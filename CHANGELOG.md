@@ -1,0 +1,843 @@
+# Changelog
+
+All notable changes to this project will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [Unreleased]
+
+## [0.1.1](https://github.com/LingXia-Dev/Rong/compare/rong-v0.1.0...rong-v0.1.1) - 2026-01-29
+
+### Added
+
+- *(ci)* add CI and Release workflows with publishing scripts
+- *(jscore)* add platform-specific cfg attributes for BigInt
+- *(rong_buffer)* add File::from_parts constructor for programmatic creation
+- *(jscore)* implement BigInt support with macOS version compatibility
+- *(fs)* implement Unix file permission mode support
+- *(child_process)* implement exit event and refactor process lifecycle
+- *(http)* implement FormData parsing for Request and Response
+- *(cli)* add tab completion to REPL with dynamic global tracking
+- *(types)* add TypeScript type definitions package for Rong runtime
+- *(cli)* add interactive REPL with history, multiline input, and top-level await
+- *(test)* add test filtering and make timer module optional
+- *(rong_modules)* add "all" feature to enable all modules at once
+- *(modules)* add child_process module with spawn, exec, and execFile support
+- *(modules)* add process module with Node.js compatible global process object
+- *(rong_stream)* add JSWritableStream wrapper for clearer semantics
+- implement HTTP redirect support in fetch API
+- add network and timeout error constants
+- *(utils)* add HTTP test utilities with axum support
+- *(core)* add context-scoped state storage API
+- *(rong_test)* add helper functions for extracting thrown JS values
+- *(core)* make stream coalesce target configurable
+- *(rong_storage)* add close method to Storage for proper database lifecycle management
+- add service container to JSContext with lifecycle management
+- *(core)* Add JS invocation scheduler with priority and coalescing
+- *(core)* implement fmt::Display for JSValueType
+- upgrade quickjs to v0.11.0
+- *(rong_stream)* add fast path for channel-to-channel stream piping
+- *(rong_storage)* implement lazy database initialization
+- convert storage module to async API
+- *(rogn_stream)* implement tee for ReadableStream
+- *(rong_http)* implement gc_mark for Resposne
+- *(core)* introduce tokio net runtime
+- *(rong_fs)* FsFile's readable return async iterator ReadableStream
+- *(rong_http)* body return ReabableStream implementing async iterator
+- *(core)* RustFunc.prototype inherits Function.prototype
+- *(rong_modules)* init rong stream
+- *(rong_stream)* ReadableStream implements the async iterable protocol and pipeTo
+- *(rong_http)* fetch supprots ReadableStream
+- *(rong_stream)* export readable_stream_take_receiver
+- *(rong_fs)* FsFile support ReadableStream and WriteableStream
+- *(rong_stream)* implement web API ReadableStream and WritableStream
+- *(rong_http)* switch to core net runtime
+- *(core)* add global net runtime + builder integration
+- *(modules:http)* not allow multiple body reads
+- *(core)* accept Vec<T> as function parameter and improve Promise resolution
+- *(rong_storage)* storage info contains key count
+- *(rong_storage)* support JSDate type
+- *(jscore)* implement create_date
+- *(quickjs)* implement create_date
+- *(core)* introduce JSDate type
+- add storage to rong_modules
+- add new module local storage
+- jscore and quickjs implement is_date
+- *(console)* print Date as String
+- *(core)* support Date type t JSTypeOf
+- *(rong_fs)* support Deno compatible FsFile
+- *(core)* implement JSParameterType for Option<T>
+- *(macro)* FromJSObj supports default value
+- *(test)* Supports running tests across all JavaScript engines
+- *(rong_http)* support check whether domain is allowed
+- *(rong_fs)* File access guard trait for controlling file access permissions
+- integrate arkjs into core and module crates
+- upgrade nix to 0.30
+- WIP, support ArkJS, Not tested
+- Harmony Ark js runtime binding
+- *(quickjs)* success to build for harmony os
+- *(macro)* Derive macro for serialization from Rust struct to JavaScript object
+- *(core)* support save user data to JSCotnext
+- *(core)* add call_async method to JSFunc for Promise support
+- *(core)* API to creates a JSObject from a JSON string
+- export Rong's Worker
+- *(macro)* support gc_mark
+- *(quickjs)* implement gc_mark
+- *(core)* add gc_mark method to trait JSClass
+- *(quickjs)* export C API for gc_mark
+- *(quickjs)* upgrade to 0.9.0
+- *(v8)* auto checkout submodule
+- *(core)* introduce WorkerMessage
+- introduce new API set to use threadpool to run JSRuntime
+- *(core)* JSObject has new method json_stringify
+- trait JSClass has new method call_without_new
+- *(core)* save engine name to JSRuntime
+- *(fetch)* fetch can handle multiple type of body
+- a tiny cli
+- danity_modules as entry of all modules
+- *(modules:fetch)* http client use UserAgent provided by navigator
+- *(modules:fetch)* support FormData
+- *(macro)* support derive FromJSValue and IntoJSValue for enum type
+- *(modules:buffer)* recall File, and refactor test for Blob and File
+- *(core)* API with_nanme to Source
+- *(console)* support %s to print bool
+- *(modules:fs)* more API following deno
+- *(modules:fs)* implement readTextFile and writeTextFile
+- *(core)* add global object Danity to Context
+- start working on v8 integration
+- *(core)* new trait IntoJSIterator
+- *(modules:timer)* async API setTimeout, setInterval, setImmediate
+- *(core)* support IntoJSAsyncIterator to avoid clone
+- *(modules:fetch)* support AbortSignal
+- *(core)* RustyJSError can hold JSValue as error
+- *(modules:abort)* tell subscriber at once if signal had been aborted
+- *(modules:abort)* refactor AbortSignal type to support share
+- *(module:fetch)* Accept-Encoding supports gzip
+- *(modules:fetch)* fetch works basically
+- *(module:fetch)* response supported initially
+- *(module:encoding)* let clippy happy
+- *(Blob)* export API from_parts
+- *(module:url)* export URLSearchParams's method to_string
+- *(modules:fetch)* introduce http body type
+- *(macro)* new macro FromJSValue
+- *(test)* test runner supports negatedMatchers like not.toBe
+- support deserialize rust struct from JS Object
+- *(core)* bridge rust's Stream to JS asyncIterable
+- *(core)* iterating Rust's iterator in JS seamlessly
+- JS Symbol can be as property key
+- *(modules:encoding)* support base64
+- *(modules)* support URL
+- *(core)* add API from_object for JSSymbol
+- *(modules)* support console basically
+- *(modules:navigator)* add arch and platform to navigator object
+- *(quickjs)* implement API throw
+- *(jsc)* implement throw
+- *(core)* new API to throw any JSValue as exception
+- *(modules:event)* add listenerCount to EventEmitter
+- *(modules:abort)* support static method timeout
+- *(modules)* support AbortSignal and AbortController basically
+- add IntoOnceJSCallable to convert FnOnce as once callable function
+- *(core)* support to convert JSObject to JSValue
+- support create once callable JS function
+- *(modules)* add DOMException
+- export PropertyDescriptor
+- *(core)* auto-implement FromJSValue and IntoJSValue for i8, u8, i16, u16, usize, isize
+- *(modules:event)* implement From for EventKey and API get_listener
+- *(core)* export some public API for JSValue and JSObject
+- *(modules)* event introduce trait EmitError
+- *(modules)* implement node's EventEmitter
+- *(core)* JSFunc's call method accept Vec<T> as argument
+- *(core)* JSSymbol implements method into_value
+- *(core)* support convert Vec into/from JS value
+- *(core)* support convert standard Result into JSResult
+- *(core)* alias Class
+- *(quickjs)* implement Hash for QJSValue
+- *(jsc)* implement Hash for JSCValue
+- *(core)* Hash for JSValue, JSObject, JSFunc, JSSymbol
+- *(jsc)* implement create_symbol
+- *(quickjs)* implement create_symbol
+- *(core)* support make javascript Symbol
+- *(jsc)* storage mapping constructor to their corresponding class references
+- *(modules)* add TextEncoder and TextDecoder
+- *(modules)* WIP, implement Request
+- support to create JavaScript null value
+- *(core)* implement IntoJSValue for Option<T>
+- *(modules)* add Header to http
+- implement get_own_property_names for quickjs and jsc
+- *(core/object)* Extend object property and prototype handling
+- *(core)* JSObject's method borrow check it's instance of class
+- *(modules)* add File to http
+- *(core)* make as_value of JSValue as public
+- *(modules)* add http, support Blob firstly
+- *(core)* add new method as_bytes for JSArrayBuffer and JSTypedArray
+- *(core)* implement PromiseResolver<V> for JSResult<T>
+- *(modules)* add module path
+- *(core)* implement IntoJSValue for JSResult
+- *(modules)* navigator but only support userAgent
+- *(core)* add into_jsobject to JSValue
+- *(class)* add from_object method to Class for instance checking
+- *(core)* add from_object for Array,ArrayBuffer,TypedArray
+- *(javascriptcore)* implement instance_of
+- *(quickjs)* implement instance_of
+- *(core)* add instance_of to Class
+- *(macro)* js_methods support async rust method
+- *(modules)* use TimerRegistry to manage timer
+- *(core)* JSRuntime supports ServiceContainer
+- *(core)* make runtime of JSCotnext as public
+- *(modules)* example binary for timer
+- *(core)* usize as u64 to exchange with JS
+- *(quickjs)* update JSArrayOps implementation
+- *(quickjs)* implement JS Typed Array trait
+- *(javascriptcore)* implement JS Typed Array trait
+- *(core)* support typed array
+- *(javascriptcore)* implement JSArrayBufferOps
+- *(quickjs)* implement JSArrayBufferOps
+- *(core)* support JS ArrayBuffer
+- JSTypeOf supports is_array_buffer
+- *(javascriptcore)* implement JSArrayOps for JSCValue
+- *(array)* add push/pop methods and improve array operations
+- *(quickjs)* implement JSArrayOps
+- *(core)* array abstraction
+- re-export macro public symbols to rusty_js
+- *(macro)* improve js_method and js_methods usage guidance
+- *(macro)* methods macro support bind attribute accessor
+- *(macro)* macro methods support &mut self as receiver
+- *(macro)* methods macro implement instance/static methods with rename support
+- *(macro)* support class name customization via rename attribute
+- *(macro)* implement basic JSClass trait generation for methods macro
+- JSCallable accepts MutFn
+- *(core)* eval & eval_async can accept plain JS and bytecode
+- REPL(Read Eval Print Loop) mode API to execute JS code
+- support to compile js code to bytecode and run
+- access JSRuntime from JSContext
+- support extract JSContext from JS callback
+- *(core)* Run GC on JSRuntime's Drop
+- *(quickjs)* print trace QJSContext's reference count
+- *(core)* Display & Debug for JSObject
+- *(core)* implement Display for JSValue
+- *(core)* add timeout mechanism for Promise
+- *(quickjs)* DUMPFLAGS can be given from env. Debug only!
+- *(quickjs)* track QJSContext to properly manage class registry lifecycle
+- *(core)* provide default implementation to clear class registry
+- *(core)* PromiseResolver send resolve/reject to JS
+- *(core)* RustFunc supports async function
+- implement derive macro JSType
+- *(core)* abort js micro task if main future resolved
+- *(core)* marker trait JSParameterType
+- *(core)* scheduler to run JS micro tasks and future
+- *(core)* promise can be as rust future
+- *(rusty-js)* new type Promise
+- *(core)* Add Param type for explicit parameter handling
+- *(core)* implement FromJSValue for RustJSError
+- *(rusty-js)* export Promise
+- *(core)* create promise from rust async w/ help of tokio
+- *(core)* support convert RustJSError to js error
+- *(core)* implement Clone for JSFunc, JSObject, Promise
+- *(core)* implement Drop for JSContext
+- *(core:promise)* implement IntoJSValue for Promise
+- *(core)* add run_pending_jobs
+- add ergonomic call! macro for JS function invocation
+- WIP, promise support
+- *(core)* JSFunc has new API call_with_this
+- JS Func can be called from rust side
+- *(core)* JSValueImpl adds from_parts to improve lifetime management
+- *(core)* throw RustyJSError as JS exception
+- *(core)* introduce type RustyJSError to handle error
+- *(core)* API to get JS engine name and version
+- *(quickjs)* set dumpflags by env for debug build
+- *(quickjs)* set CFLAGS based on cargo PROFILE
+- *(quickjs)* use Source type for code evaluation
+- *(core)* introduce Source type for JavaScript code evaluation
+- *(core)* introduce new type Constructor
+- *(core)* introduce ArgThis to avoid implement RegularTypeSealed
+- *(core)* support mutable access Javascript this object
+- *(core)* add default attributes API for method and property
+- *(core)* user can setup class, it allows:
+- *(core)* implement FromJSValue for JSFunc
+- *(quickjs)* add debug API to get reference count
+- *(core)* RustFunc::new can accept more type
+- *(core:class)* class instance object inherits prototype
+- *(quickjs)* implement set_prototype method
+- *(core:class)* add new API to get and set prototype
+- *(core)* add helper API to convert JSObject/JSFunc to innner V
+- *(core)* add From trait to build Class and JSObject
+- *(core)* support register rust function as JS function
+- *(core)* support call object as function.
+- *(quickjs: class)* implement Class fainalizer
+- *(core:Class)* add finalizer to free instance object
+- *(core)* Class support new instance and borrow it's data
+- *(core)* add new API to JSContextImpl to set/get private data
+- *(core)* JSEngine trait to export some JS engine type
+- *(core)* implement From trait for JSContext and JSValue
+- export new type EJSValue and EJSContext
+- *(core)* WIP, JSClass support
+- *(core)* add RustCallable function
+- Enhance JSContext and JSValue handling with Deref and Arc
+- JSContextImpl add method from_ffi and trait bound Clone
+- *(quickjs)* implement method define_property
+- *(core)* builder mode to support define property
+- *(core)* add JSFunc type
+- introduce ToJSValue to convert to JSValueImpl
+- add into_raw_value into JSValueImpl
+- *(core)* implement fmt::Display for JSException
+- *(core)* implement FromJSValue for JSObject
+- *(core)* enhance Object.get with type conversion
+- introduce JSValueFrom and JSValueInto for type JSValue
+- support create Exception from messageOA
+- export Exception type
+- JSObject inherits methods of JSValue
+- JSObject can be into property value
+- JSValue can be object's property value
+- trait IntoPropertyValue
+- trait IntoPropertyKey
+- JSObject has as_value and as_object method
+- JSContext can get gloal object
+- JSValue support to create UNDEFINED
+- initial support JS Object
+- TypeOf supports is_constructor
+- JSCodeRunner has new method global_object
+- add javascriptcore
+- raw binding javascriptcore
+- *(quickjs)* support binding for ios
+- QJSValue can into ()
+- error handler
+- eval com back
+- *(rusty-js)* JSTypeOf has default implementation of type_of
+- *(quickjs)* add new C API to new UNDEFINED
+- *(quickjs)* support typeof trait
+- add trait  typeof
+- *(quickjs)* add new C API QJS_IsNull & QJS_IsPromise
+- JSCTx supports eval
+- introduce JSError
+- remove JSCtxRef since JSCtxInner::from_ffi improved
+- derive Clone trait for JSValue
+- *(rusty-js)* fusion js runtim just was born
+- *(quickjs)* start working on high binding
+- add trait crate to support multiple js engines
+- *(quickjs)* new API QJS_ToUint32 and hide JSCFunctionType
+- *(quickjs)* upgrade to 0.7.0
+- *(quickjs)* improve API for exception/error
+- add new API QJS_CreateClass
+- new interal API to set/get magic of cfunction
+- bind some inline functions
+- 1st test case pass!
+- initial binding for quickjs
+
+### Fixed
+
+- *(ci)* disable semver_check for unpublished packages
+- *(rong_fs)* Add explicit flush calls to file write operations
+- *(quickjs)* implement runtime lifetime guards with safe job draining
+- *(clippy)* resolve all clippy warnings across codebase
+- *(rong_event)* propagate listener errors and add mutex poison recovery
+- *(rong_assert)* use JavaScript loose equality semantics instead of Rust identity
+- *(macro)* use fully-qualified Clone::clone to avoid inherent method conflicts
+- *(abort)* fix event ordering and add mutex poison recovery
+- *(rong_timer)* fix shutdown deadlock and interval timing behavior
+- *(jscore)* fix memory management, value semantics, and function call behavior
+- *(http)* ensure Response clones share body consumption state
+- *(quickjs)* fix memory leaks, exception handling, and value identity semantics
+- *(macro)* prevent unsafe async methods with &mut self and improve ThisMut handling
+- *(core)* improve error handling and eliminate unsafe lifetime transmutes
+- *(jsc)* use borrowed protection for enumerated property names
+- *(core)* replace message dropping with backpressure in task messaging
+- *(rong_console)* improve console.log format string handling
+- *(quickjs)* improve hash implementation for cross-platform compatibility
+- *(core)* Fix potential panics in get_user_data methods
+- update build for quickjs-ng v0.11.0 compatibility
+- cache JS ReadableStream instances in Response.body getter
+- *(jscore)* protect deferred Promise callbacks to prevent JSC crash
+- *(core)* define JSFunc::name via descriptor to match spec
+- *(core)* Keep `this` alive for the future's lifetime
+- *(tests)* make console tests deterministic with thread-local output buffer
+- *(rong_event)* Allow removing a listener during emit
+- *(core)* fix compiler warning
+- Add feature gates for optional module re-exports in rong_modules
+- *(rong_storage)* Create the storage table if it doesn't exist
+- *(rong_storage)* check over size on setting
+- convert i64/u64 to JS type smartly
+- *(console)* Set a custom console writer for the current thread.
+- *(arkjs)* correct right arkjs library name
+- make JS engine selection explicit
+- *(rong_fs)* remove wrong dependency rong_quickjs
+- *(core)* shutdown services when Rc strong count is 1
+- *(rong_timer)* if not a repeating timer, always clean up and return
+- *(rong_timer)* clear interval/timeout ignore null etc
+- *(core)* try_map should pass error directly
+- *(quickjs)* use stdbool to fix compiler issue for android
+- *(rong_abort)* refactor abort_controller to fix memory leak
+- *(rong_http)* gc_mark http request
+- *(rong_abort)* fix leak using gc_mark on quickjs
+- *(rong_event)* use gc_mark to fix leak on quickjs
+- *(core)* ensure proper JSRuntime/Service shutdown order
+- *(rong_event)* prevent JS function reference leaks in EventEmitter
+- *(quickjs)* Promise object leak issue
+- *(core)* Resolve block_on downcast failure using callback mechanism
+- *(core)* message can be received in user async function
+- *(core)* fix post_message always return Ok
+- Pass JSRuntime by value to eliminate lifetime issues in async contexts
+- fix wrong crate name javascriptcore
+- *(fs)* use f64 instead of u64 for file sizes
+- *(moudles:fetch)* initialize rustls CryptoProvider
+- *(modules:timer)* promise timer API should follow node
+- *(assert)* fix ok and equal does not throw message as error
+- *(modules:assert)* assert.fail should throw error
+- *(quickjs)* fix throw JSValue twice
+- TypeError etc works on Promise(rust async function)
+- *(test)* better isolation between tests.
+- *(test)* forget to follow new PropertyNotFound
+- JSAsyncIterator works well now
+- *(core)* abort if data constructor failed
+- enhance edge case for converting from JSValue to rust i32, u64 etc
+- *(modules:abort)* SignalAbort's throwIfAborted works
+- *(test:modules)* event test code depends on timer
+- *(modules: DOMException)* fix name style
+- *(modules:event)* avoid mutable borrowed panic
+- *(modules:event)* follow new signature of Class::prototype
+- *(quickjs)* create_symbol should use CString
+- *(modules)* Request's arrayBuffer works
+- Empty typedArray should be supported
+- *(modules)* Heades's forEach works now
+- *(macro)* avoid parameter name conflict in js_methods macro
+- *(quickjs)* handle null characters in string conversion
+- *(modules)* text,arrayBuffer,bytes need to return Promise
+- *(javascriptcore)* correct implementation of JSExceptionHandler
+- *(core)* transfer JS Error from rust to JS side
+- *(core)* forgot to implement JSParameterType  for JSArrayBuffer
+- *(core)* forget ArrayBuffer type check
+- *(modules)* Prevent premature Timer release by TimerRegistry
+- *(rustyjs_test)* it should inherits default feature
+- *(javascriptcore)* use wrong API to make Big Int
+- *(quickjs)* Properly handle exceptions in run_bytecode
+- *(core)* instance object inherits Constructor's prototype
+- *(core)* JSContext's opaque resource can not be released
+- *(quickjs)* clippy complain
+- *(core)* JSContext::from_raw_ptr panic in release build
+- don't run gc on each drop runtime
+- *(core)* fix async func cannot return RustJSError
+- *(core)* JSException should accept JS error
+- *(core)* fix async fn can not return ()
+- class registry is freed too early
+- *(core)* FromJSValue for RustyJSError should return Ok type
+- *(quickjs)* QJS_IsPromsie works now
+- accept JSFunc as argument
+- *(quickjs)* fix object are freed early
+- *(core)* typo error
+- *(core)* RustFunc::call should return RustyJSError
+- *(quickjs)* use RustyJSError
+- *(core)* improve error handling for primitive values in exceptions
+- *(core)* extend Class works now
+- *(quickjs)* WIP, reference count
+- *(core)* lifetime bound
+- *(quickjs)* not pass NULL terminated class name
+- *(quickjs)* duplicate function object for late use
+- *(core)* RustFunc::new can not accept no return value function
+- *(quickjs)* class constructor should be dropped by C
+- *(core)* fix argument order in function parameter handling
+- *(quickjs)* ctx is freed by both C & rust
+- *(core)* IntoRustCallable does not work for closure without parameter
+- *(quickjs)* lifetime does not live enough long
+- Obj.get can not hanlde non existed key
+- *(quickjs)* segmentation on object.set sometimes
+- QJS_RunJobs should return EXCEPTION
+- *(quickjs)* build failed on aarch64-linux-android
+- *(quickjs)* NewUndefined has necessary parameter
+- *(quickjs)* JSCTXInner Clod duplicate JSContext twice
+- no valueable info if make failed
+- patch/qjs.c is not part of library
+
+### Other
+
+- *(timer)* run timers on bg runtime, dispatch callbacks on JS thread
+- *(ci)* convert release workflows to manual triggers
+- *(release)* switch to release-plz with CI-gated publishing and new publish flow
+- add version constraints to workspace dependencies
+- *(scripts)* add version bump script and documentation
+- add publish script
+- prepare workspace for crates.io publishing
+- format code
+- *(rong_types)* rename package from @rong/types to @lingxia/rong
+- *(rong_assert)* use handle_assertion_error in doesNotThrow
+- *(examples)* update usage instructions to remove 'run' subcommand
+- *(cli)* remove explicit 'run' command for simpler file execution
+- *(rong_fs)* optimize file stream reading and improve stat safety
+- *(console)* remove unwrap calls and improve error handling
+- *(navigator)* replace unwrap with proper error handling in user agent test
+- *(url)* simplify searchParams getter with get_or_insert_with
+- *(rong_stream)* optimize ReadableStream with zero-copy internal reads and unbounded controller
+- *(core)* fix rustdoc warnings for type annotations and URLs
+- *(quickjs)* improve build configuration and cache invalidation
+- *(core)* remove Send bounds from async iterator and add mutex poison recovery
+- *(modules)* move chile_process to global scope and use snake_case naming
+- enhance test infrastructure with fail-fast mode, timeouts, and process cleanup
+- *(modules)* remove unused module re-exports and integrate process modules
+- improve test failure reporting with detailed error information
+- *(modules)* convert async methods from &mut self to &self with interior mutability
+- update error handling examples with new macro syntax
+- *(modules)* migrate HTTP client to rong_http module
+- *(core)* replace service_executor with bg runtime and user_agent module
+- update README
+- add module development and testing guides
+- improve table formatting and add comprehensive value system guide
+- *(core)* extract ThrownValueStore into separate module
+- *(core)* change FromJSValue and IntoJSValue to work with JSValue wrapper
+- update dependencies and set quickjs as default feature
+- add comprehensive error handling guide for module developers
+- *(examples)* add engine feature flags and simplify error handling
+- *(arkjs)* implement JSErrorFactory and JSExceptionThrower traits
+- *(rong_cli)* set quickjs as default feature and update error handling
+- *(modules)* update modules to use HostError API and let-chains
+- *(macro)* update generated code to use HostError API and let-chains
+- update tests to use new HostError API and error checking methods
+- *(javascriptcore)* implement JSErrorFactory and JSExceptionThrower traits
+- *(quickjs)* implement JSErrorFactory and JSExceptionThrower traits
+- *(core)* restructure error handling with HostError and separate error creation from throwing
+- migrate to thrown value API and add primitive throw tests
+- *(core)* replace unsafe exception pointers with generational handles
+- *(rong_fs)* use resolved paths from file access guard
+- *(quickjs)* update Android NDK configuration
+- delete v8
+- *(core)* delete user_data from JSContextInner since it has ContextServiceContainer
+- perf(rong)fs): increase file write channel buffer size
+- *(rong_http)* optimize fetch and response handling
+- *(core:net)* optimize stream processing with coalescing and larger channels
+- convert rong_storage to class-based API with per-instance storage
+- *(core)* restructure service executor into modular components with new API exports
+- *(rong_storage)* upgrade redb to 3.1.0
+- *(core)* rename with_net_threads to with_service_threads
+- rename net module to service_executor
+- gate spawn helper behind rong module
+- *(core:net)* enhance download functionality with BodySink trait
+- *(rong_http)* use HttpBody and remove BodyKind::Hyper
+- *(core)* introduce enum HttpBody
+- *(rong_http)* use Bytes for buffered body and align fetch/respons
+- *(rong_http)* increase delay for abort-on-read
+- *(rong_http)* use rong core user agent API
+- *(rong_navigator)* use rong core user agent API
+- *(examples)* update downlaoder and uploader using Stream
+- *(rong_stream)* don't use eval to get this object
+- *(rong_http)* test upload and downlaod using ReadableStream
+- FsFile streams (readable + writable)
+- add test code for web stream
+- cover Vec<T> param/return and manual custom-type conversions; clean naming
+- *(rong_timer)* attach async timer API to global object timers
+- cargo fmt
+- *(module:storage)* stop creating default storage database
+- update Readme
+- JSDate test code
+- *(rong_fs)* introduce misc.rs to contains some functions
+- *(rong_event)* enjoy FromJSObj
+- *(test)* remove one case from convert
+- rong offer wrapper func spawn
+- *(core:iterator)* simplify API
+- upgrade bindgen to 0.72
+- *(module:console)* use OnceLock in CONSOLE_WRITER instead of Mutex
+- forgot to track serialize.rs for IntoJSObj
+- improve Cargo workspace for better dependency management
+- *(core)* remove Arc support from JSContext user data to simplify API
+- *(core)* simplify promise and result handling
+- *(core)* refactor RongJSError::JSValue
+- use gc_mark_with as method name
+- find unit test js file in better way
+- *(rong_event)* rename gc_mark_callback to gc_mark
+- remove tokio from dev-dependencies
+- change identifier of JS bytecode to RONG
+- gc_mark use callback mode to make lifecyle easy
+- *(class)* test_instance_hold_object_fromjs PASS! due to gc_mark on quickjs
+- *(quickjs)* use stdbool to replace JS_BOOL
+- new case, class instance to hold object from js
+- *(rong_event)* add/remove listener does not need to return JSObject
+- *(rong_event)* Emitter's get_inner_emitter return itself
+- *(rong_event)* simplify Drop for EventEmitter
+- *(rong_fs)* fix clippy warning
+- update Rong worker example to demo terminate
+- *(core)* delete shutdown_signal from JSRuntime
+- *(module:timer)* timer cleanup mechanism to use JSRuntimeService.on_shutdown
+- add example binary to show power of Rong worker
+- test code for Rong worker
+- *(core)* Replace std::sync::Mutex with tokio::sync::Mutex and update async API
+- re-org examples
+- Merge branch 'multiple_runtime'
+- fix invalid memory reference on test_new_once_async
+- *(rong)* improve comment
+- clean up worker state and lifecycle handling
+- examples JS follow new Cli
+- *(module:timer)* rong_timer example use new runtime API
+- optimize CLI to use runtime API
+- *(core)* JSRuntime's get_shutdown_signal has its own notifier
+- *(test)* async_run! use new API
+- drop solution of scheduler
+- run_pending_jobs can tell it's necessary to run for JSRuntime
+- move method context from JSEngine to JSRuntime
+- stop using ctx.spawn_local
+- drop test helper macro run2
+- console test function use test helper API
+- upgrade rust to 2024
+- upgrade rong_macro to Rust 2024
+- standardize package names to use underscore instead of hyphens
+- rename modules with rong_ prefix
+- rename fetch to rong-http
+- re-org crate graph
+- rename
+- rename project name to Rong
+- Cli supports compile javascript to bytecode
+- Source can save and load bytecode
+- add example javascript uploader
+- add example js downloader
+- *(modules:navigator)* new manner to set and get UserAgent
+- *(assert)* update test code to confirm throw message
+- *(macro)* use test helper to fix segmentation fault
+- skip IsString check for string conversion
+- *(fetch)* its init should be public
+- *(modules:console)* insert beginning and ending space for Array
+- *(modules:fs)* change temp dir for testings
+- *(jsc)* delete constructor.c since it's misleading
+- *(modules:fetch)* header use IntoJSIterator to return Iteraterable Object
+- *(modules:timer)* update doc for crate
+- move blob to buffer as standalone module
+- standalone API to set console writer
+- *(fetch)* verify header
+- *(modules:event)* refactor EventEmitter to simplify Emitter trait
+- test harness http server for fetch
+- *(fetch)* optimize fetch on processing request and client
+- *(module:http)* request and its test
+- *(core)* TypeError if it's not instance of class on borrowing
+- *(macro)* rename file name object to instance
+- rename module http to fetch
+- *(module:http)* headers and its test
+- *(core)* imporve error message
+- plan to be a standalone product
+- rename macro js_methods to js_class
+- rename macro js_class to js_export
+- *(macro)* move rename from js_class to js_methods
+- tell Property Name when it's not found
+- *(core)* do nothing if Class had been added to registry
+- *(core)* refactor IntoJSCallable
+- refactor JSFunc's call signature
+- format encoding.js
+- abort,event,encoding,path use console crate
+- *(core)* check is_object at last stage for default JSTypeOf
+- *(modules:DOMException)* change name style saved in static properties
+- improve PropertyDescriptor's API
+- improve error for JSValue's TryInto
+- refactor abort test code to use UnitJSRunner
+- align event,abort,event,path to new test runner
+- *(test)* refactor test-runner to test AbortSignal's timeout method
+- *(modules:encoding)* use UnitJSRunner to test
+- toEqual compare each element of Array
+- path module use UnitJSRunner
+- introduce UnitJSRunner and apply to abort test
+- *(core)* some API of JSValue does not depends on JSTypeOf
+- add toBeUndefined to js test runner and improve toThrow
+- *(modules:DOMException)* create use DOMExceptionName instead of string
+- drop register_func on JSContext
+- refactor return type of some API of Class
+- *(modules)* refactor Emitter to return EventEmitter directly
+- *(event)* update doc for module event
+- *(modules)* add test Symbol as Event Key to event.js
+- *(module)* refactor EventTarget to use EventEmitter
+- test code for  event module
+- add beforeEach to test-runner
+- *(core)* JSSymbol as a standalone crate file
+- Merge branch 'jsc_class'
+- *(class)* don't check constructor as a regular function
+- *(jsc)* use JSObjectMakeConstructor to create class constructor
+- *(jsc)* Refactor class registration in JavaScriptCore
+- let Blob and Request use rust implementation of TextEncoder,TextDecoder
+- *(core)* drop RustJSError::ConvertError
+- drop create UNDEFINED from ()
+- *(core)* return JS null value if Option is None
+- *(core)* JSArray's set can be called in chain
+- *(core)* refactor This to support extract JS this as object
+- add test code to verify error's constructor
+- *(modules)* improve error handler for Blob
+- *(macro)* remove unnecessary keyword pub
+- implement GetParam for JSContext instead of &JSContext
+- *(modules)* add doc for path
+- refactor value type check
+- *(macro)* Remove Copy trait derivation
+- *(macro)* fix doctest in methods.rs
+- add async method test code for macro
+- *(core)* improve scheduler shutdown process
+- *(modules)* timer use Notify instead of mpsc to cancel timer
+- *(timer)* setTimeout/cleanTimeout, setInterval/cleanInterval
+- move test helper to a dedicated crate
+- *(javascriptcore)* follow new set of JSArrayOps
+- *(array)* Update API to handle exceptions explicitly
+- test code for typed array
+- *(array_buffer)* test code
+- *(macro)* use is_some_and
+- *(javascriptcore)* remove unnecessary code
+- *(array)* update test code
+- basic test code for array
+- Merge branch 'macro'
+- add example binary crate to use macro system
+- *(macro)* test code to verify expose a Rust struct as a JavaScript class.
+- *(macro)* rename public symbol and improve doc
+- *(macro)* replace derive macro with attribute macro for class bindings
+- BUG note for register_class
+- *(class)* verify protocol chain and inherited methods
+- cleanup code to make clippy happy
+- Merge branch 'javascriptcor'
+- *(core)* rename JSValue's method from_borrowed_raw to from_raw
+- introduce global CTX_OPAQUE to save private data for JS Conext
+- rename ValueType to JSValueType
+- *(core)* reduce unsfe code for from_raw_ptr
+- Rename to make the API more readable
+- follow new signature of get_ctx
+- JSContext does not require lower crate implements Drop
+- *(core)* remove Weak reference from JSContext
+- *(core)* refactor JSValue type and its get_ctx
+- touch context opaque in lower way
+- JSContext's new must be public in crate
+- *(macro)* follow new IntoJSValue and FromJSValue
+- Ensure APIs fully utilize JSContext
+- JSValue has weak reference of JSContext
+- *(context)* refactor JSContext type
+- *(jsc)* example c code to demo JS Promise cowork with libuv
+- JSContext don't wrapper C in RC
+- *(error)* fix js code to throw Error
+- code for compile and run bytecode
+- *(promsie)* remove into_future_with_timeout
+- *(promise)* mark test_promise_timeout
+- Revert "test(promise): extract &JSContext instead of clone to avoid leak"
+- *(scheduler)* simplify scheduler implementation
+- *(promise)* extract &JSContext instead of clone to avoid leak
+- revert Classs::get to user inner ctx
+- *(core)* ParameterKind does not need associated type
+- *(core)* rename JSContext's from_ffi to from_raw_ptr
+- *(core)* improve timeout handling in PromiseFuture
+- *(core)* remove JSCotnext from Promise type
+- JSContext construction for mainline and callback-oriented flows."
+- move class registry management to core crate
+- promise timeout test, failed now
+- *(scheduler)* improve resource management and cleanup
+- *(scheduler)* improve js microtask handling
+- test code for Display
+- add test_promise_into_future_reject_exception
+- test code for asyn fn with reject case
+- *(core)* Unwrap the parameters from the accessor
+- *(core)* improve TryInto error for converting JSValue
+- Merge branch 'class_registry'
+- *(quickjs)* follow new API to improve class registry management
+- *(core)* improve class registry memory management
+- merge JSCodeRunner into JSContextImpl
+- drop _runtime and _context from JSEngine
+- test code for async func
+- rename ActiveJSEngine to RustyJS
+- *(core)* only init class registry  in JSEngine::context
+- *(core)* use RefCell for class registry to ensure safe interior mutability
+- Source::from_path use async read
+- update to use derive macro JSType
+- delete type ArgThis
+- update code to use scheduler
+- *(core)* integrate scheduler into JSRuntime
+- *(core)* JSContext internally use Rc
+- *(core)* implement JSContext's spawn_local in scheduler.rs
+- doc
+- *(promise)* global_object had been rename to global
+- Merge branch 'promise'
+- *(promise)* test code for promise as future
+- *(quickjs)* remove QJS_RunJobs
+- use JSResult
+- *(promise)* test rust async in js
+- implement IntoJSValue and FromJSValue for String explicitly
+- *(core)* rename file error.rs to result.rs
+- *(core)* rename API into_js_exception to throw_js_exception
+- remove unused api
+- *(promise)* test promise with callback
+- *(promise)* add 1st test case
+- *(core)* call_with_this use JSObject type
+- add test for calling JS function
+- *(core)* remove unused API
+- *(quickjs)* use API to get version as String
+- *(core)* into_inner should not be public
+- *(quickjs)* add aysnc demo with help of libuv
+- *(class)* update FromJSValue for Point
+- *(core)* JSObject's borrow method return Result type instead of
+- *(quickjs)* QJS_ObjectMake don't free constructor
+- *(quickjs)* remove unnecessary code
+- *(quickjs-ng)* upgrade to 0.8.0
+- *(error)* update test cases
+- *(core)* error handling and exception management
+- *(quickjs)* follow new JSValueImpl to improve lifetime
+- forgot to commit source.rs
+- update FromJSValue implementation to use RustyJSError
+- update tests to use Source type
+- *(class)* extend class
+- *(class)* follow new signature of data_constructor
+- *(core)* RustFunc check required parameter count in call method
+- *(class)* setter method use ThisMut to modify parameter
+- Class Ext use Class::get to obtain constructor
+- *(class)* add test code for method/property,static method/property
+- *(core)* export function as namespace
+- improve PropertyDescriptor
+- *(function)* add parameter type tests for Optional<T> and Rest<T>
+- export function mod
+- remove unused import symbol
+- re-org function
+- *(quickjs)* follow new JSClass trait
+- *(core:class)* refactor JSClass trait definition
+- *(class)* add function and constructor test cases
+- *(core)* RustFunc's method parameter_count return u32
+- *(quickjs)* remove unnecessary bound
+- format error after eval
+- *(core:class)* improve function parameter count handling
+- let lint happy
+- update for class
+- *(core)* [**breaking**] consolidate Value type at context level
+- Simplify JSContext and JSRuntime initialization
+- *(core)* Runtime's method as_ffi to to_ffi
+- remove lifetime annotation 'ctx
+- improve FFI context and value ownership handling
+- rename to highlight the concept of FFI
+- rename RustCallable to JSCallable
+- *(class)* constructor works,
+- *(core)* RustFunc and RustCallable only need one generic parameter
+- *(core)* add comment for RustCallable Func
+- *(core)* FromJSValue accept reference of V::Context
+- *(core)* trait FromJSValue
+- let lint happy
+- *(core)* remove into_inner from JSFunc and JSObject
+- *(core)* trait to extract and turn into JSValue
+- update some example code
+- small scope trait bound for into_inner
+- *(core)* Object make method use type JSFunc
+- rename
+- add some test code for Object
+- FromJSValue trait as the primary conversion interface from JavaScript values to Rust types
+- JSObjectOps has trait bound JSTypeOf
+- rename Exception to JSException
+- follow lint suggestion
+- introduce trait JSValueConversion to make trait bound easy
+- *(exception)* WIP retrieve error.message & error.stack
+- move error.rs to value as exception.rs
+- improve based on compiler advice
+- improve JSTypeOf and JSCodeRunner to handle exception easily
+- Object.get return Option
+- JSValue is_type method return Option instead of bool
+- JSValue's new method should be public in crate
+- rename trait name
+- move test cases to dir tests
+- *(rusty-js)* macro help implement is_type
+- add trait bound Copy to JSValueKind's RawValue
+- new method of JSContextKind depends on JSRuntimeKind
+- use standard From and TryInto trait
+- JSValueKind
+- *(jscore)* add c example code
+- *(quickjs)* make fileds of QJSValue public in crate
+- rename the field raw of JSValue to inner
+- introduce trait JSExceptionHandler
+- rename trait *Raw to *Kind
+- let core do more things
+- rename traits to core
+- *(quickjs)* should use JS_Eval directly
+- trait definition
+- new JS String from &str
+- change file hierarchy and improve package name
+- suppress upper case name
+- *(quickjs)* improve doc to handle exception/error
+- binding update
+- add quickjs-ng as submodule
+- 1st commit
