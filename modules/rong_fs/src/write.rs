@@ -58,7 +58,11 @@ async fn write_text_file(
                 let mut file = open_options.open(&resolved).await
                     .map_err(|e| HostError::new("FS_IO", format!("Failed to open file: {}", e)))?;
                 file.write_all(text.as_bytes()).await
-                    .map_err(|e| HostError::new("FS_IO", format!("Write failed: {}", e)).into())
+                    .map_err(|e| HostError::new("FS_IO", format!("Write failed: {}", e)))?;
+                file.flush()
+                    .await
+                    .map_err(|e| HostError::new("FS_IO", format!("Flush failed: {}", e)))?;
+                Ok(())
             } => {
                 result
             }
@@ -75,7 +79,10 @@ async fn write_text_file(
             .map_err(|e| HostError::new("FS_IO", format!("Failed to open file: {}", e)))?;
         file.write_all(text.as_bytes())
             .await
-            .map_err(|e| HostError::new("FS_IO", format!("Write failed: {}", e)).into())
+            .map_err(|e| HostError::new("FS_IO", format!("Write failed: {}", e)))?;
+        file.flush()
+            .await
+            .map_err(|e| HostError::new("FS_IO", format!("Flush failed: {}", e)).into())
     }
 }
 
@@ -119,7 +126,11 @@ async fn write_file(
                 let mut file = open_options.open(&resolved).await
                     .map_err(|e| HostError::new("FS_IO", format!("Failed to open file: {}", e)))?;
                 file.write_all(bytes).await
-                    .map_err(|e| HostError::new("FS_IO", format!("Write failed: {}", e)).into())
+                    .map_err(|e| HostError::new("FS_IO", format!("Write failed: {}", e)))?;
+                file.flush()
+                    .await
+                    .map_err(|e| HostError::new("FS_IO", format!("Flush failed: {}", e)))?;
+                Ok(())
             } => {
                 result
             }
@@ -135,7 +146,10 @@ async fn write_file(
             .map_err(|e| HostError::new("FS_IO", format!("Failed to open file: {}", e)))?;
         file.write_all(bytes)
             .await
-            .map_err(|e| HostError::new("FS_IO", format!("Write failed: {}", e)).into())
+            .map_err(|e| HostError::new("FS_IO", format!("Write failed: {}", e)))?;
+        file.flush()
+            .await
+            .map_err(|e| HostError::new("FS_IO", format!("Flush failed: {}", e)).into())
     }
 }
 
