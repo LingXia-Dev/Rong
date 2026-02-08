@@ -563,8 +563,12 @@ impl_js_converter!(
         }
 
         let mut exception: jsc::JSValueRef = std::ptr::null_mut();
-        *result = jsc::JSValueToInt32(ctx, value, &mut exception);
-        if exception.is_null() { 0 } else { -1 }
+        let n = jsc::JSValueToNumber(ctx, value, &mut exception);
+        if !exception.is_null() {
+            return -1;
+        }
+        *result = n as i32;
+        0
     }
 );
 
@@ -633,8 +637,12 @@ impl_js_converter!(
         }
 
         let mut exception: jsc::JSValueRef = std::ptr::null_mut();
-        *result = jsc::JSValueToUInt32(ctx, value, &mut exception);
-        if exception.is_null() { 0 } else { -1 }
+        let n = jsc::JSValueToNumber(ctx, value, &mut exception);
+        if !exception.is_null() {
+            return -1;
+        }
+        *result = n as u32;
+        0
     }
 );
 
