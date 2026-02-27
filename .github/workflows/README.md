@@ -3,7 +3,15 @@
 ## `ci.yml` (tests)
 
 - **Trigger:** push + pull_request
-- **Runs:** `test.sh` on macOS for `quickjs` and `jscore`
+- **Runs:** `test.sh` on macOS for:
+  - `quickjs`
+  - `jscore`
+- **Submodules in CI:**
+  - Initializes `quickjs/sys/quickjs-ng` only
+  - Does not recursively fetch `third_party/WebKit` by default
+
+`jscore-provider-webkit` is validated via local scripts or dedicated provider jobs where
+WebKit build artifacts are available.
 
 ## `release-pr.yml` (release-plz)
 

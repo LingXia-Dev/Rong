@@ -30,7 +30,7 @@ log_warning() {
 }
 
 # Available engines
-ENGINES=("quickjs" "jscore")
+ENGINES=("quickjs" "jscore" "jscore-provider-webkit")
 
 # Cleanup function to kill child processes
 cleanup() {
@@ -85,7 +85,7 @@ print_usage() {
     echo "Usage: $0 [OPTIONS]"
     echo ""
     echo "Options:"
-    echo "  -e, --engine ENGINE           Run tests for specific engine (quickjs, jscore, all)"
+    echo "  -e, --engine ENGINE           Run tests for specific engine (quickjs, jscore, jscore-provider-webkit, all)"
     echo "  -t, --test TEST               Run specific test (core test name or module name)"
     echo "  -c, --core                    Run only core tests"
     echo "  -m, --modules                 Run only module tests"
@@ -100,6 +100,32 @@ print_usage() {
     echo "  $0 -t iterator                # Run iterator tests on all engines"
     echo "  $0 -t rong_http               # Run rong_http module tests on all engines"
     echo "  $0 -k -m                      # Run all module tests, continue on error"
+}
+
+configure_engine_env() {
+    local engine=$1
+    if [[ "$engine" != "jscore-provider-webkit" ]]; then
+        return 0
+    fi
+
+    if [[ -z "${RONG_JSC_WEBKIT_ROOT:-}" && -f "target/webkit-provider/env.sh" ]]; then
+        # shellcheck source=/dev/null
+        source "target/webkit-provider/env.sh"
+    fi
+
+    if [[ -z "${RONG_JSC_WEBKIT_ROOT:-}" ]]; then
+        log_error "jscore-provider-webkit requires a built provider environment"
+        log_error "Run ./scripts/build_webkit_provider.sh and retry, or set RONG_JSC_WEBKIT_ROOT explicitly"
+        exit 1
+    fi
+
+    if [[ -z "${RONG_JSC_WEBKIT_LINK_KIND:-}" ]]; then
+        if [[ "$(uname -s)" == "Darwin" ]]; then
+            export RONG_JSC_WEBKIT_LINK_KIND="framework"
+        else
+            export RONG_JSC_WEBKIT_LINK_KIND="dylib"
+        fi
+    fi
 }
 
 run_core_test() {
@@ -273,6 +299,7 @@ print_header
 # Main execution
 for engine in "${ENGINES[@]}"; do
     echo -e "\n${YELLOW}Testing with engine: $engine${NC}"
+    configure_engine_env "$engine"
 
     if [[ -n "$TEST_FILTER" ]]; then
         # Run specific test

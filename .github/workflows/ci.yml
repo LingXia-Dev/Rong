@@ -20,7 +20,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          submodules: recursive
+          submodules: false
+
+      - name: Init QuickJS submodule
+        if: contains(matrix.engine, 'quickjs')
+        run: git submodule update --init --depth 1 quickjs/sys/quickjs-ng
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable

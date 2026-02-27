@@ -83,6 +83,34 @@ Switch to JavaScriptCore explicitly:
 cargo run -p rong_cli --no-default-features --features jscore,tls-aws-lc
 ```
 
+Use JavaScriptCore with source-built WebKit provider (for non-Apple targets):
+
+```bash
+RONG_JSC_WEBKIT_ROOT=/path/to/webkit-or-bun-build \
+cargo run -p rong_cli --no-default-features --features jscore-provider-webkit,tls-aws-lc
+```
+
+With repository submodule workflow:
+
+```bash
+./scripts/webkit_submodule.sh init
+./scripts/build_webkit_provider.sh --release
+./scripts/check_jscore_webkit.sh
+bash test.sh -e jscore-provider-webkit -c
+```
+
+One-shot end-to-end workflow:
+
+```bash
+./scripts/e2e_webkit_provider.sh
+./scripts/parity_jscore_provider.sh
+```
+
+If auto-detection is not enough, override with:
+- `RONG_JSC_WEBKIT_INCLUDE_DIR`
+- `RONG_JSC_WEBKIT_LIB_DIR`
+- `RONG_JSC_WEBKIT_LINK_KIND` (`dylib`/`static`/`framework`)
+
 `quickjs` and `jscore` are mutually exclusive. If both are enabled, build fails fast.
 For TLS backend selection, use `tls-aws-lc` (default) or `tls-ring`.
 
@@ -116,6 +144,7 @@ Comprehensive guides for working with Rong:
 - **[Value System Guide](docs/value_system.md)** - Understand type conversion between Rust and JavaScript
 - **[Error Handling Guide](docs/error_handling.md)** - Best practices for error handling
 - **[Testing Guide](docs/testing.md)** - How to run and write tests
+- **[Engine & Provider Strategy](docs/engine_provider_strategy.md)** - Roadmap for multi-engine support, JSC providers, and Harmony validation
 
 ## 📄 License
 

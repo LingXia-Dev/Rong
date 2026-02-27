@@ -14,6 +14,10 @@ cargo test
 
 # JavaScriptCore
 cargo test --no-default-features --features jscore
+
+# JavaScriptCore with source-built WebKit provider (non-Apple targets)
+RONG_JSC_WEBKIT_ROOT=/path/to/webkit-or-bun-build \
+cargo test --no-default-features --features jscore-provider-webkit
 ```
 
 ### Testing a specific module
@@ -93,3 +97,53 @@ This script is useful for:
 - Quick module testing during development
 - CI/CD integration
 - Testing across different engines
+
+## WebKit provider environment
+
+When `jscore-provider-webkit` is enabled, `javascriptcore/sys` reads:
+
+- `RONG_JSC_WEBKIT_ROOT` (preferred; auto-detects include/lib layout)
+- `RONG_JSC_WEBKIT_INCLUDE_DIR` (optional override, required if root auto-detect fails)
+- `RONG_JSC_WEBKIT_LIB_DIR` (optional override, required if root auto-detect fails)
+- `RONG_JSC_WEBKIT_LIB_NAME` (optional, default: `JavaScriptCore`)
+- `RONG_JSC_WEBKIT_LINK_KIND` (optional, default: `dylib`; supports `dylib`, `static`, `framework`)
+- `RONG_JSC_WEBKIT_EXTRA_LIBS` (optional, comma-separated)
+
+## WebKit submodule workflow
+
+Use the in-repo WebKit source provider:
+
+```bash
+# Init to pinned commit
+./scripts/webkit_submodule.sh init
+
+# Build JavaScriptCore provider artifacts from WebKit source
+./scripts/build_webkit_provider.sh --release
+
+# Bump to latest main (updates submodule pointer)
+./scripts/webkit_submodule.sh bump
+```
+
+macOS note:
+- Building WebKit provider via `build-jsc` requires full Xcode (`xcodebuild`), not only Command Line Tools.
+
+Then run provider checks:
+
+```bash
+./scripts/check_jscore_webkit.sh
+
+# Or run via test.sh after provider env is available
+bash test.sh -e jscore-provider-webkit -c
+```
+
+One-shot flow:
+
+```bash
+./scripts/e2e_webkit_provider.sh
+```
+
+Parity smoke (same core tests on both providers):
+
+```bash
+./scripts/parity_jscore_provider.sh
+```
