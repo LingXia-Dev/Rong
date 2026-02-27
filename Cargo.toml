@@ -102,6 +102,7 @@ futures = { workspace = true }
 default = ["quickjs"]
 quickjs = ["dep:rong_quickjs", "rong_test/quickjs"]
 jscore = ["dep:rong_jscore", "rong_test/jscore"]
+jscore-provider-webkit = ["jscore", "rong_jscore/provider-webkit", "rong_test/jscore-provider-webkit"]
 arkjs = []  # Placeholder: arkjs engine not available on crates.io yet
 
 [dev-dependencies]

@@ -10,3 +10,7 @@ readme = "README.md"
 [dependencies]
 rong_jscore_sys = { workspace = true }
 rong_core = { workspace = true }
+
+[features]
+default = []
+provider-webkit = ["rong_jscore_sys/provider-webkit"]

@@ -17,5 +17,6 @@ axum = { workspace = true, optional = true }
 default = []
 quickjs = ["rong/quickjs"]
 jscore = ["rong/jscore"]
+jscore-provider-webkit = ["jscore", "rong/jscore-provider-webkit"]
 arkjs = ["rong/arkjs"]
 http = ["dep:axum"]

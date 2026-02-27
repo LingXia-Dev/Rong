@@ -23,6 +23,7 @@ rustyline = "17.0.2"
 default = ["quickjs", "tls-aws-lc"]
 quickjs = ["rong/quickjs", "rong_modules/quickjs", "rong_modules/all"]
 jscore = ["rong/jscore", "rong_modules/jscore", "rong_modules/all"]
+jscore-provider-webkit = ["jscore", "rong/jscore-provider-webkit", "rong_modules/jscore-provider-webkit"]
 arkjs = ["rong/arkjs", "rong_modules/arkjs", "rong_modules/all"]
 tls-aws-lc = ["rong_modules/tls-aws-lc"]
 tls-ring = ["rong_modules/tls-ring"]

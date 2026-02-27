@@ -7,5 +7,10 @@ description = "JavaScriptCore FFI bindings for RongJS"
 license.workspace = true
 repository.workspace = true
 readme.workspace = true
+
+[features]
+default = []
+provider-webkit = []
+
 [build-dependencies]
 bindgen = "0.72"

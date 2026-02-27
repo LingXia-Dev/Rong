@@ -70,6 +70,7 @@ jscore = [
     "rong_process?/jscore",
     "rong_child_process?/jscore",
 ]
+jscore-provider-webkit = ["jscore", "rong/jscore-provider-webkit"]
 arkjs = [
     "rong/arkjs",
     "rong_timer?/arkjs",
