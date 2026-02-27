@@ -1,3 +1,7 @@
 [submodule "quickjs/sys/quickjs-ng"]
 	path = quickjs/sys/quickjs-ng
 	url = https://github.com/quickjs-ng/quickjs.git
+[submodule "third_party/WebKit"]
+	path = third_party/WebKit
+	url = https://github.com/oven-sh/WebKit.git
+	branch = main

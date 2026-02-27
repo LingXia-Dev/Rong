@@ -48,3 +48,74 @@ Use this only if you intentionally want to bypass release-plz automation:
 
 - Version exists on crates.io → bump patch version
 - Publish fails mid-way → run `cargo publish -p <crate>`
+
+## WebKit Provider Helpers
+
+### webkit_submodule.sh
+
+```
+./scripts/webkit_submodule.sh init
+./scripts/webkit_submodule.sh bump
+./scripts/webkit_submodule.sh status
+```
+
+- `init`: initialize/update `third_party/WebKit` to the pinned commit
+- `bump`: update to latest `main` from remote and print the new commit
+- `status`: print current submodule commit
+
+Proxy note:
+
+```
+git config --global http.proxy http://127.0.0.1:7890
+git config --global https.proxy http://127.0.0.1:7890
+```
+
+### check_jscore_webkit.sh
+
+```
+./scripts/check_jscore_webkit.sh
+./scripts/check_jscore_webkit.sh /abs/path/to/WebKit
+./scripts/check_jscore_webkit.sh /abs/path/to/WebKit cargo test -p rong --no-default-features --features jscore-provider-webkit
+```
+
+- Loads `target/webkit-provider/env.sh` automatically when present
+- Exports `RONG_JSC_WEBKIT_ROOT` automatically
+- Defaults `RONG_JSC_WEBKIT_LINK_KIND`:
+  - `framework` on macOS
+  - `dylib` on non-macOS
+- Runs `cargo check -p rong --no-default-features --features jscore-provider-webkit` when no custom command is provided
+
+### build_webkit_provider.sh
+
+```
+./scripts/build_webkit_provider.sh --release
+./scripts/build_webkit_provider.sh --debug
+./scripts/build_webkit_provider.sh --webkit-root /abs/path/to/WebKit --build-dir /tmp/WebKitBuild
+```
+
+- Runs `Tools/Scripts/build-jsc`
+- Resolves include/lib locations
+- Writes provider env file at `target/webkit-provider/env.sh`
+- On macOS, requires full Xcode (`xcodebuild`) rather than Command Line Tools only
+
+### e2e_webkit_provider.sh
+
+```
+./scripts/e2e_webkit_provider.sh
+./scripts/e2e_webkit_provider.sh --bump
+./scripts/e2e_webkit_provider.sh -- cargo test -p rong --no-default-features --features jscore-provider-webkit
+```
+
+- Full flow: submodule init/bump -> build provider -> check provider
+- After build, `bash test.sh -e jscore-provider-webkit -c` reuses generated env from `target/webkit-provider/env.sh`
+
+### parity_jscore_provider.sh
+
+```
+./scripts/parity_jscore_provider.sh
+./scripts/parity_jscore_provider.sh --test eval
+```
+
+- Runs selected core tests against:
+  - `jscore`
+  - `jscore-provider-webkit`
