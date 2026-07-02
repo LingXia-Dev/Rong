@@ -13,7 +13,7 @@
   `check`, `clippy`, and `test` jobs:
   - `quickjs` on Windows, Linux, and macOS
   - `jscore` on macOS using the system `JavaScriptCore.framework`
-  - `jscore-source-*` on macOS, Linux, and Windows, gated by pinned prebuilt artifact rows in `javascriptcore/sys/webkit-artifacts.tsv`
+  - `jscore-source-*` on currently pinned macOS Intel, Linux, and Windows targets, gated by pinned prebuilt artifact rows in `javascriptcore/sys/webkit-artifacts.tsv`
 - **npm packaging:** builds the Rong type package and validates `docs/skills` +
   `docs/api` can generate self-contained installable skills through
   `packages/skill/bin/pack.mjs`.
@@ -26,10 +26,10 @@
 ## `build-jsc-artifacts.yml` (JSC source prebuilds)
 
 - **Trigger:** manual (`workflow_dispatch`)
-- **Runs:** builds WebKit/JSCOnly artifacts for supported macOS, Linux, and Windows targets and uploads tarballs to one GitHub Release.
+- **Runs:** builds WebKit/JSCOnly artifacts for supported macOS Intel, macOS arm64, Linux, and Windows targets and uploads tarballs to one GitHub Release.
 - **Outputs:** per-target release assets plus TSV rows for `javascriptcore/sys/webkit-artifacts.tsv`.
 - **Purpose:** produce the prebuilt source artifacts consumed by normal `jscore-source` builds. This keeps regular CI and local builds from compiling WebKit and keeps disk usage bounded to the downloaded artifact cache.
-- **Update flow:** run the workflow with one release tag and either a WebKit tag/SHA or a branch that the workflow resolves to a fixed commit, review the emitted TSV rows, paste them into `javascriptcore/sys/webkit-artifacts.tsv`, then run `CI` to verify prebuilt consumption.
+- **Update flow:** run the workflow with one release tag and either a WebKit tag/SHA or a branch that the workflow resolves to a fixed commit, review the emitted TSV rows, paste them into `javascriptcore/sys/webkit-artifacts.tsv`, then run `CI` to verify prebuilt consumption from this repository's release assets.
 
 ## `harmony-self-hosted.yml` (Harmony self-hosted)
 

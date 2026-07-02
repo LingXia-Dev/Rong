@@ -26,6 +26,7 @@ on:
         type: choice
         options:
           - all
+          - aarch64-apple-darwin
           - x86_64-apple-darwin
           - x86_64-unknown-linux-gnu
           - x86_64-pc-windows-msvc
@@ -51,7 +52,10 @@ jobs:
         run: |
           case "${{ inputs.target }}" in
             all)
-              include='[{"target":"x86_64-apple-darwin","os":"macos-15-intel"},{"target":"x86_64-unknown-linux-gnu","os":"ubuntu-latest"},{"target":"x86_64-pc-windows-msvc","os":"windows-2025-vs2026"}]'
+              include='[{"target":"aarch64-apple-darwin","os":"macos-15"},{"target":"x86_64-apple-darwin","os":"macos-15-intel"},{"target":"x86_64-unknown-linux-gnu","os":"ubuntu-latest"},{"target":"x86_64-pc-windows-msvc","os":"windows-2025-vs2026"}]'
+              ;;
+            aarch64-apple-darwin)
+              include='[{"target":"aarch64-apple-darwin","os":"macos-15"}]'
               ;;
             x86_64-apple-darwin)
               include='[{"target":"x86_64-apple-darwin","os":"macos-15-intel"}]'
@@ -302,6 +306,7 @@ jobs:
           RONG_JSC_SOURCE: "1"
           RONG_JSC_DOWNLOAD: "1"
           RONG_JSC_REQUIRE_BYTECODE: "1"
+          RONG_JSC_ARTIFACT_BASE_URL: https://github.com/${{ github.repository }}/releases/download
           RONG_JSC_CACHE_DIR: ${{ runner.temp }}/jsc-release-download-cache
           CARGO_TARGET_DIR: ${{ runner.temp }}/target-jsc-release-download
         run: |

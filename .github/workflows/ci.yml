@@ -363,6 +363,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     env:
       RONG_JSC_CACHE_DIR: ${{ github.workspace }}/.jsc-cache
+      RONG_JSC_ARTIFACT_BASE_URL: https://github.com/${{ github.repository }}/releases/download
     steps:
       - name: Checkout
         uses: actions/checkout@v5

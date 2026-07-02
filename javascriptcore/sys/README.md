@@ -114,8 +114,10 @@ intentionally producing a new artifact. The update flow is:
 
    - `webkit_ref`: the pinned WebKit tag/branch/SHA to build.
    - `release_tag`: the GitHub Release tag that will hold the tarballs.
+   - `target`: `all`, or one supported target such as
+     `aarch64-apple-darwin`.
 
-   The workflow builds the supported macOS, Linux, and Windows targets, uploads
+   The workflow builds the supported macOS Intel, macOS arm64, Linux, and Windows targets, uploads
    `rong-webkit-<target>.tar.gz` assets to the release, and emits TSV rows in
    its summary and `webkit-artifacts-additions` artifact.
 
