@@ -13,7 +13,7 @@
   `check`, `clippy`, and `test` jobs:
   - `quickjs` on Windows, Linux, and macOS
   - `jscore` on macOS using the system `JavaScriptCore.framework`
-  - `jscore-source-*` on currently pinned macOS Intel, Linux, and Windows targets, gated by pinned prebuilt artifact rows in `javascriptcore/sys/webkit-artifacts.tsv`
+  - `jscore-source-*` on currently pinned macOS Intel, macOS arm64, Linux, and Windows targets, gated by pinned prebuilt artifact rows in `javascriptcore/sys/webkit-artifacts.tsv`
 - **npm packaging:** builds the Rong type package and validates `docs/skills` +
   `docs/api` can generate self-contained installable skills through
   `packages/skill/bin/pack.mjs`.
