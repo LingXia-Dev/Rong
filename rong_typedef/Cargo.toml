@@ -1,0 +1,19 @@
+[package]
+name = "rong_typedef"
+version = "0.4.0"
+edition.workspace = true
+# Dev-only tooling: never published, never in the runtime dependency graph.
+publish = false
+
+description = "TypeScript type-definition model, Rust→TS mapping, source extractor, and renderer for RongJS bindings"
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+syn = { workspace = true }
+serde = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }

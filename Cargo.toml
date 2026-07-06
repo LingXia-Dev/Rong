@@ -21,7 +21,8 @@ members = [
     "modules/rong_worker",
     "modules/rong_redis",
     "modules/rong_s3",
-    "rong_modules", "rong_cli"
+    "rong_modules", "rong_cli",
+    "rong_typedef", "rong_typegen",
 ]
 exclude = ["testing/harmony/rong_harmony_smoke"]
 
