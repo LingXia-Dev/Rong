@@ -29,7 +29,7 @@ impl Statement {
     }
 
     /// Execute the statement. Returns `{ changes, lastInsertRowid }`.
-    #[js_method]
+    #[js_method(ts_return = "RunResult", ts_args = "params?: SQLiteParams")]
     fn run(&self, ctx: JSContext, params: Optional<JSArray>) -> JSResult<JSObject> {
         self.check_finalized()?;
         let borrow = self.conn.borrow();
@@ -54,7 +54,7 @@ impl Statement {
     }
 
     /// Execute and return all rows as array of objects.
-    #[js_method]
+    #[js_method(ts_return = "Record<string, any>[]", ts_args = "params?: SQLiteParams")]
     fn all(&self, ctx: JSContext, params: Optional<JSArray>) -> JSResult<JSArray> {
         self.check_finalized()?;
         let borrow = self.conn.borrow();
@@ -65,7 +65,10 @@ impl Statement {
     }
 
     /// Execute and return the first row, or null if no match.
-    #[js_method]
+    #[js_method(
+        ts_return = "Record<string, any> | null",
+        ts_args = "params?: SQLiteParams"
+    )]
     fn get(&self, ctx: JSContext, params: Optional<JSArray>) -> JSResult<JSValue> {
         self.check_finalized()?;
         let borrow = self.conn.borrow();
@@ -110,7 +113,7 @@ impl Statement {
     }
 
     /// Execute and return all rows as arrays of values (column-order tuples).
-    #[js_method]
+    #[js_method(ts_return = "any[][]", ts_args = "params?: SQLiteParams")]
     fn values(&self, ctx: JSContext, params: Optional<JSArray>) -> JSResult<JSArray> {
         self.check_finalized()?;
         let borrow = self.conn.borrow();

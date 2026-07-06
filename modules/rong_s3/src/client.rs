@@ -93,7 +93,7 @@ impl S3Client {
 
 #[js_class]
 impl S3Client {
-    #[js_method(constructor)]
+    #[js_method(constructor, ts_args = "options?: S3ClientOptions")]
     fn js_new(options: Optional<JSObject>) -> JSResult<Self> {
         let config = match options.0 {
             Some(ref obj) => S3Config::from_js_options(obj)?,
@@ -106,7 +106,10 @@ impl S3Client {
     }
 
     /// Lazy file reference — no network request.
-    #[js_method]
+    #[js_method(
+        ts_return = "S3File",
+        ts_args = "path: string, options?: S3ClientOptions"
+    )]
     fn file(
         &self,
         ctx: JSContext,
@@ -123,7 +126,9 @@ impl S3Client {
         Ok(Class::lookup::<S3File>(&ctx)?.instance(file))
     }
 
-    #[js_method]
+    #[js_method(
+        ts_args = "path: string, data: string | ArrayBuffer | Uint8Array, options?: S3WriteOptions & S3ClientOptions"
+    )]
     async fn write(
         &self,
         path: String,
@@ -191,7 +196,7 @@ impl S3Client {
         Ok(head.content_length.unwrap_or(0) as f64)
     }
 
-    #[js_method]
+    #[js_method(ts_return = "S3StatResult")]
     async fn stat(&self, ctx: JSContext, path: String) -> JSResult<JSObject> {
         let path = self.prefixed_path(&path);
         let bucket = self.config.create_bucket()?;
@@ -214,7 +219,7 @@ impl S3Client {
         Ok(result)
     }
 
-    #[js_method]
+    #[js_method(ts_args = "path: string, options?: S3PresignOptions & S3ClientOptions")]
     async fn presign(&self, path: String, options: Optional<JSObject>) -> JSResult<String> {
         self.reject_config_override(&options, &["expiresIn", "method"])?;
         let path = self.prefixed_path(&path);
@@ -259,7 +264,10 @@ impl S3Client {
         }
     }
 
-    #[js_method]
+    #[js_method(
+        ts_return = "S3ListResult",
+        ts_args = "options?: S3ListOptions & S3ClientOptions"
+    )]
     async fn list(&self, ctx: JSContext, options: Optional<JSObject>) -> JSResult<JSObject> {
         self.reject_config_override(&options, &["prefix", "maxKeys", "startAfter"])?;
         let config = if let Some(ref obj) = options.0 {

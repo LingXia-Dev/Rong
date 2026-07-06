@@ -72,7 +72,7 @@ impl S3File {
         Ok(JSValue::from_rust(&ctx, obj))
     }
 
-    #[js_method]
+    #[js_method(ts_return = "ArrayBuffer")]
     async fn bytes(&self, ctx: JSContext) -> JSResult<JSValue> {
         let bucket = self.config.create_bucket()?;
         let response = bucket
@@ -86,13 +86,13 @@ impl S3File {
         Ok(JSValue::from_rust(&ctx, ab))
     }
 
-    #[js_method(rename = "arrayBuffer")]
+    #[js_method(rename = "arrayBuffer", ts_return = "ArrayBuffer")]
     async fn array_buffer(&self, ctx: JSContext) -> JSResult<JSValue> {
         Self::bytes(self, ctx).await
     }
 
     /// Write data to this S3 object.
-    #[js_method]
+    #[js_method(ts_args = "data: string | ArrayBuffer | Uint8Array, options?: S3WriteOptions")]
     async fn write(&self, data: JSValue, options: Optional<JSObject>) -> JSResult<f64> {
         let bucket = self.config.create_bucket()?;
         let (content_bytes, content_type) = resolve_body(&data)?;
@@ -135,7 +135,7 @@ impl S3File {
         }
     }
 
-    #[js_method]
+    #[js_method(ts_return = "S3StatResult")]
     async fn stat(&self, ctx: JSContext) -> JSResult<JSObject> {
         let bucket = self.config.create_bucket()?;
         let (head, _status) = bucket
@@ -158,7 +158,7 @@ impl S3File {
     }
 
     /// Generate a presigned URL (async in rust-s3).
-    #[js_method]
+    #[js_method(ts_args = "options?: S3PresignOptions")]
     async fn presign(&self, options: Optional<JSObject>) -> JSResult<String> {
         let bucket = self.config.create_bucket()?;
         let expires_in = options
@@ -195,7 +195,7 @@ impl S3File {
         }
     }
 
-    #[js_method]
+    #[js_method(ts_return = "S3File")]
     fn slice(&self, ctx: JSContext, start: f64, end: Optional<f64>) -> JSResult<JSObject> {
         let file = S3File {
             config: self.config.clone(),

@@ -164,7 +164,7 @@ impl URLSearchParams {
         self.params.borrow().len() as u32
     }
 
-    #[js_method]
+    #[js_method(ts_return = "Array<[string, string]>")]
     fn entries(&self, ctx: JSContext) -> JSResult<JSArray> {
         let array = JSArray::new(&ctx)?;
         let params = self.params.borrow();
@@ -190,7 +190,10 @@ impl URLSearchParams {
         params.iter().map(|(_, v)| v.clone()).collect()
     }
 
-    #[js_method(rename = "forEach")]
+    #[js_method(
+        rename = "forEach",
+        ts_args = "callback: (value: string, key: string) => void, thisArg?: any"
+    )]
     fn for_each(&self, callback: JSFunc, this_arg: Optional<JSObject>) -> JSResult<()> {
         let params = self.params.borrow();
 

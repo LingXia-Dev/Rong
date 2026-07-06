@@ -636,7 +636,7 @@ impl Storage {
     }
 
     /// Storage list function that returns an iterator
-    #[js_method]
+    #[js_method(ts_return = "IterableIterator<string>")]
     async fn list(&self, ctx: JSContext, prefix: Optional<String>) -> JSResult<JSValue> {
         self.with_db(|db| {
             let read_txn = db.begin_read().map_err(|e| {

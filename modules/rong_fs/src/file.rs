@@ -101,7 +101,7 @@ impl FileHandle {
             .map_err(|e| HostError::new("FS_IO", format!("Failed to truncate file: {}", e)).into())
     }
 
-    #[js_method]
+    #[js_method(ts_args = "offset: number, whence?: SeekMode")]
     async fn seek(&self, offset: i64, whence: Optional<u32>) -> JSResult<u64> {
         let whence_mode = whence.0.unwrap_or(0);
 
@@ -141,7 +141,7 @@ impl FileHandle {
         Ok(())
     }
 
-    #[js_method(getter)]
+    #[js_method(getter, ts_return = "ReadableStream<Uint8Array>")]
     fn readable(&self, ctx: JSContext) -> Option<JSObject> {
         let file = self.file.clone();
         let (tx, rx) = mpsc::channel::<Result<Bytes, String>>(16);
@@ -174,7 +174,7 @@ impl FileHandle {
             .ok()
     }
 
-    #[js_method(getter)]
+    #[js_method(getter, ts_return = "WritableStream<Uint8Array>")]
     fn writable(&self) -> JSResult<WritableStream> {
         let file = self.file.clone();
         let (tx, mut rx) = mpsc::channel::<Bytes>(128);

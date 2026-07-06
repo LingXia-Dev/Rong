@@ -68,7 +68,7 @@ impl RongFile {
         JSArrayBuffer::from_bytes_owned(&ctx, data)
     }
 
-    #[js_method]
+    #[js_method(ts_return = "ReadableStream<Uint8Array>")]
     fn stream(&self, ctx: JSContext) -> Option<JSObject> {
         let resolved = self.resolved.clone();
         let (tx, rx) = mpsc::channel::<Result<Bytes, String>>(16);

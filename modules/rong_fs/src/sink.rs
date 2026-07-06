@@ -61,7 +61,7 @@ impl FileSink {
         rong::illegal_constructor("Not Allowed 'new FileSink()', use Rong.file(path).writer()")
     }
 
-    #[js_method]
+    #[js_method(ts_args = "data: string | ArrayBufferView | ArrayBuffer")]
     async fn write(&self, data: JSValue) -> JSResult<f64> {
         // String
         if data.is_string() {

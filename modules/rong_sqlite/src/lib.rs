@@ -61,7 +61,10 @@ impl SQLite {
 
     /// Execute a single statement with optional parameters.
     /// Returns `{ changes, lastInsertRowid }`.
-    #[js_method]
+    #[js_method(
+        ts_return = "RunResult",
+        ts_args = "sql: string, params?: SQLiteParams"
+    )]
     fn run(&self, ctx: JSContext, sql: String, params: Optional<JSArray>) -> JSResult<JSObject> {
         let borrow = self.conn.borrow();
         let conn = borrow
@@ -84,7 +87,10 @@ impl SQLite {
     }
 
     /// Execute a query and return all matching rows as an array of objects.
-    #[js_method]
+    #[js_method(
+        ts_return = "Record<string, any>[]",
+        ts_args = "sql: string, params?: SQLiteParams"
+    )]
     fn query(&self, ctx: JSContext, sql: String, params: Optional<JSArray>) -> JSResult<JSArray> {
         let borrow = self.conn.borrow();
         let conn = borrow
@@ -94,7 +100,7 @@ impl SQLite {
     }
 
     /// Create a prepared statement for repeated execution.
-    #[js_method]
+    #[js_method(ts_return = "Statement")]
     fn prepare(&self, ctx: JSContext, sql: String) -> JSResult<JSObject> {
         {
             let borrow = self.conn.borrow();
@@ -110,7 +116,7 @@ impl SQLite {
     }
 
     /// Run a function inside a transaction. Commits on success, rolls back on error.
-    #[js_method]
+    #[js_method(ts_args = "callback: () => void")]
     fn transaction(&self, callback: JSFunc) -> JSResult<()> {
         {
             let borrow = self.conn.borrow();

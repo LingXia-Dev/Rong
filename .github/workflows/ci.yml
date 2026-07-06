@@ -113,6 +113,27 @@ jobs:
       - name: Format
         run: cargo fmt --all -- --check
 
+  typegen:
+    needs: scope
+    # Run when Rust source changes (may alter generated types) OR when the type
+    # package changes (preludes / generated / canonical src files) — either can
+    # put the committed `.ts` out of sync with the Rust source.
+    if: needs.scope.outputs.rust == 'true' || needs.scope.outputs.npm == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          submodules: recursive
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      # Fails if the committed TS definitions are stale vs the Rust source.
+      # Run `cargo run -p rong_typegen` to update them.
+      - name: Check generated types
+        run: cargo run -p rong_typegen -- --check
+
   # Informational only: shows which crates have publish-relevant changes since
   # their last release tag, and which need a version bump. Never fails the
   # build; the actual gate is publish.sh --check-drift in release planning.
