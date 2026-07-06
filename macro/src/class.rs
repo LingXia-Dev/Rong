@@ -175,15 +175,21 @@ pub fn class_impl(input: &ItemImpl, attr: TokenStream) -> syn::Result<TokenStrea
             }
         }
 
-        // Check if this is a constructor
+        // Check if this is a constructor. Scan all metas so `constructor` is
+        // recognized even alongside other options (e.g. `ts_args`).
         if method.attrs.iter().any(|attr| {
             attr.path().is_ident("js_method")
                 && attr
                     .meta
                     .require_list()
                     .ok()
-                    .and_then(|list| list.parse_args::<Meta>().ok())
-                    .is_some_and(|meta| meta.path().is_ident("constructor"))
+                    .and_then(|list| {
+                        list.parse_args_with(
+                            syn::punctuated::Punctuated::<Meta, syn::Token![,]>::parse_terminated,
+                        )
+                        .ok()
+                    })
+                    .is_some_and(|metas| metas.iter().any(|m| m.path().is_ident("constructor")))
         }) {
             constructor = Some(quote! {
                 fn data_constructor() -> rong::function::Constructor<rong::JSEngineValue> {
