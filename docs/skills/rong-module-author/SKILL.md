@@ -102,14 +102,21 @@ Date), and the wrapper types (`JSValue`, `JSObject`, `JSArray`, `JSFunc`,
 `FromJSObj` / `IntoJSObj` with `#[rename = "jsName"]`. Use `Optional<T>` (from
 `rong::function`) for optional arguments.
 
+For public API object shapes, prefer named Rust structs with `FromJSObj` /
+`IntoJSObj` over hand-parsed or hand-built `JSObject`. The type generator reads
+those structs and emits the matching TypeScript interfaces; raw `JSObject`
+usually forces a `ts_args`/`ts_return` hatch or a manual type fragment.
+
 ## Working checklist
 
 1. Decide functions vs classes (or both).
 2. Write the Rust with the macros; return `JSResult<T>` for anything fallible.
-3. Implement `pub fn init(ctx: &JSContext) -> JSResult<()>` and register everything.
-4. For a new module crate, wire it into `rong_modules` behind a feature flag (see module-structure.md).
-5. Add a `#[cfg(test)]` test using `rong_test` (and a JS unit script via `UnitJSRunner` if useful).
-6. Verify against an engine: `cargo test -p rong_<name> --features quickjs` (and `jscore`).
+3. Model public option/result objects as `FromJSObj` / `IntoJSObj` structs so `rong_typegen` can emit TypeScript.
+4. Implement `pub fn init(ctx: &JSContext) -> JSResult<()>` and register everything.
+5. For a new module crate, wire it into `rong_modules` behind a feature flag (see module-structure.md).
+6. Add a `#[cfg(test)]` test using `rong_test` (and a JS unit script via `UnitJSRunner` if useful).
+7. Regenerate and check types when the JS surface changes: `cargo run -p rong_typegen` and `cargo run -p rong_typegen -- --check`.
+8. Verify against an engine: `cargo test -p rong_<name> --features quickjs` (and `jscore`).
 
 Match the conventions of existing modules under `modules/` - read a neighbor
 (`rong_url`, `rong_fs`, `rong_http`) before adding new patterns.

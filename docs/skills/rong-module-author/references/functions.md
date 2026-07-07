@@ -83,3 +83,7 @@ The return type is converted automatically (see `type-conversion.md`):
 - `T` directly for infallible sync functions (e.g. `bool`, `String`).
 - `Option<T>` maps to `T` or `null`.
 - Object-shaped returns: derive `IntoJSObj` (see `classes.md`).
+
+For public APIs, do not hand-build result objects with `JSObject::new(...).set(...)`
+unless the shape is intentionally dynamic. Use a named `IntoJSObj` struct so the
+same Rust shape also drives generated TypeScript.

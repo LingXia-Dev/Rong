@@ -53,8 +53,10 @@ In module code you usually write the engine-erased aliases (`JSValue`,
 | any          | `JSValue`                                   | always succeeds                |
 | Error/thrown | `RongJSError`                               | captures the value             |
 
-For object-shaped data use `#[derive(FromJSObj)]` / `#[derive(IntoJSObj)]` with
-`#[rename = "jsName"]` (see `classes.md`).
+For public object-shaped API data, use `#[derive(FromJSObj)]` /
+`#[derive(IntoJSObj)]` with `#[rename = "jsName"]` (see `classes.md`). Avoid
+manual `JSObject` parsing/building for stable API shapes; the macro/derive path
+keeps runtime conversion and generated TypeScript tied to the same Rust source.
 
 ## Explicit conversions
 
@@ -69,6 +71,10 @@ let s: String = js_value.clone().try_into::<String>()?; // probing form (returns
 ```
 
 ## Objects and arrays
+
+Use raw `JSObject` / `JSArray` for dynamic dictionaries, arbitrary JS values,
+internal glue, or cases where the field set is not part of the public contract.
+For named public option/result shapes, prefer derive structs instead.
 
 ```rust
 let obj = JSObject::new(&ctx);

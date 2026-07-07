@@ -105,6 +105,12 @@ Derive `FromJSObj` to accept a JS object as a Rust struct, and `IntoJSObj` to
 return one. Use `#[rename = "jsName"]` to map names; `Option<T>` fields are
 optional (omitted when `None` on output).
 
+For public APIs, this is the default pattern. Avoid hand-parsing options from
+`JSObject` or hand-building result `JSObject`s when the shape is part of the API.
+The macro/derive path is the automation boundary: it powers runtime conversion
+and gives `rong_typegen` enough structure to emit matching TypeScript. Use raw
+`JSObject` only for truly dynamic dictionaries or pass-through JS values.
+
 ```rust
 use rong::{FromJSObj, IntoJSObj};
 use rong::function::Optional;
