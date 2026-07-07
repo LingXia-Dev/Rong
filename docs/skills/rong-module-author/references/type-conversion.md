@@ -57,6 +57,9 @@ For public object-shaped API data, use `#[derive(FromJSObj)]` /
 `#[derive(IntoJSObj)]` with `#[rename = "jsName"]` (see `classes.md`). Avoid
 manual `JSObject` parsing/building for stable API shapes; the macro/derive path
 keeps runtime conversion and generated TypeScript tied to the same Rust source.
+Use field-level `#[ts_type = "..."]` for intentional TypeScript precision that
+cannot be inferred from the Rust conversion type. Use struct-level `#[ts_skip]`
+for internal derived parser structs that must not become public TypeScript.
 
 ## Explicit conversions
 

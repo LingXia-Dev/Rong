@@ -106,6 +106,10 @@ For public API object shapes, prefer named Rust structs with `FromJSObj` /
 `IntoJSObj` over hand-parsed or hand-built `JSObject`. The type generator reads
 those structs and emits the matching TypeScript interfaces; raw `JSObject`
 usually forces a `ts_args`/`ts_return` hatch or a manual type fragment.
+When one generated field needs a narrower or wider TypeScript type than the Rust
+conversion type, put `#[ts_type = "..."]` on that field. If an internal derived
+struct exists only to parse an implementation detail and must not become public
+TypeScript, mark it `#[ts_skip]`.
 
 ## Working checklist
 

@@ -111,6 +111,13 @@ The macro/derive path is the automation boundary: it powers runtime conversion
 and gives `rong_typegen` enough structure to emit matching TypeScript. Use raw
 `JSObject` only for truly dynamic dictionaries or pass-through JS values.
 
+Use `#[ts_type = "..."]` on a derived struct field when the generated
+TypeScript needs to be more precise than the Rust conversion type, for example a
+numeric runtime field that should publish as `number | bigint` or a `String`
+field constrained to string literals. Use `#[ts_skip]` on an internal derived
+struct that parses a combined implementation shape but should not be exported as
+a public interface.
+
 ```rust
 use rong::{FromJSObj, IntoJSObj};
 use rong::function::Optional;
@@ -125,6 +132,8 @@ pub struct StorageOptions {
 pub struct StorageInfo {
     #[rename = "currentSize"] current_size: u32,
     #[rename = "keyCount"]    key_count: u32,
+    #[ts_type = "number | bigint"]
+    #[rename = "lastRowid"]   last_rowid: i64,
 }
 
 #[js_class]
