@@ -8,6 +8,17 @@ mod statement;
 
 use statement::Statement;
 
+/// Result of a write (INSERT/UPDATE/DELETE).
+#[derive(Clone, Debug, IntoJSObj)]
+pub(crate) struct RunResult {
+    /// Number of rows changed.
+    changes: f64,
+    /// Row id of the last inserted row; large values come back as `bigint`.
+    #[rename = "lastInsertRowid"]
+    #[ts_type = "number | bigint"]
+    last_insert_rowid: i64,
+}
+
 fn sqlite_error(msg: impl Into<String>) -> RongJSError {
     HostError::new("ERR_SQLITE", msg)
         .with_name("SQLiteError")
@@ -61,11 +72,8 @@ impl SQLite {
 
     /// Execute a single statement with optional parameters.
     /// Returns `{ changes, lastInsertRowid }`.
-    #[js_method(
-        ts_return = "RunResult",
-        ts_args = "sql: string, params?: SQLiteParams"
-    )]
-    fn run(&self, ctx: JSContext, sql: String, params: Optional<JSArray>) -> JSResult<JSObject> {
+    #[js_method(ts_args = "sql: string, params?: SQLiteParams")]
+    fn run(&self, sql: String, params: Optional<JSArray>) -> JSResult<RunResult> {
         let borrow = self.conn.borrow();
         let conn = borrow
             .as_ref()
@@ -80,10 +88,10 @@ impl SQLite {
             .execute(&sql, param_refs.as_slice())
             .map_err(|e| sqlite_error(e.to_string()))?;
 
-        let result = JSObject::new(&ctx);
-        result.set("changes", changes as f64)?;
-        result.set("lastInsertRowid", conn.last_insert_rowid())?;
-        Ok(result)
+        Ok(RunResult {
+            changes: changes as f64,
+            last_insert_rowid: conn.last_insert_rowid(),
+        })
     }
 
     /// Execute a query and return all matching rows as an array of objects.

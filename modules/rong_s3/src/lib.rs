@@ -5,10 +5,15 @@
 mod client;
 mod config;
 mod file;
+mod types;
 
 pub use client::S3Client;
 pub use config::S3Config;
 pub use file::S3File;
+pub use types::{
+    S3ClientOptions, S3ListEntry, S3ListOptions, S3ListResult, S3PresignOptions, S3StatResult,
+    S3WriteOptions,
+};
 
 use rong::*;
 

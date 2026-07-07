@@ -137,7 +137,7 @@ pub fn has_orphan_js_methods(input: &ItemImpl) -> bool {
 
 /// Extract an interface from a struct that derives `FromJSObj` or `IntoJSObj`.
 pub fn extract_struct(input: &ItemStruct) -> Option<Item> {
-    if !derives_js_obj(&input.attrs) {
+    if !derives_js_obj(&input.attrs) || has_ident_attr(&input.attrs, "ts_skip") {
         return None;
     }
     let syn::Fields::Named(named) = &input.fields else {
@@ -149,7 +149,7 @@ pub fn extract_struct(input: &ItemStruct) -> Option<Item> {
         .iter()
         .map(|f| {
             let rust_name = f.ident.as_ref().map(|i| i.to_string()).unwrap_or_default();
-            let (ts_type, optional) = field_ts(&f.ty);
+            let (ts_type, optional) = field_ts(&f.attrs, &f.ty);
             Field {
                 name: field_js_name(&f.attrs, &rust_name),
                 ts_type,
@@ -384,32 +384,39 @@ fn derives_js_obj(attrs: &[Attribute]) -> bool {
 
 /// A struct field's TS type and optionality: `Option<T>`/`Optional<T>` render as
 /// an optional field of `T` (not `T | null`).
-fn field_ts(ty: &Type) -> (String, bool) {
+fn field_ts(attrs: &[Attribute], ty: &Type) -> (String, bool) {
+    let explicit = attr_str(attrs, "ts_type");
     if (last_ident_is(ty, "Option") || last_ident_is(ty, "Optional"))
         && let Some(inner) = generic_arg0(ty)
     {
-        return (rust_type_to_ts(&inner).text, true);
+        return (
+            explicit.unwrap_or_else(|| rust_type_to_ts(&inner).text),
+            true,
+        );
     }
-    (rust_type_to_ts(ty).text, false)
+    (explicit.unwrap_or_else(|| rust_type_to_ts(ty).text), false)
 }
 
 /// Field name honoring `#[rename = "…"]` (the derives' field attribute).
 fn field_js_name(attrs: &[Attribute], rust_name: &str) -> String {
-    for a in attrs {
-        if a.path().is_ident("rename")
-            && let Meta::NameValue(nv) = &a.meta
-            && let Some(v) = str_lit(&nv.value)
-        {
-            return v;
-        }
-    }
-    rust_name.to_string()
+    attr_str(attrs, "rename").unwrap_or_else(|| rust_name.to_string())
 }
 
 // ---- shared helpers ----
 
 fn has_ident_attr(attrs: &[Attribute], ident: &str) -> bool {
     attrs.iter().any(|a| path_last_is(a.path(), ident))
+}
+
+fn attr_str(attrs: &[Attribute], ident: &str) -> Option<String> {
+    attrs.iter().find_map(|a| {
+        if a.path().is_ident(ident)
+            && let Meta::NameValue(nv) = &a.meta
+        {
+            return str_lit(&nv.value);
+        }
+        None
+    })
 }
 
 /// Match an attribute/derive by its final path segment, so a qualified form
@@ -644,6 +651,8 @@ mod tests {
                 #[rename = "maxBuffer"]
                 max_buffer: Option<u32>,
                 args: Vec<String>,
+                #[ts_type = "number | bigint"]
+                rowid: i64,
             }
         };
         let Item::Interface(i) = extract_struct(&s).unwrap() else {
@@ -657,6 +666,36 @@ mod tests {
         assert_eq!(i.fields[1].ts_type, "number");
         assert!(i.fields[1].optional);
         assert_eq!(i.fields[2].ts_type, "string[]");
+        assert_eq!(i.fields[3].ts_type, "number | bigint");
+        assert!(!i.fields[3].optional);
+    }
+
+    #[test]
+    fn interface_field_ts_type_preserves_optionality() {
+        let s: syn::ItemStruct = syn::parse_quote! {
+            #[derive(FromJSObj, Default)]
+            struct Options {
+                #[ts_type = "\"GET\" | \"PUT\""]
+                method: Option<String>,
+            }
+        };
+        let Item::Interface(i) = extract_struct(&s).unwrap() else {
+            panic!("interface")
+        };
+        assert_eq!(i.fields[0].ts_type, "\"GET\" | \"PUT\"");
+        assert!(i.fields[0].optional);
+    }
+
+    #[test]
+    fn ts_skip_omits_internal_derive_structs() {
+        let s: syn::ItemStruct = syn::parse_quote! {
+            #[derive(FromJSObj, Default)]
+            #[ts_skip]
+            struct InternalOptions {
+                x: String,
+            }
+        };
+        assert!(extract_struct(&s).is_none());
     }
 
     #[test]

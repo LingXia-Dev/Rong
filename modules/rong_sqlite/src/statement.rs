@@ -1,5 +1,6 @@
 use crate::{
-    SharedConn, js_array_to_params, query_rows, set_sqlite_value, sqlite_error, sqlite_value_to_js,
+    RunResult, SharedConn, js_array_to_params, query_rows, set_sqlite_value, sqlite_error,
+    sqlite_value_to_js,
 };
 use rong::function::Optional;
 use rong::*;
@@ -29,8 +30,8 @@ impl Statement {
     }
 
     /// Execute the statement. Returns `{ changes, lastInsertRowid }`.
-    #[js_method(ts_return = "RunResult", ts_args = "params?: SQLiteParams")]
-    fn run(&self, ctx: JSContext, params: Optional<JSArray>) -> JSResult<JSObject> {
+    #[js_method(ts_args = "params?: SQLiteParams")]
+    fn run(&self, params: Optional<JSArray>) -> JSResult<RunResult> {
         self.check_finalized()?;
         let borrow = self.conn.borrow();
         let conn = borrow
@@ -47,10 +48,10 @@ impl Statement {
             .execute(&self.sql, param_refs.as_slice())
             .map_err(|e| sqlite_error(e.to_string()))?;
 
-        let result = JSObject::new(&ctx);
-        result.set("changes", changes as f64)?;
-        result.set("lastInsertRowid", conn.last_insert_rowid())?;
-        Ok(result)
+        Ok(RunResult {
+            changes: changes as f64,
+            last_insert_rowid: conn.last_insert_rowid(),
+        })
     }
 
     /// Execute and return all rows as array of objects.

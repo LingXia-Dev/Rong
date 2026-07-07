@@ -314,7 +314,7 @@ pub fn js_method(_attr: TokenStream, item: TokenStream) -> TokenStream {
 /// The macro provides detailed error messages:
 /// - Missing required fields: "Required field 'field_name' is missing"
 /// - Type conversion errors: "Failed to convert field 'field_name': [original error]"
-#[proc_macro_derive(FromJSObj, attributes(rename, js_default))]
+#[proc_macro_derive(FromJSObj, attributes(rename, js_default, ts_type, ts_skip))]
 pub fn derive_from_js_object(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
     TokenStream::from(deserialize::impl_deserialize(input))
@@ -379,7 +379,7 @@ pub fn derive_from_js_value(input: TokenStream) -> TokenStream {
 ///     nickname: "Johnny"  // Only present if Some(value)
 /// }
 /// ```
-#[proc_macro_derive(IntoJSObj, attributes(rename))]
+#[proc_macro_derive(IntoJSObj, attributes(rename, ts_type, ts_skip))]
 pub fn derive_into_js_object(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
     TokenStream::from(serialize::impl_serialize(input))

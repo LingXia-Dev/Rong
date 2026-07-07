@@ -1,5 +1,9 @@
-use crate::config::S3Config;
+use crate::config::{S3Config, S3ConfigOverlay};
 use crate::file::{S3File, resolve_body};
+use crate::types::{
+    S3ClientListOptions, S3ClientOptions, S3ClientPresignOptions, S3ClientWriteOptions,
+    S3ListEntry, S3ListResult, S3StatResult,
+};
 use rong::function::*;
 use rong::*;
 use std::rc::Rc;
@@ -39,52 +43,24 @@ impl S3Client {
         matches!(self.namespace_prefix.as_deref(), Some(prefix) if !prefix.is_empty())
     }
 
-    fn reject_config_override(
-        &self,
-        options: &Optional<JSObject>,
-        allowed_non_config_keys: &[&str],
-    ) -> JSResult<()> {
+    fn reject_config_override<T: S3ConfigOverlay>(&self, options: &Optional<T>) -> JSResult<()> {
         if !self.namespaced() {
             return Ok(());
         }
 
-        let Some(obj) = options.0.as_ref() else {
+        let Some(options) = options.0.as_ref() else {
             return Ok(());
         };
 
-        let forbidden = [
-            "accessKeyId",
-            "secretAccessKey",
-            "sessionToken",
-            "region",
-            "endpoint",
-            "bucket",
-            "acl",
-            "virtualHostedStyle",
-        ];
-
-        for key in forbidden {
-            if obj.has_property(key)? {
-                return Err(HostError::new(
-                    "E_INVALID_ARG",
-                    format!(
-                        "Cannot override S3 config field '{key}' on a namespaced injected S3Client"
-                    ),
-                )
-                .with_name("TypeError")
-                .into());
-            }
-        }
-
-        for key_str in obj.keys_as::<String>()? {
-            if !allowed_non_config_keys.contains(&key_str.as_str()) {
-                return Err(HostError::new(
-                    "E_INVALID_ARG",
-                    format!("Option '{key_str}' is not allowed on a namespaced injected S3Client"),
-                )
-                .with_name("TypeError")
-                .into());
-            }
+        if let Some(key) = options.config_override_key() {
+            return Err(HostError::new(
+                "E_INVALID_ARG",
+                format!(
+                    "Cannot override S3 config field '{key}' on a namespaced injected S3Client"
+                ),
+            )
+            .with_name("TypeError")
+            .into());
         }
 
         Ok(())
@@ -93,12 +69,9 @@ impl S3Client {
 
 #[js_class]
 impl S3Client {
-    #[js_method(constructor, ts_args = "options?: S3ClientOptions")]
-    fn js_new(options: Optional<JSObject>) -> JSResult<Self> {
-        let config = match options.0 {
-            Some(ref obj) => S3Config::from_js_options(obj)?,
-            None => S3Config::default(),
-        };
+    #[js_method(constructor)]
+    fn js_new(options: Optional<S3ClientOptions>) -> JSResult<Self> {
+        let config = S3Config::from_options(options.0);
         Ok(Self {
             config: config.into_rc(),
             namespace_prefix: None,
@@ -106,19 +79,16 @@ impl S3Client {
     }
 
     /// Lazy file reference — no network request.
-    #[js_method(
-        ts_return = "S3File",
-        ts_args = "path: string, options?: S3ClientOptions"
-    )]
+    #[js_method(ts_return = "S3File")]
     fn file(
         &self,
         ctx: JSContext,
         path: String,
-        options: Optional<JSObject>,
+        options: Optional<S3ClientOptions>,
     ) -> JSResult<JSObject> {
-        self.reject_config_override(&options, &[])?;
-        let config = if let Some(ref obj) = options.0 {
-            self.config.merge_js_options(obj)?.into_rc()
+        self.reject_config_override(&options)?;
+        let config = if let Some(ref options) = options.0 {
+            self.config.merge_options(Some(options)).into_rc()
         } else {
             self.config.clone()
         };
@@ -133,19 +103,19 @@ impl S3Client {
         &self,
         path: String,
         data: JSValue,
-        options: Optional<JSObject>,
+        options: Optional<S3ClientWriteOptions>,
     ) -> JSResult<f64> {
-        self.reject_config_override(&options, &["type"])?;
+        self.reject_config_override(&options)?;
         let path = self.prefixed_path(&path);
-        let config = if let Some(ref obj) = options.0 {
-            self.config.merge_js_options(obj)?
+        let config = if let Some(ref options) = options.0 {
+            self.config.merge_options(Some(options))
         } else {
             (*self.config).clone()
         };
         let bucket = config.create_bucket()?;
         let (content_bytes, content_type) = resolve_body(&data)?;
-        let ct = if let Some(ref opts) = options.0 {
-            opts.get::<_, String>("type").ok().or(content_type)
+        let ct = if let Some(ref options) = options.0 {
+            options.content_type.clone().or(content_type)
         } else {
             content_type
         };
@@ -196,8 +166,8 @@ impl S3Client {
         Ok(head.content_length.unwrap_or(0) as f64)
     }
 
-    #[js_method(ts_return = "S3StatResult")]
-    async fn stat(&self, ctx: JSContext, path: String) -> JSResult<JSObject> {
+    #[js_method]
+    async fn stat(&self, path: String) -> JSResult<S3StatResult> {
         let path = self.prefixed_path(&path);
         let bucket = self.config.create_bucket()?;
         let (head, _status) = bucket
@@ -205,26 +175,24 @@ impl S3Client {
             .await
             .map_err(|e| s3_error(format!("HEAD {}: {}", path, e)))?;
 
-        let result = JSObject::new(&ctx);
-        if let Some(etag) = head.e_tag {
-            result.set("etag", etag)?;
-        }
-        if let Some(last_modified) = head.last_modified {
-            result.set("lastModified", last_modified)?;
-        }
-        if let Some(ct) = head.content_type {
-            result.set("type", ct)?;
-        }
-        result.set("size", head.content_length.unwrap_or(0) as f64)?;
-        Ok(result)
+        Ok(S3StatResult {
+            etag: head.e_tag,
+            last_modified: head.last_modified,
+            size: head.content_length.unwrap_or(0) as f64,
+            content_type: head.content_type,
+        })
     }
 
     #[js_method(ts_args = "path: string, options?: S3PresignOptions & S3ClientOptions")]
-    async fn presign(&self, path: String, options: Optional<JSObject>) -> JSResult<String> {
-        self.reject_config_override(&options, &["expiresIn", "method"])?;
+    async fn presign(
+        &self,
+        path: String,
+        options: Optional<S3ClientPresignOptions>,
+    ) -> JSResult<String> {
+        self.reject_config_override(&options)?;
         let path = self.prefixed_path(&path);
-        let config = if let Some(ref obj) = options.0 {
-            self.config.merge_js_options(obj)?
+        let config = if let Some(ref options) = options.0 {
+            self.config.merge_options(Some(options))
         } else {
             (*self.config).clone()
         };
@@ -233,14 +201,14 @@ impl S3Client {
         let expires_in = options
             .0
             .as_ref()
-            .and_then(|o| o.get::<_, f64>("expiresIn").ok())
+            .and_then(|o| o.expires_in)
             .map(|v| v as u32)
             .unwrap_or(86400);
 
         let method = options
             .0
             .as_ref()
-            .and_then(|o| o.get::<_, String>("method").ok())
+            .and_then(|o| o.method.clone())
             .unwrap_or_else(|| "GET".to_string());
 
         match method.to_uppercase().as_str() {
@@ -264,14 +232,11 @@ impl S3Client {
         }
     }
 
-    #[js_method(
-        ts_return = "S3ListResult",
-        ts_args = "options?: S3ListOptions & S3ClientOptions"
-    )]
-    async fn list(&self, ctx: JSContext, options: Optional<JSObject>) -> JSResult<JSObject> {
-        self.reject_config_override(&options, &["prefix", "maxKeys", "startAfter"])?;
-        let config = if let Some(ref obj) = options.0 {
-            self.config.merge_js_options(obj)?
+    #[js_method(ts_args = "options?: S3ListOptions & S3ClientOptions")]
+    async fn list(&self, options: Optional<S3ClientListOptions>) -> JSResult<S3ListResult> {
+        self.reject_config_override(&options)?;
+        let config = if let Some(ref options) = options.0 {
+            self.config.merge_options(Some(options))
         } else {
             (*self.config).clone()
         };
@@ -280,7 +245,7 @@ impl S3Client {
         let user_prefix = options
             .0
             .as_ref()
-            .and_then(|o| o.get::<_, String>("prefix").ok())
+            .and_then(|o| o.prefix.clone())
             .unwrap_or_default();
 
         // Combine namespace prefix with user-provided prefix
@@ -289,13 +254,13 @@ impl S3Client {
         let max_keys = options
             .0
             .as_ref()
-            .and_then(|o| o.get::<_, f64>("maxKeys").ok())
+            .and_then(|o| o.max_keys)
             .map(|v| v as usize);
 
         let start_after = options
             .0
             .as_ref()
-            .and_then(|o| o.get::<_, String>("startAfter").ok())
+            .and_then(|o| o.start_after.clone())
             .map(|s| self.prefixed_path(&s));
 
         let results = bucket
@@ -303,8 +268,7 @@ impl S3Client {
             .await
             .map_err(|e| s3_error(format!("LIST: {}", e)))?;
 
-        let result_obj = JSObject::new(&ctx);
-        let contents = JSArray::new(&ctx)?;
+        let mut contents = Vec::new();
         let mut total_count = 0usize;
         let mut is_truncated = false;
 
@@ -327,21 +291,20 @@ impl S3Client {
                 // Strip namespace prefix from returned keys
                 let key = obj.key.strip_prefix(ns_prefix).unwrap_or(&obj.key);
 
-                let entry = JSObject::new(&ctx);
-                entry.set("key", key)?;
-                entry.set("size", obj.size as f64)?;
-                entry.set("lastModified", obj.last_modified.as_str())?;
-                if let Some(ref etag) = obj.e_tag {
-                    entry.set("etag", etag.as_str())?;
-                }
-                contents.push(JSValue::from_rust(&ctx, entry))?;
+                contents.push(S3ListEntry {
+                    key: key.to_string(),
+                    size: obj.size as f64,
+                    last_modified: obj.last_modified.to_string(),
+                    etag: obj.e_tag.clone(),
+                });
                 total_count += 1;
             }
         }
 
-        result_obj.set("contents", contents)?;
-        result_obj.set("isTruncated", is_truncated)?;
-        Ok(result_obj)
+        Ok(S3ListResult {
+            contents,
+            is_truncated,
+        })
     }
 
     #[js_method(gc_mark)]
