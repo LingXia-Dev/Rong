@@ -13,11 +13,32 @@ use serde::{Deserialize, Serialize};
 pub enum Item {
     /// A `#[js_class]` type exposed as a JS class.
     Class(ClassDef),
+    /// A numeric constant enum exposed as a JS object and TS literal union.
+    ConstEnum(ConstEnumDef),
     /// An interface generated from a `#[derive(FromJSObj)]` / `IntoJSObj`
     /// struct, or declared via a `ts_type` escape hatch.
     Interface(InterfaceDef),
     /// A standalone function or `export type` alias.
     TypeAlias(TypeAliasDef),
+}
+
+/// A numeric constant enum (`export declare const Name` + `export type Name`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ConstEnumDef {
+    pub name: String,
+    #[serde(default)]
+    pub docs: Vec<String>,
+    #[serde(default)]
+    pub variants: Vec<ConstEnumVariant>,
+}
+
+/// One constant enum variant.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ConstEnumVariant {
+    pub name: String,
+    pub value: u32,
+    #[serde(default)]
+    pub docs: Vec<String>,
 }
 
 /// A JS class (`export declare class Name { … }`).

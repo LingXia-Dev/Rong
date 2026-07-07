@@ -17,7 +17,7 @@ pub mod map;
 pub mod model;
 pub mod render;
 
-pub use extract::{extract_impl, extract_struct, has_orphan_js_methods};
+pub use extract::{extract_const_enum, extract_impl, extract_struct, has_orphan_js_methods};
 pub use map::{TsType, is_injected, map_return, rust_type_to_ts};
 pub use model::{
     ClassDef, Field, FnSig, InterfaceDef, Item, Member, MemberKind, ModuleTypeDef, Param,

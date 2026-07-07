@@ -9,6 +9,17 @@ use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt, SeekFrom};
 use tokio::sync::Mutex;
 use tokio::sync::mpsc;
 
+/// Seek origin constants exposed as `Rong.SeekMode`.
+#[js_const_enum]
+enum SeekMode {
+    /// Seek from start of file (absolute position).
+    Start = 0,
+    /// Seek from current position (relative).
+    Current = 1,
+    /// Seek from end of file (usually a negative offset).
+    End = 2,
+}
+
 #[derive(FromJSObj)]
 pub(crate) struct FileOpenOption {
     pub(crate) read: Option<bool>,
@@ -101,25 +112,12 @@ impl FileHandle {
             .map_err(|e| HostError::new("FS_IO", format!("Failed to truncate file: {}", e)).into())
     }
 
-    #[js_method(ts_args = "offset: number, whence?: SeekMode")]
-    async fn seek(&self, offset: i64, whence: Optional<u32>) -> JSResult<u64> {
-        let whence_mode = whence.0.unwrap_or(0);
-
-        let seek_from = match whence_mode {
-            0 => SeekFrom::Start(offset as u64),
-            1 => SeekFrom::Current(offset),
-            2 => SeekFrom::End(offset),
-            _ => {
-                return Err(HostError::new(
-                    rong::error::E_INVALID_ARG,
-                    format!(
-                        "Invalid whence value: {}. Must be 0 (Start), 1 (Current), or 2 (End)",
-                        whence_mode
-                    ),
-                )
-                .with_name("TypeError")
-                .into());
-            }
+    #[js_method]
+    async fn seek(&self, offset: i64, whence: Optional<SeekMode>) -> JSResult<u64> {
+        let seek_from = match whence.0.unwrap_or(SeekMode::Start) {
+            SeekMode::Start => SeekFrom::Start(offset as u64),
+            SeekMode::Current => SeekFrom::Current(offset),
+            SeekMode::End => SeekFrom::End(offset),
         };
 
         let mut file = self.file.lock().await;
@@ -304,11 +302,7 @@ pub(crate) fn init(ctx: &JSContext) -> JSResult<()> {
 
     ctx.register_hidden_class::<FileHandle>()?;
 
-    let seek_mode = JSObject::new(ctx);
-    seek_mode.set("Start", 0u32)?;
-    seek_mode.set("Current", 1u32)?;
-    seek_mode.set("End", 2u32)?;
-    rong.set("SeekMode", seek_mode)?;
+    rong.set("SeekMode", SeekMode::js_object(ctx)?)?;
 
     Ok(())
 }

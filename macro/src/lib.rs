@@ -4,6 +4,7 @@ use quote::quote;
 use syn::{DeriveInput, ItemImpl, parse_macro_input};
 
 mod class;
+mod const_enum;
 mod deserialize;
 mod r#enum;
 mod instance;
@@ -64,6 +65,30 @@ pub fn js_export(attr: TokenStream, item: TokenStream) -> TokenStream {
                 Err(err) => err.to_compile_error().into(),
             }
         }
+    }
+}
+
+/// Expose a numeric constant enum as JavaScript numbers plus a JS constant object.
+///
+/// This is for APIs such as `Rong.SeekMode.Start === 0`: each unit variant must
+/// have an explicit integer value. The generated type accepts numbers from JS,
+/// returns numbers to JS, and provides `Type::js_object(ctx)` for namespace
+/// registration.
+///
+/// ```ignore
+/// #[js_const_enum]
+/// enum SeekMode {
+///     Start = 0,
+///     Current = 1,
+///     End = 2,
+/// }
+/// ```
+#[proc_macro_attribute]
+pub fn js_const_enum(_attr: TokenStream, item: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(item as DeriveInput);
+    match const_enum::impl_const_enum(&input) {
+        Ok(expanded) => expanded.into(),
+        Err(err) => err.to_compile_error().into(),
     }
 }
 

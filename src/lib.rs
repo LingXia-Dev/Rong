@@ -123,7 +123,9 @@ pub type JSTypedArray<T = u8> = CoreJSTypedArray<JSEngineValue, T>;
 pub type PropertyDescriptor = CorePropertyDescriptor<JSEngineValue>;
 
 // re-export macro public symbols to rong
-pub use rong_macro::{FromJSObj, FromJSValue, IntoJSObj, js_class, js_export, js_method};
+pub use rong_macro::{
+    FromJSObj, FromJSValue, IntoJSObj, js_class, js_const_enum, js_export, js_method,
+};
 
 /// A Trait for conversion from JavaScript values.
 #[cfg(any(feature = "quickjs", feature = "jscore", feature = "arkjs"))]

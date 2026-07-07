@@ -7,11 +7,14 @@
 //! and shared by any crate's generation (rong's modules or `lingxia-logic`).
 
 use crate::map::{array_of, is_injected, map_return, rust_type_to_ts};
-use crate::model::{ClassDef, Field, FnSig, InterfaceDef, Item, Member, MemberKind, Param};
+use crate::model::{
+    ClassDef, ConstEnumDef, ConstEnumVariant, Field, FnSig, InterfaceDef, Item, Member, MemberKind,
+    Param,
+};
 use std::collections::HashSet;
 use syn::{
-    Attribute, Expr, FnArg, ImplItem, ImplItemFn, ItemImpl, ItemStruct, Lit, Meta, Pat, ReturnType,
-    Type,
+    Attribute, Expr, FnArg, ImplItem, ImplItemFn, ItemEnum, ItemImpl, ItemStruct, Lit, Meta, Pat,
+    ReturnType, Type,
 };
 
 /// Extract a class descriptor from an `impl` block, if it carries `#[js_class]`.
@@ -164,6 +167,32 @@ pub fn extract_struct(input: &ItemStruct) -> Option<Item> {
         name: input.ident.to_string(),
         docs: doc_lines(&input.attrs),
         fields,
+    }))
+}
+
+/// Extract a numeric constant enum from `#[js_const_enum]`.
+pub fn extract_const_enum(input: &ItemEnum) -> Option<Item> {
+    if !has_ident_attr(&input.attrs, "js_const_enum") {
+        return None;
+    }
+
+    let variants = input
+        .variants
+        .iter()
+        .filter_map(|v| {
+            let (_, expr) = v.discriminant.as_ref()?;
+            Some(ConstEnumVariant {
+                name: v.ident.to_string(),
+                value: integer_expr(expr)?,
+                docs: doc_lines(&v.attrs),
+            })
+        })
+        .collect();
+
+    Some(Item::ConstEnum(ConstEnumDef {
+        name: input.ident.to_string(),
+        docs: doc_lines(&input.attrs),
+        variants,
     }))
 }
 
@@ -435,6 +464,16 @@ fn str_lit(expr: &Expr) -> Option<String> {
     }
 }
 
+fn integer_expr(expr: &Expr) -> Option<u32> {
+    match expr {
+        Expr::Lit(e) => match &e.lit {
+            Lit::Int(lit) => lit.base10_parse().ok(),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
 fn last_ident_is(ty: &Type, name: &str) -> bool {
     matches!(ty, Type::Path(p) if p.path.segments.last().is_some_and(|s| s.ident == name))
 }
@@ -696,6 +735,29 @@ mod tests {
             }
         };
         assert!(extract_struct(&s).is_none());
+    }
+
+    #[test]
+    fn const_enum_from_js_const_enum_attr() {
+        let e: syn::ItemEnum = syn::parse_quote! {
+            /// Seek origin.
+            #[js_const_enum]
+            enum SeekMode {
+                /// Seek from start.
+                Start = 0,
+                Current = 1,
+                End = 2,
+            }
+        };
+        let Item::ConstEnum(e) = extract_const_enum(&e).unwrap() else {
+            panic!("const enum")
+        };
+        assert_eq!(e.name, "SeekMode");
+        assert_eq!(e.docs, vec!["Seek origin.".to_string()]);
+        assert_eq!(e.variants.len(), 3);
+        assert_eq!(e.variants[0].name, "Start");
+        assert_eq!(e.variants[0].value, 0);
+        assert_eq!(e.variants[0].docs, vec!["Seek from start.".to_string()]);
     }
 
     #[test]

@@ -13,7 +13,7 @@
 //!                                             # generate one crate's types
 
 use rong_typedef::model::{Item, ModuleTypeDef};
-use rong_typedef::{extract_impl, extract_struct, render_module};
+use rong_typedef::{extract_const_enum, extract_impl, extract_struct, render_module};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
@@ -185,6 +185,11 @@ fn collect_items(items: &[syn::Item], out: &mut Vec<Item>) {
                     out.push(desc);
                 }
             }
+            syn::Item::Enum(e) => {
+                if let Some(desc) = extract_const_enum(e) {
+                    out.push(desc);
+                }
+            }
             syn::Item::Mod(m) => {
                 if let Some((_, inner)) = &m.content {
                     collect_items(inner, out);
@@ -200,7 +205,8 @@ fn sort_key(item: &Item) -> String {
     match item {
         Item::TypeAlias(a) => format!("0:{}", a.name),
         Item::Interface(i) => format!("1:{}", i.name),
-        Item::Class(c) => format!("2:{}", c.name),
+        Item::ConstEnum(e) => format!("2:{}", e.name),
+        Item::Class(c) => format!("3:{}", c.name),
     }
 }
 

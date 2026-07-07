@@ -1,7 +1,8 @@
 //! Render a [`ModuleTypeDef`] to TypeScript declaration text.
 
 use crate::model::{
-    ClassDef, Field, InterfaceDef, Item, MemberKind, ModuleTypeDef, Param, TypeAliasDef,
+    ClassDef, ConstEnumDef, Field, InterfaceDef, Item, MemberKind, ModuleTypeDef, Param,
+    TypeAliasDef,
 };
 use std::fmt::Write as _;
 
@@ -21,12 +22,32 @@ pub fn render_module(def: &ModuleTypeDef) -> String {
         }
     }
     for item in &def.items {
+        if let Item::ConstEnum(e) = item {
+            render_const_enum(&mut out, e);
+        }
+    }
+    for item in &def.items {
         if let Item::Class(c) = item {
             render_class(&mut out, c);
         }
     }
 
     out
+}
+
+fn render_const_enum(out: &mut String, e: &ConstEnumDef) {
+    render_docs(out, &e.docs, "");
+    let _ = writeln!(out, "export declare const {}: {{", e.name);
+    for variant in &e.variants {
+        render_docs(out, &variant.docs, "  ");
+        let _ = writeln!(out, "  readonly {}: {};", variant.name, variant.value);
+    }
+    let _ = writeln!(out, "}};");
+    let _ = writeln!(
+        out,
+        "export type {} = (typeof {})[keyof typeof {}];\n",
+        e.name, e.name, e.name
+    );
 }
 
 fn render_type_alias(out: &mut String, a: &TypeAliasDef) {

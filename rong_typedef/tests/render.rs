@@ -54,6 +54,27 @@ fn sqlite_module() -> ModuleTypeDef {
                     },
                 ],
             }),
+            Item::ConstEnum(ConstEnumDef {
+                name: "SeekMode".into(),
+                docs: vec!["Seek origin.".into()],
+                variants: vec![
+                    ConstEnumVariant {
+                        name: "Start".into(),
+                        value: 0,
+                        docs: vec!["Seek from start.".into()],
+                    },
+                    ConstEnumVariant {
+                        name: "Current".into(),
+                        value: 1,
+                        docs: vec![],
+                    },
+                    ConstEnumVariant {
+                        name: "End".into(),
+                        value: 2,
+                        docs: vec![],
+                    },
+                ],
+            }),
             Item::Class(ClassDef {
                 name: "SQLite".into(),
                 docs: vec!["SQLite database connection.".into()],
@@ -108,6 +129,15 @@ export interface RunResult {
   changes: number;
   lastInsertRowid: number | bigint;
 }
+
+/** Seek origin. */
+export declare const SeekMode: {
+  /** Seek from start. */
+  readonly Start: 0;
+  readonly Current: 1;
+  readonly End: 2;
+};
+export type SeekMode = (typeof SeekMode)[keyof typeof SeekMode];
 
 /** SQLite database connection. */
 export declare class SQLite {
