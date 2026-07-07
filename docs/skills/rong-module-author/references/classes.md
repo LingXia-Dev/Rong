@@ -105,18 +105,10 @@ Derive `FromJSObj` to accept a JS object as a Rust struct, and `IntoJSObj` to
 return one. Use `#[rename = "jsName"]` to map names; `Option<T>` fields are
 optional (omitted when `None` on output).
 
-For public APIs, this is the default pattern. Avoid hand-parsing options from
-`JSObject` or hand-building result `JSObject`s when the shape is part of the API.
-The macro/derive path is the automation boundary: it powers runtime conversion
-and gives `rong_typegen` enough structure to emit matching TypeScript. Use raw
-`JSObject` only for truly dynamic dictionaries or pass-through JS values.
-
-Use `#[ts_type = "..."]` on a derived struct field when the generated
-TypeScript needs to be more precise than the Rust conversion type, for example a
-numeric runtime field that should publish as `number | bigint` or a `String`
-field constrained to string literals. Use `#[ts_skip]` on an internal derived
-struct that parses a combined implementation shape but should not be exported as
-a public interface.
+Default to this for public API shapes. Use raw `JSObject` only for dynamic
+dictionaries or pass-through values. Use `#[ts_type = "..."]` for field-level TS
+precision, and `#[ts_skip]` for internal derived parser structs that should not
+be exported.
 
 ```rust
 use rong::{FromJSObj, IntoJSObj};
@@ -147,6 +139,26 @@ impl Storage {
 
     #[js_method]
     fn info(&self) -> JSResult<StorageInfo> { todo!() }
+}
+```
+
+## Numeric constant objects
+
+Use `#[js_const_enum]` for numeric constants exposed as a JS object, such as
+`Rong.SeekMode.Start === 0`. Typegen emits a const object plus a literal-union
+type; do not write a TS enum prelude for this shape.
+
+```rust
+#[js_const_enum]
+enum SeekMode {
+    Start = 0,
+    Current = 1,
+    End = 2,
+}
+
+pub(crate) fn init(ctx: &JSContext) -> JSResult<()> {
+    ctx.host_namespace().set("SeekMode", SeekMode::js_object(ctx)?)?;
+    Ok(())
 }
 ```
 
