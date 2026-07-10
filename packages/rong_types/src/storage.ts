@@ -28,4 +28,3 @@ export declare class Storage {
   /** Storage info function */
   info(): Promise<StorageInfo>;
 }
-

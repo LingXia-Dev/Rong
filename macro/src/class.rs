@@ -107,7 +107,7 @@ pub fn class_impl(input: &ItemImpl, attr: TokenStream) -> syn::Result<TokenStrea
         if !method
             .attrs
             .iter()
-            .any(|attr| attr.path().is_ident("js_method"))
+            .any(|attr| path_last_is(attr.path(), "js_method"))
         {
             continue;
         }
@@ -118,7 +118,7 @@ pub fn class_impl(input: &ItemImpl, attr: TokenStream) -> syn::Result<TokenStrea
         // Parse method attributes
         let mut opts = MethodOpts::default();
         for attr in &method.attrs {
-            if attr.path().is_ident("js_method")
+            if path_last_is(attr.path(), "js_method")
                 && let Meta::List(list) = &attr.meta
             {
                 for nested in list.parse_args_with(
@@ -178,7 +178,7 @@ pub fn class_impl(input: &ItemImpl, attr: TokenStream) -> syn::Result<TokenStrea
         // Check if this is a constructor. Scan all metas so `constructor` is
         // recognized even alongside other options (e.g. `ts_args`).
         if method.attrs.iter().any(|attr| {
-            attr.path().is_ident("js_method")
+            path_last_is(attr.path(), "js_method")
                 && attr
                     .meta
                     .require_list()
@@ -490,4 +490,21 @@ pub fn class_impl(input: &ItemImpl, attr: TokenStream) -> syn::Result<TokenStrea
 
     // println!("Generated code:\n{}", output.to_string());
     Ok(output)
+}
+
+fn path_last_is(path: &syn::Path, name: &str) -> bool {
+    path.segments
+        .last()
+        .is_some_and(|segment| segment.ident == name)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn qualified_js_method_attributes_match_runtime_extraction() {
+        let path: syn::Path = syn::parse_quote!(rong::js_method);
+        assert!(path_last_is(&path, "js_method"));
+    }
 }

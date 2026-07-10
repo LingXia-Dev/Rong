@@ -9,7 +9,7 @@ For modules whose JS surface is entirely `#[js_class]` / `#[derive(FromJSObj|Int
 edit these by hand — change the Rust source and regenerate:
 
 ```
-cargo run -p rong_typegen              # regenerate into packages/rong_types/generated
+cargo run -p rong_typegen              # regenerate canonical + reference outputs
 cargo run -p rong_typegen -- --check   # CI drift-guard
 ```
 
@@ -17,11 +17,19 @@ Currently generated-canonical: **url, storage, sqlite, s3, fs** — modules whos
 public surface is fully expressed by `#[js_class]` and matched by the manual
 types (with hatches/preludes for the coarse spots).
 
-A `src/<module>.ts` is treated as canonical when it begins with the generated
-marker comment. `rong-typegen` writes and `--check`-verifies canonical modules
-in place under `src/`; every other module is written to `generated/<module>.ts`
-as a reference only. So a canonical published file can never silently drift from
-the Rust source — CI regenerates and diffs it.
+`typegen.json` is the source of truth for output policy. A module declared as
+`canonical` is written and checked in `src/<module>.ts`; a module declared as
+`reference` is written and checked in `generated/<module>.ts`. The check also
+fails for configured modules that disappear, newly discovered modules missing
+from the policy, and stale managed output files. The generated marker is only a
+content marker — it never decides whether a published file is canonical.
+
+Source discovery starts at each crate's `src/lib.rs` and follows Rust `mod`
+declarations, so unreferenced `.rs` files are not part of the generated API.
+`#[cfg(test)]` modules/items are excluded. Other target `cfg`s are intentionally
+treated as a target-agnostic union because the npm type package covers every
+supported host platform. Parse, read, unresolved-module, and orphan
+`#[js_method]` errors are fatal rather than warnings.
 
 Irreducible TS with no Rust origin (unions like `SQLiteParam`, result shapes) is
 authored once in `preludes/<module>.ts` and prepended to the generated file.
@@ -55,9 +63,9 @@ Two categories stay authored because generation would lose fidelity:
 
 ## The `generated/` reference
 
-`generated/*.ts` holds the generated output for **every** module (including the
-hand-authored ones) and is CI-checked. For hand-authored modules it is a
-drift reference: diffing it against `src/` surfaces cases where the authored
-types have fallen out of step with the actual registered Rust classes (e.g. the
-runtime registers `Worker`/`Response`, which authored files once called
-`RongWorker`/`FetchResponse`).
+`generated/*.ts` holds CI-checked output for modules classified as `reference`
+in `typegen.json`. Canonical modules live only in `src/`. For hand-authored
+modules the generated file is a review aid: diffing it against `src/` surfaces
+cases where the authored types have fallen out of step with the registered Rust
+classes (e.g. the runtime registers `Worker`/`Response`, which authored files
+once called `RongWorker`/`FetchResponse`).

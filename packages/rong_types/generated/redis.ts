@@ -51,4 +51,3 @@ export declare class RedisSubscription {
   next(): Promise<object>;
   return(): Promise<object>;
 }
-

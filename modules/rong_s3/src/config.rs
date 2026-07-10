@@ -3,7 +3,6 @@ use std::rc::Rc;
 
 pub(crate) trait S3ConfigOverlay {
     fn apply_to_config(&self, config: &mut S3Config);
-    fn config_override_key(&self) -> Option<&'static str>;
 }
 
 /// S3 configuration: credentials + bucket + endpoint.

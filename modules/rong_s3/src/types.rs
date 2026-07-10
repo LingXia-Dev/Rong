@@ -188,28 +188,6 @@ macro_rules! impl_s3_overlay {
                     config.virtual_hosted_style = v;
                 }
             }
-
-            fn config_override_key(&self) -> Option<&'static str> {
-                if self.access_key_id.is_some() {
-                    Some("accessKeyId")
-                } else if self.secret_access_key.is_some() {
-                    Some("secretAccessKey")
-                } else if self.session_token.is_some() {
-                    Some("sessionToken")
-                } else if self.region.is_some() {
-                    Some("region")
-                } else if self.endpoint.is_some() {
-                    Some("endpoint")
-                } else if self.bucket.is_some() {
-                    Some("bucket")
-                } else if self.acl.is_some() {
-                    Some("acl")
-                } else if self.virtual_hosted_style.is_some() {
-                    Some("virtualHostedStyle")
-                } else {
-                    None
-                }
-            }
         }
     };
 }

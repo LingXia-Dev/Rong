@@ -1,0 +1,20 @@
+{
+  "modules": {
+    "abort": "reference",
+    "buffer": "reference",
+    "command": "reference",
+    "console": "reference",
+    "encoding": "reference",
+    "event": "reference",
+    "exception": "reference",
+    "fs": "canonical",
+    "http": "reference",
+    "redis": "reference",
+    "s3": "canonical",
+    "sqlite": "canonical",
+    "storage": "canonical",
+    "stream": "reference",
+    "url": "canonical",
+    "worker": "reference"
+  }
+}

@@ -55,4 +55,3 @@ export declare class Statement {
   /** The SQL text of this statement. */
   readonly sql: string;
 }
-

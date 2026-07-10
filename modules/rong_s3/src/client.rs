@@ -43,28 +43,68 @@ impl S3Client {
         matches!(self.namespace_prefix.as_deref(), Some(prefix) if !prefix.is_empty())
     }
 
-    fn reject_config_override<T: S3ConfigOverlay>(&self, options: &Optional<T>) -> JSResult<()> {
+    fn reject_config_override(
+        &self,
+        options: &Optional<JSObject>,
+        allowed_non_config_keys: &[&str],
+    ) -> JSResult<()> {
         if !self.namespaced() {
             return Ok(());
         }
 
-        let Some(options) = options.0.as_ref() else {
+        let Some(obj) = options.0.as_ref() else {
             return Ok(());
         };
 
-        if let Some(key) = options.config_override_key() {
-            return Err(HostError::new(
-                "E_INVALID_ARG",
-                format!(
-                    "Cannot override S3 config field '{key}' on a namespaced injected S3Client"
-                ),
-            )
-            .with_name("TypeError")
-            .into());
+        for key in [
+            "accessKeyId",
+            "secretAccessKey",
+            "sessionToken",
+            "region",
+            "endpoint",
+            "bucket",
+            "acl",
+            "virtualHostedStyle",
+        ] {
+            if obj.has_property(key)? {
+                return Err(HostError::new(
+                    "E_INVALID_ARG",
+                    format!(
+                        "Cannot override S3 config field '{key}' on a namespaced injected S3Client"
+                    ),
+                )
+                .with_name("TypeError")
+                .into());
+            }
+        }
+
+        for key in obj.keys_as::<String>()? {
+            if !allowed_non_config_keys.contains(&key.as_str()) {
+                return Err(HostError::new(
+                    "E_INVALID_ARG",
+                    format!("Option '{key}' is not allowed on a namespaced injected S3Client"),
+                )
+                .with_name("TypeError")
+                .into());
+            }
         }
 
         Ok(())
     }
+}
+
+fn typed_options<T>(options: &Optional<JSObject>) -> JSResult<Option<T>>
+where
+    T: FromJSValue<JSEngineValue>,
+{
+    options
+        .0
+        .as_ref()
+        .map(|object| {
+            let ctx = object.context();
+            T::from_js_value(&ctx, object.clone().into_js_value(&ctx))
+        })
+        .transpose()
 }
 
 #[js_class]
@@ -79,15 +119,19 @@ impl S3Client {
     }
 
     /// Lazy file reference — no network request.
-    #[js_method(ts_return = "S3File")]
+    #[js_method(
+        ts_return = "S3File",
+        ts_args = "path: string, options?: S3ClientOptions"
+    )]
     fn file(
         &self,
         ctx: JSContext,
         path: String,
-        options: Optional<S3ClientOptions>,
+        options: Optional<JSObject>,
     ) -> JSResult<JSObject> {
-        self.reject_config_override(&options)?;
-        let config = if let Some(ref options) = options.0 {
+        self.reject_config_override(&options, &[])?;
+        let options = typed_options::<S3ClientOptions>(&options)?;
+        let config = if let Some(ref options) = options {
             self.config.merge_options(Some(options)).into_rc()
         } else {
             self.config.clone()
@@ -103,18 +147,19 @@ impl S3Client {
         &self,
         path: String,
         data: JSValue,
-        options: Optional<S3ClientWriteOptions>,
+        options: Optional<JSObject>,
     ) -> JSResult<f64> {
-        self.reject_config_override(&options)?;
+        self.reject_config_override(&options, &["type"])?;
+        let options = typed_options::<S3ClientWriteOptions>(&options)?;
         let path = self.prefixed_path(&path);
-        let config = if let Some(ref options) = options.0 {
+        let config = if let Some(ref options) = options {
             self.config.merge_options(Some(options))
         } else {
             (*self.config).clone()
         };
         let bucket = config.create_bucket()?;
         let (content_bytes, content_type) = resolve_body(&data)?;
-        let ct = if let Some(ref options) = options.0 {
+        let ct = if let Some(ref options) = options {
             options.content_type.clone().or(content_type)
         } else {
             content_type
@@ -184,14 +229,11 @@ impl S3Client {
     }
 
     #[js_method(ts_args = "path: string, options?: S3PresignOptions & S3ClientOptions")]
-    async fn presign(
-        &self,
-        path: String,
-        options: Optional<S3ClientPresignOptions>,
-    ) -> JSResult<String> {
-        self.reject_config_override(&options)?;
+    async fn presign(&self, path: String, options: Optional<JSObject>) -> JSResult<String> {
+        self.reject_config_override(&options, &["expiresIn", "method"])?;
+        let options = typed_options::<S3ClientPresignOptions>(&options)?;
         let path = self.prefixed_path(&path);
-        let config = if let Some(ref options) = options.0 {
+        let config = if let Some(ref options) = options {
             self.config.merge_options(Some(options))
         } else {
             (*self.config).clone()
@@ -199,14 +241,12 @@ impl S3Client {
         let bucket = config.create_bucket()?;
 
         let expires_in = options
-            .0
             .as_ref()
             .and_then(|o| o.expires_in)
             .map(|v| v as u32)
             .unwrap_or(86400);
 
         let method = options
-            .0
             .as_ref()
             .and_then(|o| o.method.clone())
             .unwrap_or_else(|| "GET".to_string());
@@ -233,9 +273,10 @@ impl S3Client {
     }
 
     #[js_method(ts_args = "options?: S3ListOptions & S3ClientOptions")]
-    async fn list(&self, options: Optional<S3ClientListOptions>) -> JSResult<S3ListResult> {
-        self.reject_config_override(&options)?;
-        let config = if let Some(ref options) = options.0 {
+    async fn list(&self, options: Optional<JSObject>) -> JSResult<S3ListResult> {
+        self.reject_config_override(&options, &["prefix", "maxKeys", "startAfter"])?;
+        let options = typed_options::<S3ClientListOptions>(&options)?;
+        let config = if let Some(ref options) = options {
             self.config.merge_options(Some(options))
         } else {
             (*self.config).clone()
@@ -243,7 +284,6 @@ impl S3Client {
         let bucket = config.create_bucket()?;
 
         let user_prefix = options
-            .0
             .as_ref()
             .and_then(|o| o.prefix.clone())
             .unwrap_or_default();
@@ -252,13 +292,11 @@ impl S3Client {
         let prefix = self.prefixed_path(&user_prefix);
 
         let max_keys = options
-            .0
             .as_ref()
             .and_then(|o| o.max_keys)
             .map(|v| v as usize);
 
         let start_after = options
-            .0
             .as_ref()
             .and_then(|o| o.start_after.clone())
             .map(|s| self.prefixed_path(&s));

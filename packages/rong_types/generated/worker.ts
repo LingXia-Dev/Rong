@@ -8,4 +8,3 @@ export declare class Worker {
   /** Terminate the worker. */
   terminate(): void;
 }
-

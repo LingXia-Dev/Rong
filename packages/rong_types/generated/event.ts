@@ -40,4 +40,3 @@ export declare class EventEmitter {
 export declare class EventTarget {
   constructor();
 }
-

@@ -142,4 +142,3 @@ export declare class SSE {
   next(): Promise<object>;
   return(): Promise<object>;
 }
-

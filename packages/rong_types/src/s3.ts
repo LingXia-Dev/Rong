@@ -110,4 +110,3 @@ export declare class S3File {
   presign(options?: S3PresignOptions): Promise<string>;
   slice(start: number, end?: number): S3File;
 }
-

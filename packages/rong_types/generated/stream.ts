@@ -64,4 +64,3 @@ export declare class WritableStreamDefaultWriter {
   abort(): Promise<void>;
   releaseLock(): Promise<void>;
 }
-

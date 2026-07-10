@@ -33,4 +33,3 @@ export declare class AbortSignal {
    */
   static timeout(time: number): object;
 }
-

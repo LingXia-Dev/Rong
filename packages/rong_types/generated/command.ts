@@ -51,4 +51,3 @@ export declare class ShellError {
   readonly stdout: Uint8Array;
   readonly stderr: Uint8Array;
 }
-

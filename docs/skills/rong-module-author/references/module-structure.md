@@ -88,6 +88,17 @@ pub fn init(ctx: &JSContext) -> JSResult<()> {
 rong_<name>::init(ctx)?;
 ```
 
+4. **`packages/rong_types/typegen.json`** - if the crate contains
+   `#[js_class]`, `FromJSObj`/`IntoJSObj`, or `#[js_const_enum]` items, classify
+   its generated output explicitly:
+   - use `canonical` when the generated declaration is the published
+     `src/<name>.ts`;
+   - use `reference` when `src/<name>.ts` remains curated and the generated
+     declaration is only a checked review artifact.
+
+   Typegen fails for an unclassified JS-facing module, so this decision cannot
+   be skipped accidentally.
+
 ## 5. Tests
 
 Modules test against an engine via `rong_test`. Sync tests use `run(|ctx| ...)`;

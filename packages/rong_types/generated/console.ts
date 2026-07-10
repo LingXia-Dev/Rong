@@ -18,4 +18,3 @@ export declare class Console {
   countReset(label?: string): void;
   static clear(): void;
 }
-

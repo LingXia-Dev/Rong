@@ -32,4 +32,3 @@ export declare class File {
   arrayBuffer(): Promise<ArrayBuffer>;
   bytes(): Promise<Uint8Array>;
 }
-

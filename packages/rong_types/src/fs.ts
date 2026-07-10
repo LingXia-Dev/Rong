@@ -99,4 +99,3 @@ export declare class RongFile {
   open(option?: FileOpenOption): Promise<FileHandle>;
   writer(option?: FileSinkOptions): Promise<FileSink>;
 }
-

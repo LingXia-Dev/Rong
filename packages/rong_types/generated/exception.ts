@@ -7,4 +7,3 @@ export declare class DOMException {
   readonly message: string;
   readonly stack: string;
 }
-

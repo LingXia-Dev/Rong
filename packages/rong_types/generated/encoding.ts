@@ -42,4 +42,3 @@ export declare class TextEncoder {
    */
   encodeInto(input: string, dest: object): object;
 }
-

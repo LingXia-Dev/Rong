@@ -35,4 +35,3 @@ export declare class URLSearchParams {
   forEach(callback: (value: string, key: string) => void, thisArg?: any): void;
   toString(): string;
 }
-
