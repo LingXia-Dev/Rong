@@ -124,7 +124,7 @@ pub type PropertyDescriptor = CorePropertyDescriptor<JSEngineValue>;
 
 // re-export macro public symbols to rong
 pub use rong_macro::{
-    FromJSObj, FromJSValue, IntoJSObj, js_class, js_const_enum, js_export, js_method,
+    FromJSObject, FromJSValue, IntoJSObject, js_api, js_class, js_method, js_numeric_enum, js_union,
 };
 
 /// A Trait for conversion from JavaScript values.

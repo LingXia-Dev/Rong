@@ -1,9 +1,9 @@
-use rong_macro::{FromJSObj, js_class, js_export, js_method};
+use rong_macro::{FromJSObject, js_class, js_method};
 use rong_test::*;
 use std::sync::{Mutex, OnceLock};
 use tokio::time::Duration;
 
-#[js_export(clone)]
+#[js_class(clone)]
 #[derive(Debug, PartialEq)]
 struct Point {
     x: i32,
@@ -19,7 +19,7 @@ impl Point {
         Self { x, y }
     }
 
-    #[js_method(getter, configurable, rename = "ORIGIN")]
+    #[js_method(getter, rename = "ORIGIN")]
     fn get_origin() -> Point {
         ORIGIN
             .get_or_init(|| Mutex::new(Point { x: 0x5a, y: 0xa5 }))
@@ -90,11 +90,11 @@ impl Point {
     }
 }
 
-#[derive(FromJSObj)]
+#[derive(FromJSObject)]
 struct Person {
-    #[rename = "firstName"]
+    #[js_name = "firstName"]
     first_name: String,
-    #[rename = "lastName"]
+    #[js_name = "lastName"]
     last_name: String,
     age: i32,
     nickname: Option<String>,
@@ -104,7 +104,7 @@ struct Person {
     score: i32,
 }
 
-#[derive(FromJSObj, Debug)]
+#[derive(FromJSObject, Debug)]
 struct Config {
     name: String,
     // Optional field

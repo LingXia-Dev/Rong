@@ -11,6 +11,8 @@ WORKSPACE_TOML="Cargo.toml"
 NPM_PACKAGE_JSONS=("packages/rong_types/package.json" "packages/skill/package.json")
 
 CORE_CRATES=(
+  "rong_typedef"
+  "rong_typegen"
   "rong_macro"
   "rong_rt"
   "rong_core"

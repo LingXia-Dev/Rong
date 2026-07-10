@@ -3,6 +3,12 @@ use quote::quote;
 use syn::{Data, DeriveInput, Error, Fields};
 
 pub(crate) fn impl_enum_conversions(input: &DeriveInput) -> Result<TokenStream, Error> {
+    if !input.generics.params.is_empty() {
+        return Err(Error::new_spanned(
+            &input.generics,
+            "#[js_union] does not support generic enums",
+        ));
+    }
     let name = &input.ident;
 
     match &input.data {

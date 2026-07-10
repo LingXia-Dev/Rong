@@ -4,7 +4,7 @@ use std::time::SystemTime;
 use tokio::fs;
 
 /// Create a symbolic link
-async fn symlink(old_path: String, new_path: String) -> JSResult<()> {
+pub(crate) async fn symlink(old_path: String, new_path: String) -> JSResult<()> {
     let resolved_old = grant_file_access(&old_path)?;
     let resolved_new = grant_file_access(&new_path)?;
     #[cfg(unix)]
@@ -31,7 +31,7 @@ async fn symlink(old_path: String, new_path: String) -> JSResult<()> {
 }
 
 /// Read the target of a symbolic link
-async fn readlink(path: String) -> JSResult<String> {
+pub(crate) async fn readlink(path: String) -> JSResult<String> {
     let resolved = grant_file_access(&path)?;
     fs::read_link(&resolved)
         .await
@@ -41,7 +41,7 @@ async fn readlink(path: String) -> JSResult<String> {
 
 /// Change file permissions (Unix only)
 #[cfg(unix)]
-async fn chmod(path: String, mode: u32) -> JSResult<()> {
+pub(crate) async fn chmod(path: String, mode: u32) -> JSResult<()> {
     let resolved = grant_file_access(&path)?;
     use std::os::unix::fs::PermissionsExt;
     let permissions = std::fs::Permissions::from_mode(mode);
@@ -52,7 +52,7 @@ async fn chmod(path: String, mode: u32) -> JSResult<()> {
 
 /// Change file ownership (Unix only)
 #[cfg(unix)]
-async fn chown(path: String, uid: u32, gid: u32) -> JSResult<()> {
+pub(crate) async fn chown(path: String, uid: u32, gid: u32) -> JSResult<()> {
     let resolved = grant_file_access(&path)?;
     use nix::unistd::{Gid, Uid, chown as nix_chown};
     nix_chown(
@@ -63,15 +63,17 @@ async fn chown(path: String, uid: u32, gid: u32) -> JSResult<()> {
     .map_err(|e| HostError::new("FS_IO", format!("Failed to change ownership: {}", e)).into())
 }
 
-/// Options for utime function
-#[derive(FromJSObj)]
+/// Access and modification timestamps for `Rong.utime`.
+#[derive(FromJSObject)]
 pub(crate) struct UTimeOptions {
+    /// Access time in Unix epoch milliseconds. Defaults to the current time.
     accessed: Option<f64>,
+    /// Modification time in Unix epoch milliseconds. Defaults to the current time.
     modified: Option<f64>,
 }
 
 /// Change file access and modification times
-async fn utime(path: String, options: UTimeOptions) -> JSResult<()> {
+pub(crate) async fn utime(path: String, options: UTimeOptions) -> JSResult<()> {
     let resolved = grant_file_access(&path)?;
     use filetime::FileTime;
 
@@ -91,7 +93,7 @@ async fn utime(path: String, options: UTimeOptions) -> JSResult<()> {
 }
 
 /// Rename a file or directory
-async fn rename(from: String, to: String) -> JSResult<()> {
+pub(crate) async fn rename(from: String, to: String) -> JSResult<()> {
     let resolved_from = grant_file_access(&from)?;
     let resolved_to = grant_file_access(&to)?;
     fs::rename(&resolved_from, &resolved_to)
@@ -100,41 +102,10 @@ async fn rename(from: String, to: String) -> JSResult<()> {
 }
 
 /// Get the real path (canonical path) of a file
-async fn real_path(path: String) -> JSResult<String> {
+pub(crate) async fn real_path(path: String) -> JSResult<String> {
     let resolved = grant_file_access(&path)?;
     fs::canonicalize(&resolved)
         .await
         .map(|p| p.to_string_lossy().into_owned())
         .map_err(|e| HostError::new("FS_IO", format!("Failed to resolve real path: {}", e)).into())
-}
-
-/// Initialize miscellaneous file system functions
-pub(crate) fn init(ctx: &JSContext) -> JSResult<()> {
-    let rong = ctx.host_namespace();
-
-    let symlink_fn = JSFunc::new(ctx, symlink)?.name("symlink")?;
-    rong.set("symlink", symlink_fn)?;
-
-    let readlink_fn = JSFunc::new(ctx, readlink)?.name("readlink")?;
-    rong.set("readlink", readlink_fn)?;
-
-    #[cfg(unix)]
-    {
-        let chmod_fn = JSFunc::new(ctx, chmod)?.name("chmod")?;
-        rong.set("chmod", chmod_fn)?;
-
-        let chown_fn = JSFunc::new(ctx, chown)?.name("chown")?;
-        rong.set("chown", chown_fn)?;
-    }
-
-    let utime_fn = JSFunc::new(ctx, utime)?.name("utime")?;
-    rong.set("utime", utime_fn)?;
-
-    let rename_fn = JSFunc::new(ctx, rename)?.name("rename")?;
-    rong.set("rename", rename_fn)?;
-
-    let real_path_fn = JSFunc::new(ctx, real_path)?.name("realPath")?;
-    rong.set("realPath", real_path_fn)?;
-
-    Ok(())
 }

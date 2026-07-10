@@ -1,15 +1,22 @@
 use proc_macro2::{Span, TokenStream};
 use quote::quote;
-use syn::spanned::Spanned;
-use syn::{Data, DeriveInput, Error, Expr, Fields, Lit};
+use rong_typedef::u32_integer_expr;
+use syn::{Data, DeriveInput, Error, Fields};
 
-pub(crate) fn impl_const_enum(input: &DeriveInput) -> Result<TokenStream, Error> {
+pub(crate) fn impl_numeric_enum(input: &DeriveInput) -> Result<TokenStream, Error> {
     let name = &input.ident;
+
+    if !input.generics.params.is_empty() {
+        return Err(Error::new_spanned(
+            &input.generics,
+            "js_numeric_enum does not support generic enums",
+        ));
+    }
 
     let Data::Enum(data) = &input.data else {
         return Err(Error::new(
             Span::call_site(),
-            "js_const_enum can only be used on enums",
+            "js_numeric_enum can only be used on enums",
         ));
     };
 
@@ -22,23 +29,18 @@ pub(crate) fn impl_const_enum(input: &DeriveInput) -> Result<TokenStream, Error>
         if !matches!(variant.fields, Fields::Unit) {
             return Err(Error::new(
                 variant.ident.span(),
-                "js_const_enum only supports unit variants",
+                "js_numeric_enum only supports unit variants",
             ));
         }
 
         let Some((_, expr)) = &variant.discriminant else {
             return Err(Error::new(
                 variant.ident.span(),
-                "js_const_enum variants must have explicit integer values",
+                "js_numeric_enum variants must have explicit integer values",
             ));
         };
 
-        let Some(value) = integer_expr(expr) else {
-            return Err(Error::new(
-                expr.span(),
-                "js_const_enum values must be integer literals",
-            ));
-        };
+        let value = u32_integer_expr(expr)?;
 
         let variant_name = &variant.ident;
         let js_name = variant_name.to_string();
@@ -97,14 +99,4 @@ pub(crate) fn impl_const_enum(input: &DeriveInput) -> Result<TokenStream, Error>
             }
         }
     })
-}
-
-fn integer_expr(expr: &Expr) -> Option<u32> {
-    match expr {
-        Expr::Lit(expr) => match &expr.lit {
-            Lit::Int(lit) => lit.base10_parse().ok(),
-            _ => None,
-        },
-        _ => None,
-    }
 }

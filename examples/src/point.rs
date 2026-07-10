@@ -1,8 +1,8 @@
 use rong::*;
-use rong::{js_class, js_export, js_method};
+use rong::{js_class, js_method};
 
-// Define the Point struct with js_export macro
-#[js_export]
+// Define the Point struct with js_class macro
+#[js_class]
 #[derive(Debug)]
 struct Point {
     x: i32,

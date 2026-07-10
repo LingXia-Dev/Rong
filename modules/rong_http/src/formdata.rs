@@ -3,7 +3,7 @@ use rong_buffer::{Blob, File};
 use std::collections::HashMap;
 use url::form_urlencoded;
 
-#[js_export]
+#[js_union]
 #[derive(Clone)]
 enum FormDataEntryValue {
     File(File),
@@ -11,7 +11,7 @@ enum FormDataEntryValue {
     String(String),
 }
 
-#[js_export]
+#[js_class]
 pub struct FormData {
     // Reasons for using Vec instead of HashMap:
     // 1. FormData specification requires maintaining insertion order, which Vec naturally supports

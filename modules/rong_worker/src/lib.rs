@@ -71,7 +71,7 @@ enum FromWorker {
     Error(String),
 }
 
-#[js_export]
+#[js_class]
 pub struct Worker {
     /// Send commands to the worker thread.
     to_worker: mpsc::Sender<ToWorker>,

@@ -9,7 +9,7 @@ export interface S3ClientOptions {
   secretAccessKey?: string;
   /** AWS session token (STS). */
   sessionToken?: string;
-  /** AWS region. */
+  /** AWS region. Defaults to `us-east-1`. */
   region?: string;
   /** Custom endpoint URL (for S3-compatible services). */
   endpoint?: string;
@@ -17,7 +17,7 @@ export interface S3ClientOptions {
   bucket?: string;
   /** Default ACL for uploads (e.g. "public-read"). */
   acl?: string;
-  /** Use virtual-hosted-style URLs instead of path-style. */
+  /** Use virtual-hosted-style URLs instead of path-style. Defaults to false. */
   virtualHostedStyle?: boolean;
 }
 
@@ -53,9 +53,9 @@ export interface S3ListResult {
 
 /** Options for presigning URLs. */
 export interface S3PresignOptions {
-  /** Expiration in seconds. */
+  /** Expiration in seconds. Defaults to 86400 (24 hours). */
   expiresIn?: number;
-  /** HTTP method. */
+  /** HTTP method. Defaults to `GET`. */
   method?: "GET" | "PUT" | "DELETE";
 }
 
@@ -73,40 +73,67 @@ export interface S3StatResult {
 
 /** Options for write operations. */
 export interface S3WriteOptions {
-  /** Content-Type header. */
+  /** Content-Type header. Defaults to `application/octet-stream` when it cannot be inferred. */
   type?: string;
 }
 
+/** S3-compatible object-storage client. */
 export declare class S3Client {
+  /** Construct a client from explicit options or the process environment. */
   constructor(options?: S3ClientOptions);
   /** Lazy file reference — no network request. */
   file(path: string, options?: S3ClientOptions): S3File;
+  /** Write an object and return the number of bytes uploaded. */
   write(path: string, data: string | ArrayBuffer | Uint8Array, options?: S3WriteOptions & S3ClientOptions): Promise<number>;
+  /** Delete an object. */
   delete(path: string): Promise<void>;
+  /** Delete an object (alias of `delete`). */
   unlink(path: string): Promise<void>;
+  /** Test whether an object exists. */
   exists(path: string): Promise<boolean>;
+  /** Return an object's size in bytes. */
   size(path: string): Promise<number>;
+  /** Read object metadata without downloading its body. */
   stat(path: string): Promise<S3StatResult>;
+  /** Generate a presigned object URL. */
   presign(path: string, options?: S3PresignOptions & S3ClientOptions): Promise<string>;
+  /** List objects in the configured bucket. */
   list(options?: S3ListOptions & S3ClientOptions): Promise<S3ListResult>;
 }
 
+/** Lazy reference to an S3 object. No network request on creation. */
 export declare class S3File {
   private constructor();
+  /** Object key as exposed by this reference. */
   readonly name: string;
   /** S3 objects don't have synchronous size — use stat() instead. */
   readonly size: number;
+  /** Download the object as UTF-8 text. */
   text(): Promise<string>;
+  /** Download and parse the object as JSON. */
   json(): Promise<any>;
+  /** Download the object as an ArrayBuffer. */
   bytes(): Promise<ArrayBuffer>;
+  /** Download the object as an ArrayBuffer (alias of `bytes`). */
   arrayBuffer(): Promise<ArrayBuffer>;
   /** Write data to this S3 object. */
   write(data: string | ArrayBuffer | Uint8Array, options?: S3WriteOptions): Promise<number>;
+  /** Delete this object. */
   delete(): Promise<void>;
+  /** Delete this object (alias of `delete`). */
   unlink(): Promise<void>;
+  /** Test whether this object exists. */
   exists(): Promise<boolean>;
+  /** Read object metadata without downloading its body. */
   stat(): Promise<S3StatResult>;
   /** Generate a presigned URL (async in rust-s3). */
   presign(options?: S3PresignOptions): Promise<string>;
+  /** Create a lazy reference to a byte range of this object. */
   slice(start: number, end?: number): S3File;
+}
+
+declare global {
+  interface RongNamespace {
+    readonly S3Client: typeof S3Client;
+  }
 }

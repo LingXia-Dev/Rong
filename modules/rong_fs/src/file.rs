@@ -10,8 +10,8 @@ use tokio::sync::Mutex;
 use tokio::sync::mpsc;
 
 /// Seek origin constants exposed as `Rong.SeekMode`.
-#[js_const_enum]
-enum SeekMode {
+#[js_numeric_enum]
+pub(crate) enum SeekMode {
     /// Seek from start of file (absolute position).
     Start = 0,
     /// Seek from current position (relative).
@@ -20,30 +20,39 @@ enum SeekMode {
     End = 2,
 }
 
-#[derive(FromJSObj)]
-pub(crate) struct FileOpenOption {
+#[derive(FromJSObject)]
+pub(crate) struct FileOpenOptions {
+    /// Open the file for reading. Defaults to true.
     pub(crate) read: Option<bool>,
+    /// Open the file for writing. Defaults to false.
     pub(crate) write: Option<bool>,
+    /// Append writes to the end of the file.
     pub(crate) append: Option<bool>,
+    /// Truncate the file to zero bytes when opening it for writing.
     pub(crate) truncate: Option<bool>,
+    /// Create the file when it does not exist.
     pub(crate) create: Option<bool>,
-    #[rename = "createNew"]
+    /// Create a new file and fail when it already exists.
+    #[js_name = "createNew"]
     pub(crate) create_new: Option<bool>,
+    /// Unix file permissions mode.
     pub(crate) mode: Option<u32>,
 }
 
-#[js_export]
+#[js_class]
 pub(crate) struct FileHandle {
     file: Arc<Mutex<Option<File>>>,
 }
 
+/// Low-level random-access file handle returned by `RongFile.open`.
 #[js_class]
 impl FileHandle {
-    #[js_method(constructor)]
+    #[js_method(constructor, private)]
     fn new() -> JSResult<Self> {
         rong::illegal_constructor("Not Allowed 'new FileHandle()', use Rong.file(path).open()")
     }
 
+    /// Read metadata for the open file.
     #[js_method]
     async fn stat(&self) -> JSResult<FileInfo> {
         let file = self.file.lock().await;
@@ -55,6 +64,7 @@ impl FileHandle {
             .map_err(|e| HostError::new("FS_IO", format!("Failed to get file stats: {}", e)).into())
     }
 
+    /// Read into an ArrayBuffer, returning null at end of file.
     #[js_method]
     async fn read(&self, buffer: JSArrayBuffer) -> JSResult<Option<usize>> {
         let buf_len = buffer.len();
@@ -76,6 +86,7 @@ impl FileHandle {
         }
     }
 
+    /// Write the complete ArrayBuffer at the current position.
     #[js_method]
     async fn write(&self, buffer: JSArrayBuffer) -> JSResult<usize> {
         let buf = buffer.as_slice();
@@ -91,6 +102,7 @@ impl FileHandle {
         Ok(buf.len())
     }
 
+    /// Flush file contents and metadata to stable storage.
     #[js_method]
     async fn sync(&self) -> JSResult<()> {
         let file = self.file.lock().await;
@@ -101,6 +113,7 @@ impl FileHandle {
             .map_err(|e| HostError::new("FS_IO", format!("Failed to sync file: {}", e)).into())
     }
 
+    /// Resize the file, defaulting to zero bytes.
     #[js_method]
     async fn truncate(&self, len: Optional<u64>) -> JSResult<()> {
         let length = len.0.unwrap_or(0);
@@ -112,6 +125,7 @@ impl FileHandle {
             .map_err(|e| HostError::new("FS_IO", format!("Failed to truncate file: {}", e)).into())
     }
 
+    /// Move the current file position and return the new offset.
     #[js_method]
     async fn seek(&self, offset: i64, whence: Optional<SeekMode>) -> JSResult<u64> {
         let seek_from = match whence.0.unwrap_or(SeekMode::Start) {
@@ -132,6 +146,7 @@ impl FileHandle {
         Ok(new_position)
     }
 
+    /// Close this handle. Further operations fail.
     #[js_method]
     async fn close(&self) -> JSResult<()> {
         let mut file = self.file.lock().await;
@@ -139,6 +154,7 @@ impl FileHandle {
         Ok(())
     }
 
+    /// Readable byte stream backed by this handle.
     #[js_method(getter, ts_return = "ReadableStream<Uint8Array>")]
     fn readable(&self, ctx: JSContext) -> Option<JSObject> {
         let file = self.file.clone();
@@ -172,6 +188,7 @@ impl FileHandle {
             .ok()
     }
 
+    /// Writable byte stream backed by this handle.
     #[js_method(getter, ts_return = "WritableStream<Uint8Array>")]
     fn writable(&self) -> JSResult<WritableStream> {
         let file = self.file.clone();
@@ -217,9 +234,9 @@ impl FileHandle {
 pub(crate) async fn open_file_internal(
     resolved: &Path,
     display_path: &str,
-    option: Option<FileOpenOption>,
+    option: Option<FileOpenOptions>,
 ) -> JSResult<FileHandle> {
-    let opts = option.unwrap_or(FileOpenOption {
+    let opts = option.unwrap_or(FileOpenOptions {
         read: None,
         write: None,
         append: None,
@@ -298,11 +315,6 @@ pub(crate) async fn open_file_internal(
 }
 
 pub(crate) fn init(ctx: &JSContext) -> JSResult<()> {
-    let rong = ctx.host_namespace();
-
     ctx.register_hidden_class::<FileHandle>()?;
-
-    rong.set("SeekMode", SeekMode::js_object(ctx)?)?;
-
     Ok(())
 }

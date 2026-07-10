@@ -2,18 +2,20 @@
 name = "rong_typedef"
 version = "0.4.0"
 edition.workspace = true
-# Dev-only tooling: never published, never in the runtime dependency graph.
-publish = false
-
-description = "TypeScript type-definition model, Rust→TS mapping, source extractor, and renderer for RongJS bindings"
+description = "Shared declaration syntax and TypeScript type generation for RongJS bindings"
 license.workspace = true
 repository.workspace = true
 homepage.workspace = true
 rust-version.workspace = true
+keywords.workspace = true
+categories.workspace = true
+include = ["Cargo.toml", "src/**", "profiles/logic-web.d.ts"]
+
+[features]
+default = ["typegen"]
+typegen = []
 
 [dependencies]
+proc-macro2 = "1.0"
+quote = "1.0"
 syn = { workspace = true }
-serde = { workspace = true }
-
-[dev-dependencies]
-serde_json = { workspace = true }

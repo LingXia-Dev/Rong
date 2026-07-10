@@ -13,6 +13,7 @@
   },
   "scripts": {
     "build": "tsc",
+    "check:profiles": "tsc -p ../../rong_typedef/profiles/tsconfig.json",
     "watch": "tsc --watch",
     "prepare": "npm run build",
     "prepublishOnly": "npm run build"

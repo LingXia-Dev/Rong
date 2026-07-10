@@ -51,9 +51,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }`;
 
 const classBindings = `use rong::*;
-use rong::{js_class, js_export, js_method};
+use rong::{js_class, js_method};
 
-#[js_export]
+#[js_class]
 struct Point { x: i32, y: i32 }
 
 #[js_class(rename = "Point2D")]

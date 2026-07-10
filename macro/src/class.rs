@@ -1,6 +1,7 @@
 use proc_macro2::TokenStream;
 use quote::quote;
-use syn::{Expr, ItemImpl, Lit, Meta};
+use rong_typedef::{js_method_options, parse_js_class_args};
+use syn::ItemImpl;
 
 /// Configuration options for JavaScript method/property bindings.
 ///
@@ -33,9 +34,9 @@ use syn::{Expr, ItemImpl, Lit, Meta};
 /// # Examples
 ///
 /// ```ignore
-/// use rong_macro::{js_export, js_method, js_class};
+/// use rong_macro::{js_class, js_method};
 ///
-/// #[js_export]
+/// #[js_class]
 /// struct MyStruct {
 ///     value: i32,
 /// }
@@ -46,7 +47,7 @@ use syn::{Expr, ItemImpl, Lit, Meta};
 ///     #[js_method(getter, enumerable)]
 ///     fn value(&self) -> i32 { self.value }
 ///
-///     #[js_method(setter)]
+///     #[js_method(setter, rename = "value")]
 ///     fn set_value(&mut self, v: i32) { self.value = v; }
 ///
 ///     // Read-only property (getter only)
@@ -54,35 +55,24 @@ use syn::{Expr, ItemImpl, Lit, Meta};
 ///     fn computed(&self) -> i32 { self.value * 2 }
 /// }
 /// ```
-#[derive(Default)]
-struct MethodOpts {
-    rename: Option<String>,
-    getter: bool,
-    setter: bool,
-    enumerable: bool,
-    gc_mark: bool,
-}
-
 /// Process method attributes and generate JavaScript bindings
 pub fn class_impl(input: &ItemImpl, attr: TokenStream) -> syn::Result<TokenStream> {
+    if !input.generics.params.is_empty() {
+        return Err(syn::Error::new_spanned(
+            &input.generics,
+            "#[js_class] does not support generic impl blocks",
+        ));
+    }
     let impl_type = &input.self_ty;
 
     // Get class name from js_class attribute if present
-    let mut js_export_name = quote!(#impl_type).to_string();
+    let mut js_class_name = quote!(#impl_type).to_string();
 
-    // Parse the rename attribute from the macro arguments
-    if !attr.is_empty() {
-        let meta = syn::parse2::<Meta>(attr)?;
-        if let Meta::NameValue(nv) = meta
-            && nv.path.is_ident("rename")
-            && let Expr::Lit(expr_lit) = nv.value
-            && let Lit::Str(s) = expr_lit.lit
-        {
-            js_export_name = s.value();
-        }
+    if let Some(rename) = parse_js_class_args(attr)?.rename {
+        js_class_name = rename;
     }
 
-    let js_export_name = syn::LitStr::new(&js_export_name, proc_macro2::Span::call_site());
+    let js_class_name = syn::LitStr::new(&js_class_name, proc_macro2::Span::call_site());
 
     let mut instance_methods = Vec::new();
     let mut static_methods = Vec::new();
@@ -103,55 +93,18 @@ pub fn class_impl(input: &ItemImpl, attr: TokenStream) -> syn::Result<TokenStrea
             _ => continue,
         };
 
-        // Skip methods that don't have #[js_method] attribute
-        if !method
-            .attrs
-            .iter()
-            .any(|attr| path_last_is(attr.path(), "js_method"))
-        {
+        let Some(opts) = js_method_options(&method.attrs)? else {
             continue;
-        }
+        };
 
         let method_name = &method.sig.ident;
         let is_async = method.sig.asyncness.is_some();
 
-        // Parse method attributes
-        let mut opts = MethodOpts::default();
-        for attr in &method.attrs {
-            if path_last_is(attr.path(), "js_method")
-                && let Meta::List(list) = &attr.meta
-            {
-                for nested in list.parse_args_with(
-                    syn::punctuated::Punctuated::<Meta, syn::Token![,]>::parse_terminated,
-                )? {
-                    match nested {
-                        Meta::Path(path) => {
-                            if path.is_ident("getter") {
-                                opts.getter = true;
-                            } else if path.is_ident("setter") {
-                                opts.setter = true;
-                            } else if path.is_ident("enumerable") {
-                                opts.enumerable = true;
-                            } else if path.is_ident("gc_mark") {
-                                opts.gc_mark = true;
-                            }
-                        }
-                        Meta::NameValue(nv) => {
-                            if nv.path.is_ident("rename")
-                                && let Expr::Lit(expr_lit) = &nv.value
-                                && let Lit::Str(s) = &expr_lit.lit
-                            {
-                                opts.rename = Some(s.value());
-                            }
-                        }
-                        _ => {}
-                    }
-                }
-            }
-        }
-
         let js_name = syn::LitStr::new(
-            &opts.rename.unwrap_or_else(|| method_name.to_string()),
+            &opts
+                .rename
+                .clone()
+                .unwrap_or_else(|| method_name.to_string()),
             method_name.span(),
         );
 
@@ -175,22 +128,13 @@ pub fn class_impl(input: &ItemImpl, attr: TokenStream) -> syn::Result<TokenStrea
             }
         }
 
-        // Check if this is a constructor. Scan all metas so `constructor` is
-        // recognized even alongside other options (e.g. `ts_args`).
-        if method.attrs.iter().any(|attr| {
-            path_last_is(attr.path(), "js_method")
-                && attr
-                    .meta
-                    .require_list()
-                    .ok()
-                    .and_then(|list| {
-                        list.parse_args_with(
-                            syn::punctuated::Punctuated::<Meta, syn::Token![,]>::parse_terminated,
-                        )
-                        .ok()
-                    })
-                    .is_some_and(|metas| metas.iter().any(|m| m.path().is_ident("constructor")))
-        }) {
+        if opts.constructor {
+            if constructor.is_some() {
+                return Err(syn::Error::new_spanned(
+                    method,
+                    "a js_class cannot declare more than one constructor",
+                ));
+            }
             constructor = Some(quote! {
                 fn data_constructor() -> rong::function::Constructor<rong::JSEngineValue> {
                     rong::function::Constructor::new(Self::#method_name)
@@ -474,7 +418,7 @@ pub fn class_impl(input: &ItemImpl, attr: TokenStream) -> syn::Result<TokenStrea
 
     let output = quote! {
         impl rong::JSClass<rong::JSEngineValue> for #impl_type {
-            const NAME: &'static str = #js_export_name;
+            const NAME: &'static str = #js_class_name;
 
             #constructor
 
@@ -492,19 +436,11 @@ pub fn class_impl(input: &ItemImpl, attr: TokenStream) -> syn::Result<TokenStrea
     Ok(output)
 }
 
-fn path_last_is(path: &syn::Path, name: &str) -> bool {
-    path.segments
-        .last()
-        .is_some_and(|segment| segment.ident == name)
-}
-
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     #[test]
     fn qualified_js_method_attributes_match_runtime_extraction() {
         let path: syn::Path = syn::parse_quote!(rong::js_method);
-        assert!(path_last_is(&path, "js_method"));
+        assert!(rong_typedef::path_last_is(&path, "js_method"));
     }
 }

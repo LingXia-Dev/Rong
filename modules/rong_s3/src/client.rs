@@ -1,4 +1,4 @@
-use crate::config::{S3Config, S3ConfigOverlay};
+use crate::config::S3Config;
 use crate::file::{S3File, resolve_body};
 use crate::types::{
     S3ClientListOptions, S3ClientOptions, S3ClientPresignOptions, S3ClientWriteOptions,
@@ -13,7 +13,7 @@ fn s3_error(msg: impl Into<String>) -> RongJSError {
 }
 
 /// S3-compatible object storage client.
-#[js_export]
+#[js_class]
 pub struct S3Client {
     pub(crate) config: Rc<S3Config>,
     namespace_prefix: Option<String>,
@@ -102,13 +102,15 @@ where
         .as_ref()
         .map(|object| {
             let ctx = object.context();
-            T::from_js_value(&ctx, object.clone().into_js_value(&ctx))
+            T::from_js_value(&ctx, object.clone().into_js_value())
         })
         .transpose()
 }
 
+/// S3-compatible object-storage client.
 #[js_class]
 impl S3Client {
+    /// Construct a client from explicit options or the process environment.
     #[js_method(constructor)]
     fn js_new(options: Optional<S3ClientOptions>) -> JSResult<Self> {
         let config = S3Config::from_options(options.0);
@@ -121,7 +123,7 @@ impl S3Client {
     /// Lazy file reference — no network request.
     #[js_method(
         ts_return = "S3File",
-        ts_args = "path: string, options?: S3ClientOptions"
+        ts_params = "path: string, options?: S3ClientOptions"
     )]
     fn file(
         &self,
@@ -140,8 +142,9 @@ impl S3Client {
         Ok(Class::lookup::<S3File>(&ctx)?.instance(file))
     }
 
+    /// Write an object and return the number of bytes uploaded.
     #[js_method(
-        ts_args = "path: string, data: string | ArrayBuffer | Uint8Array, options?: S3WriteOptions & S3ClientOptions"
+        ts_params = "path: string, data: string | ArrayBuffer | Uint8Array, options?: S3WriteOptions & S3ClientOptions"
     )]
     async fn write(
         &self,
@@ -174,6 +177,7 @@ impl S3Client {
         Ok(content_bytes.len() as f64)
     }
 
+    /// Delete an object.
     #[js_method]
     async fn delete(&self, path: String) -> JSResult<()> {
         let path = self.prefixed_path(&path);
@@ -185,11 +189,13 @@ impl S3Client {
         Ok(())
     }
 
+    /// Delete an object (alias of `delete`).
     #[js_method]
     async fn unlink(&self, path: String) -> JSResult<()> {
         Self::delete(self, path).await
     }
 
+    /// Test whether an object exists.
     #[js_method]
     async fn exists(&self, path: String) -> JSResult<bool> {
         let path = self.prefixed_path(&path);
@@ -200,6 +206,7 @@ impl S3Client {
         }
     }
 
+    /// Return an object's size in bytes.
     #[js_method]
     async fn size(&self, path: String) -> JSResult<f64> {
         let path = self.prefixed_path(&path);
@@ -211,6 +218,7 @@ impl S3Client {
         Ok(head.content_length.unwrap_or(0) as f64)
     }
 
+    /// Read object metadata without downloading its body.
     #[js_method]
     async fn stat(&self, path: String) -> JSResult<S3StatResult> {
         let path = self.prefixed_path(&path);
@@ -228,7 +236,8 @@ impl S3Client {
         })
     }
 
-    #[js_method(ts_args = "path: string, options?: S3PresignOptions & S3ClientOptions")]
+    /// Generate a presigned object URL.
+    #[js_method(ts_params = "path: string, options?: S3PresignOptions & S3ClientOptions")]
     async fn presign(&self, path: String, options: Optional<JSObject>) -> JSResult<String> {
         self.reject_config_override(&options, &["expiresIn", "method"])?;
         let options = typed_options::<S3ClientPresignOptions>(&options)?;
@@ -272,7 +281,8 @@ impl S3Client {
         }
     }
 
-    #[js_method(ts_args = "options?: S3ListOptions & S3ClientOptions")]
+    /// List objects in the configured bucket.
+    #[js_method(ts_params = "options?: S3ListOptions & S3ClientOptions")]
     async fn list(&self, options: Optional<JSObject>) -> JSResult<S3ListResult> {
         self.reject_config_override(&options, &["prefix", "maxKeys", "startAfter"])?;
         let options = typed_options::<S3ClientListOptions>(&options)?;

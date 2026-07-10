@@ -2,7 +2,7 @@ use futures::StreamExt;
 use redis::{AsyncCommands, Client, Value as RedisValue};
 use rong::{
     HostError, IntoJSValue, JSArray, JSContext, JSObject, JSResult, JSValue, function::Optional,
-    js_class, js_export, js_method,
+    js_class, js_method,
 };
 use rong_abort::AbortSignal;
 use std::cell::{Cell, RefCell};
@@ -19,7 +19,7 @@ struct RedisSubscriptionMessage {
     message: String,
 }
 
-#[js_export]
+#[js_class]
 pub struct RedisSubscription {
     id: u64,
     channel: String,
@@ -59,7 +59,7 @@ impl RedisSubscription {
 
 #[js_class]
 impl RedisSubscription {
-    #[js_method(constructor)]
+    #[js_method(constructor, private)]
     fn new() -> JSResult<Self> {
         rong::illegal_constructor(
             "Not allowed 'new RedisSubscription()'. Use client.subscribe(channel) instead.",
@@ -124,7 +124,7 @@ impl RedisSubscription {
     }
 }
 
-#[js_export]
+#[js_class]
 pub struct RedisClient {
     url: String,
     conn: Rc<RefCell<Option<redis::aio::MultiplexedConnection>>>,

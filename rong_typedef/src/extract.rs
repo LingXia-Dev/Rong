@@ -2,35 +2,78 @@
 //!
 //! The generator parses a crate's `.rs` files with `syn` and feeds each item
 //! here. [`extract_impl`] turns a `#[js_class] impl` into a class descriptor;
-//! [`extract_struct`] turns a `#[derive(FromJSObj)]` / `IntoJSObj` struct into
+//! [`extract_struct`] turns a `#[derive(FromJSObject)]` / `IntoJSObject` struct into
 //! an interface. Everything is pure AST → descriptor, so it is unit-testable
 //! and shared by any crate's generation (rong's modules or `lingxia-logic`).
 
 use crate::map::{array_of, is_injected, map_return, rust_type_to_ts};
 use crate::model::{
-    ClassDef, ConstEnumDef, ConstEnumVariant, Field, FnSig, InterfaceDef, Item, Member, MemberKind,
-    Param,
+    ClassDef, Field, FnSig, FunctionDef, InterfaceDef, Item, Member, MemberKind, NumericEnumDef,
+    NumericEnumVariant, Param, TypeAliasDef,
+};
+use crate::{
+    JsFieldOptions, JsMethodOptions, js_class_options, js_field_options, js_method_options,
+    u32_integer_expr,
 };
 use std::collections::HashSet;
 use syn::{
-    Attribute, Expr, FnArg, ImplItem, ImplItemFn, ItemEnum, ItemImpl, ItemStruct, Lit, Meta, Pat,
-    ReturnType, Type,
+    Attribute, Expr, FnArg, ImplItem, ImplItemFn, ItemEnum, ItemFn, ItemImpl, ItemStruct, Lit,
+    Meta, Pat, ReturnType, Signature, Type,
 };
 
+/// Extract a namespace function signature from a registered Rust function.
+pub fn extract_function(
+    input: &ItemFn,
+    name: String,
+    ts_params: Option<String>,
+    ts_return: Option<String>,
+) -> FunctionDef {
+    let is_async = input.sig.asyncness.is_some();
+    let ret = overridden_return(ts_return.as_deref(), is_async)
+        .unwrap_or_else(|| return_ts(&input.sig, is_async, None));
+    FunctionDef {
+        name,
+        docs: doc_lines(&input.attrs),
+        sig: FnSig {
+            params: params(&input.sig),
+            ret,
+            raw_params: ts_params,
+        },
+    }
+}
+
 /// Extract a class descriptor from an `impl` block, if it carries `#[js_class]`.
-pub fn extract_impl(input: &ItemImpl) -> Option<Item> {
-    let class_rename = js_class_rename(&input.attrs)?;
-    let name = class_rename.or_else(|| type_name(&input.self_ty))?;
+pub fn extract_impl(input: &ItemImpl) -> syn::Result<Option<Item>> {
+    let Some(class_options) = js_class_options(&input.attrs)? else {
+        return Ok(None);
+    };
+    if !input.generics.params.is_empty() {
+        return Err(syn::Error::new_spanned(
+            &input.generics,
+            "#[js_class] does not support generic impl blocks",
+        ));
+    }
+    let Some(name) = class_options.rename.or_else(|| type_name(&input.self_ty)) else {
+        return Ok(None);
+    };
     if name.is_empty() {
-        return None; // e.g. a `#[js_class]` on an unnamed/complex self type
+        return Ok(None); // e.g. a `#[js_class]` on an unnamed/complex self type
     }
 
     let mut constructor = None;
+    let mut constructor_docs = Vec::new();
     let mut private_constructor = false;
     let mut members = Vec::new();
 
     // Parse each method's options once.
-    let parsed: Vec<(&ImplItemFn, Opts)> = fns(input).map(|m| (m, parse_opts(m))).collect();
+    let parsed: Vec<(&ImplItemFn, JsMethodOptions)> = fns(input)
+        .map(|method| {
+            Ok((
+                method,
+                js_method_options(&method.attrs)?.expect("filtered method"),
+            ))
+        })
+        .collect::<syn::Result<_>>()?;
     // A getter that also has a setter is a read/write property, not readonly.
     let setter_names: HashSet<String> = parsed
         .iter()
@@ -47,13 +90,20 @@ pub fn extract_impl(input: &ItemImpl) -> Option<Item> {
         let member_name = js_name(m, opts);
 
         if opts.constructor {
-            if constructor_rejects(m) {
+            if constructor.is_some() || private_constructor {
+                return Err(syn::Error::new_spanned(
+                    m,
+                    "a js_class cannot declare more than one constructor",
+                ));
+            }
+            constructor_docs = doc_lines(&m.attrs);
+            if opts.private {
                 private_constructor = true;
             } else {
                 constructor = Some(FnSig {
-                    params: params(m),
+                    params: params(&m.sig),
                     ret: String::new(),
-                    raw_params: opts.ts_args.clone(),
+                    raw_params: opts.ts_params.clone(),
                 });
             }
             continue;
@@ -90,110 +140,153 @@ pub fn extract_impl(input: &ItemImpl) -> Option<Item> {
         members.push(member);
     }
 
-    Some(Item::Class(ClassDef {
+    Ok(Some(Item::Class(ClassDef {
         name,
         docs: doc_lines(&input.attrs),
         constructor,
+        constructor_docs,
         private_constructor,
         members,
-    }))
-}
-
-/// Whether a constructor body rejects direct construction by calling
-/// `illegal_constructor(...)` — in a bare expr, a `let`, a `return`/`?`, or
-/// nested in a block/`if`.
-fn constructor_rejects(m: &ImplItemFn) -> bool {
-    stmts_call_illegal(&m.block.stmts)
-}
-
-fn stmts_call_illegal(stmts: &[syn::Stmt]) -> bool {
-    stmts.iter().any(|s| match s {
-        syn::Stmt::Expr(e, _) => expr_calls_illegal(e),
-        syn::Stmt::Local(l) => l.init.as_ref().is_some_and(|i| expr_calls_illegal(&i.expr)),
-        _ => false,
-    })
-}
-
-fn expr_calls_illegal(e: &Expr) -> bool {
-    match e {
-        Expr::Call(c) => {
-            matches!(&*c.func, Expr::Path(p) if path_last_is(&p.path, "illegal_constructor"))
-        }
-        Expr::Return(r) => r.expr.as_deref().is_some_and(expr_calls_illegal),
-        Expr::Try(t) => expr_calls_illegal(&t.expr),
-        Expr::Block(b) => stmts_call_illegal(&b.block.stmts),
-        Expr::If(i) => {
-            stmts_call_illegal(&i.then_branch.stmts)
-                || i.else_branch
-                    .as_ref()
-                    .is_some_and(|(_, e)| expr_calls_illegal(e))
-        }
-        _ => false,
-    }
+    })))
 }
 
 /// True if this impl carries `#[js_method]` fns but no `#[js_class]`, so its
 /// methods would be silently dropped. Callers can warn.
 pub fn has_orphan_js_methods(input: &ItemImpl) -> bool {
-    js_class_rename(&input.attrs).is_none() && fns(input).next().is_some()
+    !input
+        .attrs
+        .iter()
+        .any(|attr| path_last_is(attr.path(), "js_class"))
+        && fns(input).next().is_some()
 }
 
-/// Extract an interface from a struct that derives `FromJSObj` or `IntoJSObj`.
-pub fn extract_struct(input: &ItemStruct) -> Option<Item> {
-    if !derives_js_obj(&input.attrs) || has_ident_attr(&input.attrs, "ts_skip") {
-        return None;
+/// Extract an interface from a struct that derives `FromJSObject` or `IntoJSObject`.
+pub fn extract_struct(input: &ItemStruct) -> syn::Result<Option<Item>> {
+    let struct_options = js_field_options(&input.attrs)?;
+    if !derives_js_obj(&input.attrs) || struct_options.ts_skip {
+        return Ok(None);
+    }
+    if !input.generics.params.is_empty() {
+        return Err(syn::Error::new_spanned(
+            &input.generics,
+            "FromJSObject and IntoJSObject do not support generic structs",
+        ));
     }
     let syn::Fields::Named(named) = &input.fields else {
-        return None;
+        return Ok(None);
     };
 
     let fields = named
         .named
         .iter()
-        .map(|f| {
+        .map(|f| -> syn::Result<Field> {
+            let options = js_field_options(&f.attrs)?;
+            if options.ts_skip {
+                return Err(syn::Error::new_spanned(
+                    f,
+                    "ts_skip is only valid on a derived struct",
+                ));
+            }
             let rust_name = f.ident.as_ref().map(|i| i.to_string()).unwrap_or_default();
-            let (ts_type, optional) = field_ts(&f.attrs, &f.ty);
-            Field {
-                name: field_js_name(&f.attrs, &rust_name),
+            let (ts_type, optional) = field_ts(&options, &f.ty);
+            Ok(Field {
+                name: options.js_name.unwrap_or(rust_name),
                 ts_type,
                 optional,
                 readonly: false,
                 docs: doc_lines(&f.attrs),
-            }
+            })
         })
-        .collect();
+        .collect::<syn::Result<_>>()?;
 
-    Some(Item::Interface(InterfaceDef {
+    Ok(Some(Item::Interface(InterfaceDef {
         name: input.ident.to_string(),
         docs: doc_lines(&input.attrs),
         fields,
-    }))
+    })))
 }
 
-/// Extract a numeric constant enum from `#[js_const_enum]`.
-pub fn extract_const_enum(input: &ItemEnum) -> Option<Item> {
-    if !has_ident_attr(&input.attrs, "js_const_enum") {
-        return None;
+/// Extract a numeric constant enum from `#[js_numeric_enum]`.
+pub fn extract_numeric_enum(input: &ItemEnum) -> syn::Result<Option<Item>> {
+    if !has_ident_attr(&input.attrs, "js_numeric_enum") {
+        return Ok(None);
+    }
+
+    if !input.generics.params.is_empty() {
+        return Err(syn::Error::new_spanned(
+            &input.generics,
+            "js_numeric_enum does not support generic enums",
+        ));
     }
 
     let variants = input
         .variants
         .iter()
-        .filter_map(|v| {
-            let (_, expr) = v.discriminant.as_ref()?;
-            Some(ConstEnumVariant {
+        .map(|v| -> syn::Result<NumericEnumVariant> {
+            if !matches!(v.fields, syn::Fields::Unit) {
+                return Err(syn::Error::new_spanned(
+                    &v.fields,
+                    "js_numeric_enum only supports unit variants",
+                ));
+            }
+            let (_, expr) = v.discriminant.as_ref().ok_or_else(|| {
+                syn::Error::new_spanned(
+                    v,
+                    "js_numeric_enum variants must have explicit integer values",
+                )
+            })?;
+            Ok(NumericEnumVariant {
                 name: v.ident.to_string(),
-                value: integer_expr(expr)?,
+                value: u32_integer_expr(expr)?,
                 docs: doc_lines(&v.attrs),
             })
         })
-        .collect();
+        .collect::<syn::Result<_>>()?;
 
-    Some(Item::ConstEnum(ConstEnumDef {
+    Ok(Some(Item::NumericEnum(NumericEnumDef {
         name: input.ident.to_string(),
         docs: doc_lines(&input.attrs),
         variants,
-    }))
+    })))
+}
+
+/// Extract an untagged `#[js_union]` enum as a TypeScript union alias.
+pub fn extract_union(input: &ItemEnum) -> syn::Result<Option<Item>> {
+    if !has_ident_attr(&input.attrs, "js_union") {
+        return Ok(None);
+    }
+    if has_ident_attr(&input.attrs, "js_numeric_enum") {
+        return Err(syn::Error::new_spanned(
+            input,
+            "an enum cannot be both #[js_union] and #[js_numeric_enum]",
+        ));
+    }
+    if !input.generics.params.is_empty() {
+        return Err(syn::Error::new_spanned(
+            &input.generics,
+            "#[js_union] does not support generic enums",
+        ));
+    }
+
+    let variants = input
+        .variants
+        .iter()
+        .map(|variant| match &variant.fields {
+            syn::Fields::Unnamed(fields) if fields.unnamed.len() == 1 => {
+                Ok(rust_type_to_ts(&fields.unnamed[0].ty).text)
+            }
+            _ => Err(syn::Error::new_spanned(
+                &variant.fields,
+                "#[js_union] variants must contain exactly one unnamed field",
+            )),
+        })
+        .collect::<syn::Result<Vec<_>>>()?;
+
+    Ok(Some(Item::TypeAlias(TypeAliasDef {
+        name: input.ident.to_string(),
+        ts_type: variants.join(" | "),
+        docs: doc_lines(&input.attrs),
+    })))
 }
 
 // ---- class helpers ----
@@ -205,93 +298,40 @@ fn fns(input: &ItemImpl) -> impl Iterator<Item = &ImplItemFn> {
     })
 }
 
-#[derive(Default)]
-struct Opts {
-    rename: Option<String>,
-    getter: bool,
-    setter: bool,
-    gc_mark: bool,
-    constructor: bool,
-    ts_return: Option<String>,
-    ts_args: Option<String>,
-}
-
-fn parse_opts(m: &ImplItemFn) -> Opts {
-    let mut opts = Opts::default();
-    for attr in &m.attrs {
-        if !path_last_is(attr.path(), "js_method") {
-            continue;
-        }
-        let Meta::List(list) = &attr.meta else {
-            continue;
-        };
-        let Ok(nested) = list
-            .parse_args_with(syn::punctuated::Punctuated::<Meta, syn::Token![,]>::parse_terminated)
-        else {
-            continue;
-        };
-        for meta in nested {
-            match meta {
-                Meta::Path(p) if p.is_ident("getter") => opts.getter = true,
-                Meta::Path(p) if p.is_ident("setter") => opts.setter = true,
-                Meta::Path(p) if p.is_ident("gc_mark") => opts.gc_mark = true,
-                Meta::Path(p) if p.is_ident("constructor") => opts.constructor = true,
-                Meta::NameValue(nv) => {
-                    if let Expr::Lit(e) = &nv.value
-                        && let Lit::Str(s) = &e.lit
-                    {
-                        if nv.path.is_ident("rename") {
-                            opts.rename = Some(s.value());
-                        } else if nv.path.is_ident("ts_return") {
-                            opts.ts_return = Some(s.value());
-                        } else if nv.path.is_ident("ts_args") {
-                            opts.ts_args = Some(s.value());
-                        }
-                    }
-                }
-                _ => {}
-            }
-        }
-    }
-    opts
-}
-
-fn js_name(m: &ImplItemFn, opts: &Opts) -> String {
+fn js_name(m: &ImplItemFn, opts: &JsMethodOptions) -> String {
     opts.rename
         .clone()
         .unwrap_or_else(|| m.sig.ident.to_string())
 }
 
-/// Build a signature, applying `ts_return`/`ts_args` overrides when present.
+/// Build a signature, applying `ts_return`/`ts_params` overrides when present.
 fn make_sig(
     m: &ImplItemFn,
-    opts: &Opts,
+    opts: &JsMethodOptions,
     is_async: bool,
     include_params: bool,
     self_name: &str,
 ) -> FnSig {
-    let params = if include_params { params(m) } else { vec![] };
+    let params = if include_params {
+        params(&m.sig)
+    } else {
+        vec![]
+    };
     // A `ts_return` hatch gives the *inner* type; async wrapping still applies,
     // so an async method with `ts_return = "T"` renders `Promise<T>`. Don't
     // double-wrap if a hatch already spelled out `Promise<…>`.
-    let ret = match &opts.ts_return {
-        Some(t) if is_async && !t.trim_start().starts_with("Promise<") => {
-            format!("Promise<{t}>")
-        }
-        Some(t) => t.clone(),
-        None => return_ts(m, is_async, self_name),
-    };
+    let ret = overridden_return(opts.ts_return.as_deref(), is_async)
+        .unwrap_or_else(|| return_ts(&m.sig, is_async, Some(self_name)));
     FnSig {
         params,
         ret,
-        raw_params: opts.ts_args.clone(),
+        raw_params: opts.ts_params.clone(),
     }
 }
 
 /// JS-visible parameters: drop the receiver and runtime-injected params.
-fn params(m: &ImplItemFn) -> Vec<Param> {
-    m.sig
-        .inputs
+fn params(sig: &Signature) -> Vec<Param> {
+    sig.inputs
         .iter()
         .enumerate()
         .filter_map(|(i, arg)| match arg {
@@ -331,8 +371,8 @@ fn pat_name(pat: &Pat, index: usize) -> String {
     }
 }
 
-fn return_ts(m: &ImplItemFn, is_async: bool, self_name: &str) -> String {
-    let ret = match &m.sig.output {
+fn return_ts(sig: &Signature, is_async: bool, self_name: Option<&str>) -> String {
+    let ret = match &sig.output {
         ReturnType::Default => {
             if is_async {
                 "Promise<void>".to_string()
@@ -342,9 +382,20 @@ fn return_ts(m: &ImplItemFn, is_async: bool, self_name: &str) -> String {
         }
         ReturnType::Type(_, ty) => map_return(ty, is_async),
     };
-    // `Self` (builder methods returning `Self`) names the class in TS. Replace
-    // only whole-word `Self` tokens, so a user type like `SelfTest` is intact.
-    replace_ident(&ret, "Self", self_name)
+    match self_name {
+        Some(self_name) => replace_ident(&ret, "Self", self_name),
+        None => ret,
+    }
+}
+
+fn overridden_return(ts_return: Option<&str>, is_async: bool) -> Option<String> {
+    match ts_return {
+        Some(value) if is_async && !value.trim_start().starts_with("Promise<") => {
+            Some(format!("Promise<{value}>"))
+        }
+        Some(value) => Some(value.to_string()),
+        None => None,
+    }
 }
 
 /// Replace whole-identifier occurrences of `ident` in `text` with `to`. Unlike
@@ -369,24 +420,6 @@ fn replace_ident(text: &str, ident: &str, to: &str) -> String {
     out
 }
 
-/// The rename in `#[js_class(rename = "…")]`, wrapped so a present `#[js_class]`
-/// returns `Some` (with `None` inside when no rename), absent returns `None`.
-fn js_class_rename(attrs: &[Attribute]) -> Option<Option<String>> {
-    let attr = attrs.iter().find(|a| path_last_is(a.path(), "js_class"))?;
-    Some(match &attr.meta {
-        Meta::List(list) => list
-            .parse_args_with(syn::punctuated::Punctuated::<Meta, syn::Token![,]>::parse_terminated)
-            .ok()
-            .and_then(|nested| {
-                nested.into_iter().find_map(|m| match m {
-                    Meta::NameValue(nv) if nv.path.is_ident("rename") => str_lit(&nv.value),
-                    _ => None,
-                })
-            }),
-        _ => None,
-    })
-}
-
 fn type_name(ty: &Type) -> Option<String> {
     match ty {
         Type::Path(p) => p.path.segments.last().map(|s| s.ident.to_string()),
@@ -405,7 +438,7 @@ fn derives_js_obj(attrs: &[Attribute]) -> bool {
             .map(|paths| {
                 paths
                     .iter()
-                    .any(|p| path_last_is(p, "FromJSObj") || path_last_is(p, "IntoJSObj"))
+                    .any(|p| path_last_is(p, "FromJSObject") || path_last_is(p, "IntoJSObject"))
             })
             .unwrap_or(false)
     })
@@ -413,9 +446,9 @@ fn derives_js_obj(attrs: &[Attribute]) -> bool {
 
 /// A struct field's TS type and optionality: `Option<T>`/`Optional<T>` render as
 /// an optional field of `T` (not `T | null`).
-fn field_ts(attrs: &[Attribute], ty: &Type) -> (String, bool) {
-    let explicit = attr_str(attrs, "ts_type");
-    if (last_ident_is(ty, "Option") || last_ident_is(ty, "Optional"))
+fn field_ts(options: &JsFieldOptions, ty: &Type) -> (String, bool) {
+    let explicit = options.ts_type.clone();
+    if last_ident_is(ty, "Option")
         && let Some(inner) = generic_arg0(ty)
     {
         return (
@@ -423,12 +456,10 @@ fn field_ts(attrs: &[Attribute], ty: &Type) -> (String, bool) {
             true,
         );
     }
-    (explicit.unwrap_or_else(|| rust_type_to_ts(ty).text), false)
-}
-
-/// Field name honoring `#[rename = "…"]` (the derives' field attribute).
-fn field_js_name(attrs: &[Attribute], rust_name: &str) -> String {
-    attr_str(attrs, "rename").unwrap_or_else(|| rust_name.to_string())
+    (
+        explicit.unwrap_or_else(|| rust_type_to_ts(ty).text),
+        options.default.is_some(),
+    )
 }
 
 // ---- shared helpers ----
@@ -437,19 +468,8 @@ fn has_ident_attr(attrs: &[Attribute], ident: &str) -> bool {
     attrs.iter().any(|a| path_last_is(a.path(), ident))
 }
 
-fn attr_str(attrs: &[Attribute], ident: &str) -> Option<String> {
-    attrs.iter().find_map(|a| {
-        if a.path().is_ident(ident)
-            && let Meta::NameValue(nv) = &a.meta
-        {
-            return str_lit(&nv.value);
-        }
-        None
-    })
-}
-
 /// Match an attribute/derive by its final path segment, so a qualified form
-/// like `#[rong::js_class]` or `#[derive(rong::FromJSObj)]` still matches.
+/// like `#[rong::js_class]` or `#[derive(rong::FromJSObject)]` still matches.
 fn path_last_is(path: &syn::Path, name: &str) -> bool {
     path.segments.last().is_some_and(|s| s.ident == name)
 }
@@ -458,16 +478,6 @@ fn str_lit(expr: &Expr) -> Option<String> {
     match expr {
         Expr::Lit(e) => match &e.lit {
             Lit::Str(s) => Some(s.value()),
-            _ => None,
-        },
-        _ => None,
-    }
-}
-
-fn integer_expr(expr: &Expr) -> Option<u32> {
-    match expr {
-        Expr::Lit(e) => match &e.lit {
-            Lit::Int(lit) => lit.base10_parse().ok(),
             _ => None,
         },
         _ => None,
@@ -507,7 +517,7 @@ mod tests {
     use super::*;
 
     fn class(input: syn::ItemImpl) -> ClassDef {
-        match extract_impl(&input).unwrap() {
+        match extract_impl(&input).unwrap().unwrap() {
             Item::Class(c) => c,
             _ => panic!("expected class"),
         }
@@ -517,7 +527,7 @@ mod tests {
     fn only_js_class_impls_are_extracted() {
         // No #[js_class] -> not extracted.
         let plain: syn::ItemImpl = syn::parse_quote! { impl Foo { fn bar(&self) {} } };
-        assert!(extract_impl(&plain).is_none());
+        assert!(extract_impl(&plain).unwrap().is_none());
     }
 
     #[test]
@@ -581,11 +591,11 @@ mod tests {
     }
 
     #[test]
-    fn illegal_constructor_becomes_private() {
+    fn explicit_private_constructor_becomes_private() {
         let c = class(syn::parse_quote! {
             #[js_class]
             impl Statement {
-                #[js_method(constructor)]
+                #[js_method(constructor, private)]
                 fn new() -> JSResult<Self> {
                     rong::illegal_constructor("use db.prepare(sql)")
                 }
@@ -638,7 +648,8 @@ mod tests {
                 #[rong::js_method]
                 fn go(&self) -> JSResult<()> { unimplemented!() }
             }
-        });
+        })
+        .unwrap();
         assert!(matches!(c, Some(Item::Class(_))));
     }
 
@@ -666,7 +677,7 @@ mod tests {
                 #[js_method]
                 async fn load(&self) -> JSResult<String> { unimplemented!() }
 
-                #[js_method(ts_return = "RunResult", ts_args = "sql: string, params?: SQLiteParams")]
+                #[js_method(ts_return = "RunResult", ts_params = "sql: string, params?: SQLiteParams")]
                 fn run(&self, sql: String, params: Optional<JSArray>) -> JSResult<JSObject> { unimplemented!() }
             }
         });
@@ -684,17 +695,17 @@ mod tests {
     fn interface_from_derive_maps_fields() {
         let s: syn::ItemStruct = syn::parse_quote! {
             /// Options.
-            #[derive(FromJSObj, Default)]
+            #[derive(FromJSObject, Default)]
             struct SpawnOptions {
                 cmd: String,
-                #[rename = "maxBuffer"]
+                #[js_name = "maxBuffer"]
                 max_buffer: Option<u32>,
                 args: Vec<String>,
                 #[ts_type = "number | bigint"]
                 rowid: i64,
             }
         };
-        let Item::Interface(i) = extract_struct(&s).unwrap() else {
+        let Item::Interface(i) = extract_struct(&s).unwrap().unwrap() else {
             panic!("interface")
         };
         assert_eq!(i.name, "SpawnOptions");
@@ -712,13 +723,13 @@ mod tests {
     #[test]
     fn interface_field_ts_type_preserves_optionality() {
         let s: syn::ItemStruct = syn::parse_quote! {
-            #[derive(FromJSObj, Default)]
+            #[derive(FromJSObject, Default)]
             struct Options {
                 #[ts_type = "\"GET\" | \"PUT\""]
                 method: Option<String>,
             }
         };
-        let Item::Interface(i) = extract_struct(&s).unwrap() else {
+        let Item::Interface(i) = extract_struct(&s).unwrap().unwrap() else {
             panic!("interface")
         };
         assert_eq!(i.fields[0].ts_type, "\"GET\" | \"PUT\"");
@@ -726,22 +737,38 @@ mod tests {
     }
 
     #[test]
+    fn js_default_fields_are_optional() {
+        let s: syn::ItemStruct = syn::parse_quote! {
+            #[derive(FromJSObject, Default)]
+            struct Options {
+                #[js_default]
+                enabled: bool,
+            }
+        };
+        let Item::Interface(interface) = extract_struct(&s).unwrap().unwrap() else {
+            panic!("interface")
+        };
+        assert!(interface.fields[0].optional);
+        assert_eq!(interface.fields[0].ts_type, "boolean");
+    }
+
+    #[test]
     fn ts_skip_omits_internal_derive_structs() {
         let s: syn::ItemStruct = syn::parse_quote! {
-            #[derive(FromJSObj, Default)]
+            #[derive(FromJSObject, Default)]
             #[ts_skip]
             struct InternalOptions {
                 x: String,
             }
         };
-        assert!(extract_struct(&s).is_none());
+        assert!(extract_struct(&s).unwrap().is_none());
     }
 
     #[test]
-    fn const_enum_from_js_const_enum_attr() {
+    fn numeric_enum_from_js_numeric_enum_attr() {
         let e: syn::ItemEnum = syn::parse_quote! {
             /// Seek origin.
-            #[js_const_enum]
+            #[js_numeric_enum]
             enum SeekMode {
                 /// Seek from start.
                 Start = 0,
@@ -749,8 +776,8 @@ mod tests {
                 End = 2,
             }
         };
-        let Item::ConstEnum(e) = extract_const_enum(&e).unwrap() else {
-            panic!("const enum")
+        let Item::NumericEnum(e) = extract_numeric_enum(&e).unwrap().unwrap() else {
+            panic!("numeric enum")
         };
         assert_eq!(e.name, "SeekMode");
         assert_eq!(e.docs, vec!["Seek origin.".to_string()]);
@@ -761,8 +788,26 @@ mod tests {
     }
 
     #[test]
+    fn js_union_becomes_a_type_alias() {
+        let e: syn::ItemEnum = syn::parse_quote! {
+            /// A string or number.
+            #[js_union]
+            enum StringOrNumber {
+                String(String),
+                Number(f64),
+            }
+        };
+        let Item::TypeAlias(alias) = extract_union(&e).unwrap().unwrap() else {
+            panic!("type alias")
+        };
+        assert_eq!(alias.name, "StringOrNumber");
+        assert_eq!(alias.ts_type, "string | number");
+        assert_eq!(alias.docs, ["A string or number."]);
+    }
+
+    #[test]
     fn struct_without_derive_is_ignored() {
         let s: syn::ItemStruct = syn::parse_quote! { struct Plain { x: i32 } };
-        assert!(extract_struct(&s).is_none());
+        assert!(extract_struct(&s).unwrap().is_none());
     }
 }

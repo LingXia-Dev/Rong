@@ -1,4 +1,4 @@
-//! End-to-end: build a descriptor by hand, render it, and round-trip it.
+//! End-to-end descriptor rendering.
 
 use rong_typedef::model::*;
 use rong_typedef::render_module;
@@ -29,11 +29,6 @@ fn sqlite_module() -> ModuleTypeDef {
     ModuleTypeDef {
         module: "sqlite".into(),
         items: vec![
-            Item::TypeAlias(TypeAliasDef {
-                name: "SQLiteParams".into(),
-                docs: vec!["Supported parameter types.".into()],
-                value: "SQLiteParam[]".into(),
-            }),
             Item::Interface(InterfaceDef {
                 name: "RunResult".into(),
                 docs: vec!["Result of a write operation.".into()],
@@ -54,21 +49,21 @@ fn sqlite_module() -> ModuleTypeDef {
                     },
                 ],
             }),
-            Item::ConstEnum(ConstEnumDef {
+            Item::NumericEnum(NumericEnumDef {
                 name: "SeekMode".into(),
                 docs: vec!["Seek origin.".into()],
                 variants: vec![
-                    ConstEnumVariant {
+                    NumericEnumVariant {
                         name: "Start".into(),
                         value: 0,
                         docs: vec!["Seek from start.".into()],
                     },
-                    ConstEnumVariant {
+                    NumericEnumVariant {
                         name: "Current".into(),
                         value: 1,
                         docs: vec![],
                     },
-                    ConstEnumVariant {
+                    NumericEnumVariant {
                         name: "End".into(),
                         value: 2,
                         docs: vec![],
@@ -83,6 +78,7 @@ fn sqlite_module() -> ModuleTypeDef {
                     ret: String::new(),
                     ..Default::default()
                 }),
+                constructor_docs: vec![],
                 private_constructor: false,
                 members: vec![
                     Member {
@@ -120,9 +116,6 @@ fn sqlite_module() -> ModuleTypeDef {
 fn renders_expected_declarations() {
     let out = render_module(&sqlite_module());
     let expected = "\
-/** Supported parameter types. */
-export type SQLiteParams = SQLiteParam[];
-
 /** Result of a write operation. */
 export interface RunResult {
   /** Number of rows changed. */
@@ -153,11 +146,19 @@ export declare class SQLite {
 }
 
 #[test]
-fn descriptor_round_trips_through_json() {
-    let def = sqlite_module();
-    let json = serde_json::to_string(&def).unwrap();
-    let back: ModuleTypeDef = serde_json::from_str(&json).unwrap();
-    assert_eq!(def, back);
+fn renders_documented_type_alias() {
+    let out = render_module(&ModuleTypeDef {
+        module: "sqlite".into(),
+        items: vec![Item::TypeAlias(TypeAliasDef {
+            name: "SQLiteParam".into(),
+            ts_type: "null | string | Uint8Array".into(),
+            docs: vec!["A bindable value.".into()],
+        })],
+    });
+    assert_eq!(
+        out,
+        "/** A bindable value. */\nexport type SQLiteParam = null | string | Uint8Array;\n\n"
+    );
 }
 
 fn one_class(c: ClassDef) -> String {
@@ -173,6 +174,7 @@ fn private_constructor_renders() {
         name: "Stmt".into(),
         docs: vec![],
         constructor: None,
+        constructor_docs: vec![],
         private_constructor: true,
         members: vec![],
     });
@@ -185,6 +187,7 @@ fn non_trailing_optional_param_uses_union_not_question_mark() {
         name: "C".into(),
         docs: vec![],
         constructor: None,
+        constructor_docs: vec![],
         private_constructor: false,
         members: vec![method(
             "f",
@@ -212,4 +215,54 @@ fn jsdoc_escapes_comment_terminator() {
     });
     assert!(!out.contains("*/ danger"), "unescaped terminator: {out}");
     assert!(out.contains("*\\/ danger"), "{out}");
+}
+
+#[test]
+fn renders_mergeable_namespace_augmentation() {
+    let output = render_module(&ModuleTypeDef {
+        module: "fs".into(),
+        items: vec![Item::Namespace(NamespaceDef {
+            name: "RongNamespace".into(),
+            members: vec![
+                NamespaceMember::Function(FunctionDef {
+                    name: "file".into(),
+                    docs: vec!["Create a file reference.".into()],
+                    sig: FnSig {
+                        params: vec![param("path", "string", false)],
+                        ret: "RongFile".into(),
+                        ..Default::default()
+                    },
+                }),
+                NamespaceMember::Value(NamespaceValueDef {
+                    name: "SeekMode".into(),
+                    ts_type: "typeof SeekMode".into(),
+                }),
+            ],
+        })],
+    });
+    assert!(output.contains("interface RongNamespace"), "{output}");
+    assert!(output.contains("file(path: string): RongFile;"), "{output}");
+    assert!(
+        output.contains("readonly SeekMode: typeof SeekMode;"),
+        "{output}"
+    );
+}
+
+#[test]
+fn quotes_non_identifier_property_names() {
+    let output = render_module(&ModuleTypeDef {
+        module: "x".into(),
+        items: vec![Item::Namespace(NamespaceDef {
+            name: "Lx".into(),
+            members: vec![NamespaceMember::Function(FunctionDef {
+                name: "open-file".into(),
+                docs: vec![],
+                sig: FnSig {
+                    ret: "void".into(),
+                    ..Default::default()
+                },
+            })],
+        })],
+    });
+    assert!(output.contains("\"open-file\"(): void;"), "{output}");
 }

@@ -1,5 +1,5 @@
 use bytes::Bytes;
-use rong::{function::Optional, js_class, js_export, js_method, *};
+use rong::{function::Optional, js_class, js_method, *};
 
 #[derive(Default)]
 struct BlobOptions {
@@ -19,7 +19,7 @@ const LINE_ENDING: &[u8] = b"\r\n";
 #[cfg(not(windows))]
 const LINE_ENDING: &[u8] = b"\n";
 
-#[js_export(clone)]
+#[js_class(clone)]
 pub struct Blob {
     mime_type: String,
     data: Bytes,

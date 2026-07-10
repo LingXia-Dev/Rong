@@ -15,7 +15,7 @@ fn type_error(msg: impl Into<String>) -> RongJSError {
 }
 
 /// Lazy reference to an S3 object. No network request on creation.
-#[js_export]
+#[js_class]
 pub struct S3File {
     config: Rc<S3Config>,
     key: String,
@@ -24,9 +24,10 @@ pub struct S3File {
     range_end: Option<u64>,
 }
 
+/// Lazy reference to an S3 object. No network request on creation.
 #[js_class]
 impl S3File {
-    #[js_method(constructor)]
+    #[js_method(constructor, private)]
     fn new() -> JSResult<Self> {
         rong::illegal_constructor(
             "S3File cannot be constructed directly. Use S3Client.file() instead.",
@@ -43,6 +44,7 @@ impl S3File {
         }
     }
 
+    /// Object key as exposed by this reference.
     #[js_method(getter)]
     fn name(&self) -> String {
         self.display_name.clone()
@@ -54,6 +56,7 @@ impl S3File {
         f64::NAN
     }
 
+    /// Download the object as UTF-8 text.
     #[js_method]
     async fn text(&self) -> JSResult<String> {
         let bucket = self.config.create_bucket()?;
@@ -66,6 +69,7 @@ impl S3File {
         String::from_utf8(bytes.to_vec()).map_err(|e| s3_error(format!("invalid UTF-8: {}", e)))
     }
 
+    /// Download and parse the object as JSON.
     #[js_method]
     async fn json(&self, ctx: JSContext) -> JSResult<JSValue> {
         let text = Self::text(self).await?;
@@ -73,6 +77,7 @@ impl S3File {
         Ok(JSValue::from_rust(&ctx, obj))
     }
 
+    /// Download the object as an ArrayBuffer.
     #[js_method(ts_return = "ArrayBuffer")]
     async fn bytes(&self, ctx: JSContext) -> JSResult<JSValue> {
         let bucket = self.config.create_bucket()?;
@@ -87,13 +92,14 @@ impl S3File {
         Ok(JSValue::from_rust(&ctx, ab))
     }
 
+    /// Download the object as an ArrayBuffer (alias of `bytes`).
     #[js_method(rename = "arrayBuffer", ts_return = "ArrayBuffer")]
     async fn array_buffer(&self, ctx: JSContext) -> JSResult<JSValue> {
         Self::bytes(self, ctx).await
     }
 
     /// Write data to this S3 object.
-    #[js_method(ts_args = "data: string | ArrayBuffer | Uint8Array, options?: S3WriteOptions")]
+    #[js_method(ts_params = "data: string | ArrayBuffer | Uint8Array, options?: S3WriteOptions")]
     async fn write(&self, data: JSValue, options: Optional<S3WriteOptions>) -> JSResult<f64> {
         let bucket = self.config.create_bucket()?;
         let (content_bytes, content_type) = resolve_body(&data)?;
@@ -112,6 +118,7 @@ impl S3File {
         Ok(content_bytes.len() as f64)
     }
 
+    /// Delete this object.
     #[js_method]
     async fn delete(&self) -> JSResult<()> {
         let bucket = self.config.create_bucket()?;
@@ -122,11 +129,13 @@ impl S3File {
         Ok(())
     }
 
+    /// Delete this object (alias of `delete`).
     #[js_method]
     async fn unlink(&self) -> JSResult<()> {
         Self::delete(self).await
     }
 
+    /// Test whether this object exists.
     #[js_method]
     async fn exists(&self) -> JSResult<bool> {
         let bucket = self.config.create_bucket()?;
@@ -136,6 +145,7 @@ impl S3File {
         }
     }
 
+    /// Read object metadata without downloading its body.
     #[js_method]
     async fn stat(&self) -> JSResult<S3StatResult> {
         let bucket = self.config.create_bucket()?;
@@ -190,6 +200,7 @@ impl S3File {
         }
     }
 
+    /// Create a lazy reference to a byte range of this object.
     #[js_method(ts_return = "S3File")]
     fn slice(&self, ctx: JSContext, start: f64, end: Optional<f64>) -> JSResult<JSObject> {
         let file = S3File {

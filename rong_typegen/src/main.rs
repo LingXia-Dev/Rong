@@ -1,11 +1,17 @@
 //! Generate TypeScript definitions for RongJS modules from their Rust source.
 //!
 //! Default mode follows `packages/rong_types/typegen.json`, which explicitly
-//! decides whether each module is canonical (`src/`) or a drift reference
-//! (`generated/`). Single-crate mode writes to an explicit `--out` directory.
+//! decides whether each module is generated canonically (`src/`) or remains a
+//! deliberately curated TypeScript surface. Single-crate mode writes to an
+//! explicit `--out` directory.
 
-use rong_typedef::model::{Item, ModuleTypeDef};
-use rong_typedef::{extract_const_enum, extract_impl, extract_struct, render_module};
+use rong_typedef::model::{
+    Item, ModuleTypeDef, NamespaceDef, NamespaceMember, NamespaceValueDef, TypeAliasDef,
+};
+use rong_typedef::{
+    JsApiEntry, JsApiInput, extract_function, extract_impl, extract_numeric_enum, extract_struct,
+    extract_union, render_module,
+};
 use serde::Deserialize;
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::path::{Path, PathBuf};
@@ -26,29 +32,188 @@ fn main() -> ExitCode {
 
 fn run() -> Result<(), String> {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    let check = args.iter().any(|a| a == "--check");
-    let explicit_out = flag(&args, "--out").map(PathBuf::from);
-    let explicit_name = flag(&args, "--name");
-    let explicit_src = positional(&args).map(PathBuf::from);
-
-    if explicit_src.is_none() && (explicit_out.is_some() || explicit_name.is_some()) {
-        return Err("--out/--name require an explicit SRC_DIR".to_string());
+    let args = CliArgs::parse(&args)?;
+    if let Some(config) = args.config {
+        return run_downstream_config(&config, args.check);
     }
-
-    if let Some(src) = explicit_src {
-        let out =
-            explicit_out.ok_or_else(|| "single-crate mode requires `--out DIR`".to_string())?;
-        let name = explicit_name.unwrap_or_else(|| dir_name(&src));
+    if let Some(src) = args.src {
+        let out = args.out.expect("validated by CliArgs::parse");
+        let name = args.name.unwrap_or_else(|| dir_name(&src));
         let module = module_from_crate(&CrateSrc { name, src })?;
         if module.items.is_empty() {
             return Err("no JS-facing types found in the configured source graph".to_string());
         }
-        let prelude_dir = out.parent().map(|p| p.join("preludes"));
         let file = out.join(format!("{}.ts", module.module));
-        return emit_one(&module, &file, prelude_dir.as_deref(), check);
+        return emit_one(&module, &file, args.check);
     }
 
-    run_repository_mode(check)
+    run_repository_mode(args.check)
+}
+
+#[derive(Debug, Default, PartialEq, Eq)]
+struct CliArgs {
+    check: bool,
+    config: Option<PathBuf>,
+    out: Option<PathBuf>,
+    name: Option<String>,
+    src: Option<PathBuf>,
+}
+
+impl CliArgs {
+    fn parse(args: &[String]) -> Result<Self, String> {
+        let mut parsed = Self::default();
+        let mut index = 0;
+        while index < args.len() {
+            match args[index].as_str() {
+                "--check" => {
+                    if parsed.check {
+                        return Err("duplicate --check".to_string());
+                    }
+                    parsed.check = true;
+                    index += 1;
+                }
+                "--config" | "--out" | "--name" => {
+                    let flag = args[index].as_str();
+                    let value = args
+                        .get(index + 1)
+                        .filter(|value| !value.starts_with('-'))
+                        .ok_or_else(|| format!("{flag} requires a value"))?
+                        .clone();
+                    match flag {
+                        "--config" if parsed.config.is_none() => parsed.config = Some(value.into()),
+                        "--out" if parsed.out.is_none() => parsed.out = Some(value.into()),
+                        "--name" if parsed.name.is_none() => parsed.name = Some(value),
+                        _ => return Err(format!("duplicate {flag}")),
+                    }
+                    index += 2;
+                }
+                value if value.starts_with('-') => {
+                    return Err(format!("unknown option: {value}"));
+                }
+                value => {
+                    if parsed.src.is_some() {
+                        return Err(format!("unexpected positional argument: {value}"));
+                    }
+                    parsed.src = Some(value.into());
+                    index += 1;
+                }
+            }
+        }
+
+        if parsed.config.is_some()
+            && (parsed.src.is_some() || parsed.out.is_some() || parsed.name.is_some())
+        {
+            return Err("--config cannot be combined with SRC_DIR, --out, or --name".to_string());
+        }
+        if parsed.src.is_none() && (parsed.out.is_some() || parsed.name.is_some()) {
+            return Err("--out/--name require an explicit SRC_DIR".to_string());
+        }
+        if parsed.src.is_some() && parsed.out.is_none() {
+            return Err("single-crate mode requires `--out DIR`".to_string());
+        }
+        Ok(parsed)
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DownstreamConfig {
+    source: PathBuf,
+    name: String,
+    out: PathBuf,
+    #[serde(default)]
+    preludes: Vec<PathBuf>,
+    #[serde(default)]
+    global_objects: BTreeMap<String, String>,
+    #[serde(default)]
+    profiles: BTreeMap<RuntimeProfile, PathBuf>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+enum RuntimeProfile {
+    LogicWeb,
+}
+
+fn run_downstream_config(path: &Path, check: bool) -> Result<(), String> {
+    let path = path
+        .canonicalize()
+        .map_err(|error| format!("resolve config {}: {error}", path.display()))?;
+    let base = path
+        .parent()
+        .ok_or_else(|| format!("config has no parent directory: {}", path.display()))?;
+    let source = std::fs::read_to_string(&path)
+        .map_err(|error| format!("read config {}: {error}", path.display()))?;
+    let config: DownstreamConfig = serde_json::from_str(&source)
+        .map_err(|error| format!("parse config {}: {error}", path.display()))?;
+
+    let module = module_from_crate(&CrateSrc {
+        name: config.name,
+        src: base.join(config.source),
+    })?;
+    if module.items.is_empty() {
+        return Err("no JS-facing types found in the configured source graph".to_string());
+    }
+    let mut rendered = header(&module.module);
+    for prelude in config.preludes {
+        let prelude = base.join(prelude);
+        rendered.push_str(
+            std::fs::read_to_string(&prelude)
+                .map_err(|error| format!("read prelude {}: {error}", prelude.display()))?
+                .trim_end(),
+        );
+        rendered.push_str("\n\n");
+    }
+    rendered.push_str(&render_module(&module));
+    if !config.global_objects.is_empty() {
+        rendered.push_str("declare global {\n");
+        for (value, interface) in config.global_objects {
+            if !ts_identifier(&value) || !ts_identifier(&interface) {
+                return Err(format!(
+                    "global object mapping requires TypeScript identifiers: `{value}` -> `{interface}`"
+                ));
+            }
+            rendered.push_str(&format!("  const {value}: {interface};\n"));
+        }
+        rendered.push_str("}\n\n");
+    }
+    rendered.push_str("export {};\n");
+    emit_content(
+        &base.join(config.out),
+        &format!("{}\n", rendered.trim_end()),
+        check,
+    )?;
+
+    for (profile, output) in config.profiles {
+        emit_content(&base.join(output), runtime_profile(profile), check)?;
+    }
+    Ok(())
+}
+
+fn ts_identifier(value: &str) -> bool {
+    let mut chars = value.chars();
+    chars
+        .next()
+        .is_some_and(|c| c == '_' || c == '$' || c.is_ascii_alphabetic())
+        && chars.all(|c| c == '_' || c == '$' || c.is_ascii_alphanumeric())
+}
+
+fn runtime_profile(profile: RuntimeProfile) -> &'static str {
+    match profile {
+        RuntimeProfile::LogicWeb => rong_typedef::LOGIC_WEB_PROFILE,
+    }
+}
+
+fn emit_content(file: &Path, rendered: &str, check: bool) -> Result<(), String> {
+    if check {
+        if std::fs::read_to_string(file).unwrap_or_default() != rendered {
+            return Err(format!("{} is out of date", file.display()));
+        }
+        println!("{} is up to date.", file.display());
+        Ok(())
+    } else {
+        write_output(file, rendered)
+    }
 }
 
 fn run_repository_mode(check: bool) -> Result<(), String> {
@@ -84,10 +249,10 @@ fn run_repository_mode(check: bool) -> Result<(), String> {
                 "module `{name}` is configured in {POLICY_FILE} but has no extractable JS-facing types"
             )
         })?;
-        let file = match mode {
-            OutputMode::Canonical => pkg.join("src").join(format!("{name}.ts")),
-            OutputMode::Reference => pkg.join("generated").join(format!("{name}.ts")),
+        let OutputMode::Canonical = mode else {
+            continue;
         };
+        let file = pkg.join("src").join(format!("{name}.ts"));
         expected.insert(file.clone());
         outputs.push((module, file));
     }
@@ -115,10 +280,9 @@ fn run_repository_mode(check: bool) -> Result<(), String> {
         }
     }
 
-    let prelude_dir = pkg.join("preludes");
     let mut stale = Vec::new();
     for (module, file) in outputs {
-        let rendered = rendered_module(module, Some(&prelude_dir))?;
+        let rendered = rendered_module(module);
         if check {
             if std::fs::read_to_string(&file).unwrap_or_default() != rendered {
                 stale.push(file);
@@ -140,13 +304,8 @@ fn run_repository_mode(check: bool) -> Result<(), String> {
     Ok(())
 }
 
-fn emit_one(
-    module: &ModuleTypeDef,
-    file: &Path,
-    prelude_dir: Option<&Path>,
-    check: bool,
-) -> Result<(), String> {
-    let rendered = rendered_module(module, prelude_dir)?;
+fn emit_one(module: &ModuleTypeDef, file: &Path, check: bool) -> Result<(), String> {
+    let rendered = rendered_module(module);
     if check {
         if std::fs::read_to_string(file).unwrap_or_default() != rendered {
             return Err(format!(
@@ -161,20 +320,9 @@ fn emit_one(
     Ok(())
 }
 
-fn rendered_module(module: &ModuleTypeDef, prelude_dir: Option<&Path>) -> Result<String, String> {
-    let prelude_path = prelude_dir.map(|dir| dir.join(format!("{}.ts", module.module)));
-    let prelude = match prelude_path {
-        Some(path) if path.exists() => {
-            std::fs::read_to_string(&path)
-                .map_err(|e| format!("read prelude {}: {e}", path.display()))?
-                .trim_end()
-                .to_string()
-                + "\n\n"
-        }
-        _ => String::new(),
-    };
-    let rendered = header(&module.module) + &prelude + &render_module(module);
-    Ok(format!("{}\n", rendered.trim_end()))
+fn rendered_module(module: &ModuleTypeDef) -> String {
+    let rendered = header(&module.module) + &render_module(module);
+    format!("{}\n", rendered.trim_end())
 }
 
 fn write_output(file: &Path, rendered: &str) -> Result<(), String> {
@@ -188,6 +336,7 @@ fn write_output(file: &Path, rendered: &str) -> Result<(), String> {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct TypegenPolicy {
     modules: BTreeMap<String, OutputMode>,
 }
@@ -196,7 +345,7 @@ struct TypegenPolicy {
 #[serde(rename_all = "lowercase")]
 enum OutputMode {
     Canonical,
-    Reference,
+    Curated,
 }
 
 fn load_policy(path: &Path) -> Result<TypegenPolicy, String> {
@@ -277,14 +426,138 @@ fn module_from_crate(c: &CrateSrc) -> Result<ModuleTypeDef, String> {
         .parent()
         .ok_or_else(|| format!("source root has no parent: {}", root.display()))?
         .to_path_buf();
-    let mut items = Vec::new();
+    let mut extraction = Extraction::default();
     let mut visited = HashSet::new();
-    visit_file(&root, &module_dir, &mut visited, &mut items)?;
-    items.sort_by_key(sort_key);
+    visit_file(&root, &module_dir, &[], &mut visited, &mut extraction)?;
+    extraction.resolve_namespaces()?;
+    validate_type_aliases(&extraction.items)?;
+    extraction.items.sort_by_key(sort_key);
     Ok(ModuleTypeDef {
         module: c.name.clone(),
-        items,
+        items: extraction.items,
     })
+}
+
+fn validate_type_aliases(items: &[Item]) -> Result<(), String> {
+    let mut declarations = BTreeMap::<&str, &'static str>::new();
+    for item in items {
+        let (name, kind) = match item {
+            Item::TypeAlias(value) => (value.name.as_str(), "type alias"),
+            Item::Interface(value) => (value.name.as_str(), "interface"),
+            Item::NumericEnum(value) => (value.name.as_str(), "numeric enum"),
+            Item::Class(value) => (value.name.as_str(), "class"),
+            Item::Namespace(_) => continue,
+        };
+        if let Some(previous) = declarations.insert(name, kind)
+            && (previous == "type alias" || kind == "type alias")
+        {
+            return Err(format!(
+                "TypeScript type alias `{name}` conflicts with a generated {previous}"
+            ));
+        }
+    }
+    Ok(())
+}
+
+#[derive(Default)]
+struct Extraction {
+    items: Vec<Item>,
+    functions: BTreeMap<String, Vec<syn::ItemFn>>,
+    apis: Vec<(Vec<String>, JsApiInput)>,
+}
+
+impl Extraction {
+    fn resolve_namespaces(&mut self) -> Result<(), String> {
+        let mut namespaces: BTreeMap<String, Vec<NamespaceMember>> = BTreeMap::new();
+        let mut exported_names = BTreeSet::new();
+        for (module_path, api) in self.apis.drain(..) {
+            let namespace_name = api.namespace.to_string();
+            let members = namespaces.entry(namespace_name.clone()).or_default();
+            for entry in api.entries {
+                let entry = match entry {
+                    JsApiEntry::TypeAlias(alias) => {
+                        self.items.push(Item::TypeAlias(TypeAliasDef {
+                            name: alias.name.to_string(),
+                            ts_type: alias.ts_type.value(),
+                            docs: alias.docs,
+                        }));
+                        continue;
+                    }
+                    entry => entry,
+                };
+                let export_name = match &entry {
+                    JsApiEntry::Function(export) => export.name.value(),
+                    JsApiEntry::Class(export) => export.name.value(),
+                    JsApiEntry::Const(export) => export.name.value(),
+                    JsApiEntry::TypeAlias(_) => unreachable!(),
+                };
+                if !exported_names.insert((namespace_name.clone(), export_name.clone())) {
+                    return Err(format!(
+                        "duplicate `{export_name}` registration in TypeScript interface `{namespace_name}`"
+                    ));
+                }
+                match entry {
+                    JsApiEntry::Function(export) => {
+                        let key =
+                            resolve_function_key(&self.functions, &module_path, &export.function)?;
+                        let functions = self.functions.get(&key).ok_or_else(|| {
+                            format!("registered namespace function `{key}` was not found")
+                        })?;
+                        let definitions: Vec<_> = functions
+                            .iter()
+                            .map(|function| {
+                                extract_function(
+                                    function,
+                                    export.name.value(),
+                                    export.ts_params.as_ref().map(|value| value.value()),
+                                    export.ts_return.as_ref().map(|value| value.value()),
+                                )
+                            })
+                            .collect();
+                        if definitions
+                            .windows(2)
+                            .any(|pair| pair[0].sig != pair[1].sig)
+                        {
+                            return Err(format!(
+                                "cfg variants of registered function `{key}` produce different TypeScript signatures"
+                            ));
+                        }
+                        members.push(NamespaceMember::Function(
+                            definitions.into_iter().next().ok_or_else(|| {
+                                format!("registered namespace function `{key}` has no definition")
+                            })?,
+                        ));
+                    }
+                    JsApiEntry::Const(export) => {
+                        members.push(NamespaceMember::Value(NamespaceValueDef {
+                            name: export.name.value(),
+                            ts_type: export.ts_type.value(),
+                        }));
+                    }
+                    JsApiEntry::Class(export) => {
+                        let class_name = export
+                            .class
+                            .segments
+                            .last()
+                            .expect("class path has a segment")
+                            .ident
+                            .to_string();
+                        members.push(NamespaceMember::Value(NamespaceValueDef {
+                            name: export.name.value(),
+                            ts_type: format!("typeof {class_name}"),
+                        }));
+                    }
+                    JsApiEntry::TypeAlias(_) => unreachable!(),
+                }
+            }
+        }
+        self.items.extend(
+            namespaces
+                .into_iter()
+                .map(|(name, members)| Item::Namespace(NamespaceDef { name, members })),
+        );
+        Ok(())
+    }
 }
 
 fn crate_root_file(src: &Path) -> Result<PathBuf, String> {
@@ -306,8 +579,9 @@ fn crate_root_file(src: &Path) -> Result<PathBuf, String> {
 fn visit_file(
     file: &Path,
     module_dir: &Path,
+    rust_module_path: &[String],
     visited: &mut HashSet<PathBuf>,
-    out: &mut Vec<Item>,
+    extraction: &mut Extraction,
 ) -> Result<(), String> {
     let file = file
         .canonicalize()
@@ -319,21 +593,31 @@ fn visit_file(
         .map_err(|e| format!("read Rust source {}: {e}", file.display()))?;
     let ast =
         syn::parse_file(&text).map_err(|e| format!("parse Rust source {}: {e}", file.display()))?;
-    collect_items(&ast.items, &file, module_dir, visited, out)
+    collect_items(
+        &ast.items,
+        &file,
+        module_dir,
+        rust_module_path,
+        visited,
+        extraction,
+    )
 }
 
 fn collect_items(
     items: &[syn::Item],
     current_file: &Path,
     module_dir: &Path,
+    rust_module_path: &[String],
     visited: &mut HashSet<PathBuf>,
-    out: &mut Vec<Item>,
+    extraction: &mut Extraction,
 ) -> Result<(), String> {
     for item in items {
         match item {
             syn::Item::Impl(i) if !cfg_test(&i.attrs) => {
-                if let Some(desc) = extract_impl(i) {
-                    out.push(desc);
+                if let Some(desc) = extract_impl(i).map_err(|error| {
+                    format!("extract js_class in {}: {error}", current_file.display())
+                })? {
+                    extraction.items.push(desc);
                 } else if has_attr(&i.attrs, "js_class") {
                     return Err(format!(
                         "could not extract #[js_class] impl in {}",
@@ -347,27 +631,48 @@ fn collect_items(
                 }
             }
             syn::Item::Struct(s) if !cfg_test(&s.attrs) => {
-                if let Some(desc) = extract_struct(s) {
-                    out.push(desc);
+                if let Some(desc) = extract_struct(s).map_err(|error| {
+                    format!("extract JS object in {}: {error}", current_file.display())
+                })? {
+                    extraction.items.push(desc);
                 }
             }
             syn::Item::Enum(e) if !cfg_test(&e.attrs) => {
-                if let Some(desc) = extract_const_enum(e) {
-                    if let Item::ConstEnum(def) = &desc
-                        && def.variants.len() != e.variants.len()
-                    {
-                        return Err(format!(
-                            "could not extract every #[js_const_enum] variant in {}",
-                            current_file.display()
-                        ));
-                    }
-                    out.push(desc);
+                if let Some(desc) = extract_numeric_enum(e).map_err(|error| {
+                    format!(
+                        "extract js_numeric_enum in {}: {error}",
+                        current_file.display()
+                    )
+                })? {
+                    extraction.items.push(desc);
                 }
+                if let Some(desc) = extract_union(e).map_err(|error| {
+                    format!("extract js_union in {}: {error}", current_file.display())
+                })? {
+                    extraction.items.push(desc);
+                }
+            }
+            syn::Item::Fn(function) if !cfg_test(&function.attrs) => {
+                let key = qualified_item_name(rust_module_path, &function.sig.ident.to_string());
+                extraction
+                    .functions
+                    .entry(key)
+                    .or_default()
+                    .push(function.clone());
             }
             syn::Item::Mod(m) if !cfg_test(&m.attrs) => {
                 let child_dir = module_dir.join(m.ident.to_string());
+                let mut child_module_path = rust_module_path.to_vec();
+                child_module_path.push(m.ident.to_string());
                 if let Some((_, inner)) = &m.content {
-                    collect_items(inner, current_file, &child_dir, visited, out)?;
+                    collect_items(
+                        inner,
+                        current_file,
+                        &child_dir,
+                        &child_module_path,
+                        visited,
+                        extraction,
+                    )?;
                 } else {
                     let path = resolve_module_file(m, current_file, module_dir)?;
                     let next_dir = if path.file_name().and_then(|n| n.to_str()) == Some("mod.rs") {
@@ -375,8 +680,17 @@ fn collect_items(
                     } else {
                         path.with_extension("")
                     };
-                    visit_file(&path, &next_dir, visited, out)?;
+                    visit_file(&path, &next_dir, &child_module_path, visited, extraction)?;
                 }
+            }
+            syn::Item::Macro(m) if path_last_is(&m.mac.path, "js_api") => {
+                let api = syn::parse2::<JsApiInput>(m.mac.tokens.clone()).map_err(|e| {
+                    format!(
+                        "parse js_api! declaration in {}: {e}",
+                        current_file.display()
+                    )
+                })?;
+                extraction.apis.push((rust_module_path.to_vec(), api));
             }
             syn::Item::Macro(m) if macro_may_hide_js_api(m) => {
                 return Err(format!(
@@ -388,6 +702,81 @@ fn collect_items(
         }
     }
     Ok(())
+}
+
+fn qualified_item_name(module_path: &[String], item: &str) -> String {
+    if module_path.is_empty() {
+        item.to_string()
+    } else {
+        format!("{}::{item}", module_path.join("::"))
+    }
+}
+
+fn resolve_function_key(
+    functions: &BTreeMap<String, Vec<syn::ItemFn>>,
+    module_path: &[String],
+    path: &syn::Path,
+) -> Result<String, String> {
+    let mut segments: Vec<String> = path
+        .segments
+        .iter()
+        .map(|segment| segment.ident.to_string())
+        .collect();
+    if segments.first().is_some_and(|segment| segment == "crate") {
+        segments.remove(0);
+    } else if segments.first().is_some_and(|segment| segment == "self") {
+        segments.remove(0);
+        let mut relative = module_path.to_vec();
+        relative.extend(segments);
+        let key = relative.join("::");
+        return functions
+            .contains_key(&key)
+            .then_some(key)
+            .ok_or_else(|| format!("cannot resolve namespace function `{}`", path_text(path)));
+    } else if segments.first().is_some_and(|segment| segment == "super") {
+        let mut relative = module_path.to_vec();
+        while segments.first().is_some_and(|segment| segment == "super") {
+            segments.remove(0);
+            relative.pop().ok_or_else(|| {
+                format!(
+                    "namespace function path escapes crate: `{}`",
+                    path_text(path)
+                )
+            })?;
+        }
+        relative.extend(segments);
+        let key = relative.join("::");
+        return functions
+            .contains_key(&key)
+            .then_some(key)
+            .ok_or_else(|| format!("cannot resolve namespace function `{}`", path_text(path)));
+    }
+
+    let root_key = segments.join("::");
+    if functions.contains_key(&root_key) {
+        return Ok(root_key);
+    }
+    let mut relative = module_path.to_vec();
+    relative.extend(segments);
+    let relative_key = relative.join("::");
+    functions
+        .contains_key(&relative_key)
+        .then_some(relative_key)
+        .ok_or_else(|| format!("cannot resolve namespace function `{}`", path_text(path)))
+}
+
+fn path_text(path: &syn::Path) -> String {
+    path.segments
+        .iter()
+        .map(|segment| segment.ident.to_string())
+        .collect::<Vec<_>>()
+        .join("::")
+}
+
+fn path_last_is(path: &syn::Path, name: &str) -> bool {
+    path.segments
+        .last()
+        .is_some_and(|segment| segment.ident == name)
 }
 
 fn resolve_module_file(
@@ -468,9 +857,10 @@ fn macro_may_hide_js_api(item: &syn::ItemMacro) -> bool {
     [
         "js_class",
         "js_method",
-        "js_const_enum",
-        "FromJSObj",
-        "IntoJSObj",
+        "js_numeric_enum",
+        "js_union",
+        "FromJSObject",
+        "IntoJSObject",
     ]
     .iter()
     .any(|needle| tokens.contains(needle))
@@ -478,10 +868,11 @@ fn macro_may_hide_js_api(item: &syn::ItemMacro) -> bool {
 
 fn sort_key(item: &Item) -> String {
     match item {
-        Item::TypeAlias(a) => format!("0:{}", a.name),
+        Item::TypeAlias(alias) => format!("0:{}", alias.name),
         Item::Interface(i) => format!("1:{}", i.name),
-        Item::ConstEnum(e) => format!("2:{}", e.name),
+        Item::NumericEnum(e) => format!("2:{}", e.name),
         Item::Class(c) => format!("3:{}", c.name),
+        Item::Namespace(namespace) => format!("4:{}", namespace.name),
     }
 }
 
@@ -498,26 +889,6 @@ fn format_paths(message: &str, paths: &[PathBuf]) -> String {
         .map(|path| format!("\n  {}", path.display()))
         .collect::<String>();
     format!("{message}:{paths}")
-}
-
-fn flag(args: &[String], name: &str) -> Option<String> {
-    let idx = args.iter().position(|a| a == name)?;
-    args.get(idx + 1).cloned()
-}
-
-fn positional(args: &[String]) -> Option<String> {
-    let mut i = 0;
-    while i < args.len() {
-        let a = &args[i];
-        if a == "--check" {
-            i += 1;
-        } else if a == "--out" || a == "--name" {
-            i += 2;
-        } else {
-            return Some(a.clone());
-        }
-    }
-    None
 }
 
 fn dir_name(p: &Path) -> String {
@@ -549,20 +920,19 @@ mod tests {
     }
 
     #[test]
-    fn flag_reads_value_after_name() {
-        let a = args(&["--out", "dir", "--name", "x"]);
-        assert_eq!(flag(&a, "--out").as_deref(), Some("dir"));
-        assert_eq!(flag(&a, "--name").as_deref(), Some("x"));
-        assert_eq!(flag(&a, "--missing"), None);
-    }
-
-    #[test]
-    fn positional_skips_flags_and_their_values() {
+    fn cli_args_are_strict_and_support_downstream_config() {
         assert_eq!(
-            positional(&args(&["--check", "--out", "gen", "src/path"])).as_deref(),
-            Some("src/path")
+            CliArgs::parse(&args(&["--check", "--config", "types.json"])).unwrap(),
+            CliArgs {
+                check: true,
+                config: Some("types.json".into()),
+                ..Default::default()
+            }
         );
-        assert_eq!(positional(&args(&["--check"])), None);
+        assert!(CliArgs::parse(&args(&["--unknown"])).is_err());
+        assert!(CliArgs::parse(&args(&["--config"])).is_err());
+        assert!(CliArgs::parse(&args(&["--config", "a.json", "--out", "generated"])).is_err());
+        assert!(CliArgs::parse(&args(&["src"])).is_err());
     }
 
     #[test]
@@ -586,17 +956,17 @@ mod tests {
         std::fs::create_dir_all(&src).unwrap();
         std::fs::write(
             src.join("lib.rs"),
-            "mod live;\n#[cfg(test)] mod tests { #[derive(FromJSObj)] struct TestOnly { value: String } }\n",
+            "mod live;\n#[cfg(test)] mod tests { #[derive(FromJSObject)] struct TestOnly { value: String } }\n",
         )
         .unwrap();
         std::fs::write(
             src.join("live.rs"),
-            "#[derive(FromJSObj)] struct Live { value: String }\n",
+            "#[derive(FromJSObject)] struct Live { value: String }\n",
         )
         .unwrap();
         std::fs::write(
             src.join("dead.rs"),
-            "#[derive(FromJSObj)] struct Dead { value: String }\n",
+            "#[derive(FromJSObject)] struct Dead { value: String }\n",
         )
         .unwrap();
 
@@ -626,13 +996,122 @@ mod tests {
         std::fs::create_dir_all(&generated).unwrap();
         std::fs::write(src.join("canonical.ts"), format!("{GEN_MARKER}\n")).unwrap();
         std::fs::write(src.join("hand.ts"), "export interface Hand {}\n").unwrap();
-        std::fs::write(generated.join("reference.ts"), format!("{GEN_MARKER}\n")).unwrap();
+        std::fs::write(generated.join("stale.ts"), format!("{GEN_MARKER}\n")).unwrap();
 
         let managed = managed_outputs(&root).unwrap();
         assert!(managed.contains(&src.join("canonical.ts")));
-        assert!(managed.contains(&generated.join("reference.ts")));
+        assert!(managed.contains(&generated.join("stale.ts")));
         assert!(!managed.contains(&src.join("hand.ts")));
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn js_api_resolves_function_signatures_and_type_aliases() {
+        let root = temp_dir("js-api");
+        let src = root.join("src");
+        std::fs::create_dir_all(&src).unwrap();
+        std::fs::write(
+            src.join("lib.rs"),
+            "mod api;\njs_api! { fn register(ctx) { namespace RongNamespace = ctx.host_namespace(); type Name = \"string\"; fn ping = api::ping; } }\n",
+        )
+        .unwrap();
+        std::fs::write(
+            src.join("api.rs"),
+            "/// Ping a name.\npub(crate) async fn ping(name: String) -> JSResult<String> { todo!() }\n",
+        )
+        .unwrap();
+
+        let module = module_from_crate(&CrateSrc {
+            name: "fixture".into(),
+            src,
+        })
+        .unwrap();
+        let namespace = module
+            .items
+            .iter()
+            .find_map(|item| match item {
+                Item::Namespace(namespace) => Some(namespace),
+                _ => None,
+            })
+            .unwrap();
+        let NamespaceMember::Function(function) = &namespace.members[0] else {
+            panic!("function")
+        };
+        assert_eq!(function.name, "ping");
+        assert_eq!(function.sig.params[0].ts_type, "string");
+        assert_eq!(function.sig.ret, "Promise<string>");
+        assert_eq!(function.docs, ["Ping a name."]);
+        let alias = module
+            .items
+            .iter()
+            .find_map(|item| match item {
+                Item::TypeAlias(alias) => Some(alias),
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(alias.name, "Name");
+        assert_eq!(alias.ts_type, "string");
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn downstream_config_generates_an_independent_logic_surface_and_profile() {
+        let root = temp_dir("downstream-logic");
+        let crate_src = root.join("crates/logic/src");
+        let types = root.join("packages/types");
+        std::fs::create_dir_all(&crate_src).unwrap();
+        std::fs::create_dir_all(&types).unwrap();
+        std::fs::write(
+            crate_src.join("lib.rs"),
+            r#"
+                #[derive(IntoJSObject)]
+                struct DeviceInfo { platform: String }
+
+                fn get_device_info() -> JSResult<DeviceInfo> { todo!() }
+
+                rong::js_api! {
+                    fn register_logic(ctx) {
+                        namespace Lx = lx::namespace(ctx);
+                        fn getDeviceInfo = get_device_info;
+                    }
+                }
+            "#,
+        )
+        .unwrap();
+        let config = types.join("typegen.json");
+        std::fs::write(
+            &config,
+            r#"{
+                "source": "../../crates/logic/src",
+                "name": "logic",
+                "out": "src/generated/logic.ts",
+                "global_objects": { "lx": "Lx" },
+                "profiles": { "logic-web": "src/logic-globals.d.ts" }
+            }"#,
+        )
+        .unwrap();
+
+        run_downstream_config(&config, false).unwrap();
+        let logic = std::fs::read_to_string(types.join("src/generated/logic.ts")).unwrap();
+        assert!(logic.contains("export interface DeviceInfo"));
+        assert!(logic.contains("export interface Lx"));
+        assert!(logic.contains("getDeviceInfo(): DeviceInfo"));
+        assert!(logic.contains("const lx: Lx"));
+
+        let profile = std::fs::read_to_string(types.join("src/logic-globals.d.ts")).unwrap();
+        assert!(profile.contains("declare function fetch"));
+        assert!(!profile.contains("interface Document"));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn logic_web_profile_is_dom_free_and_contains_runtime_fetch() {
+        let profile = runtime_profile(RuntimeProfile::LogicWeb);
+        assert!(profile.contains("declare function fetch"));
+        assert!(profile.contains("interface Request"));
+        assert!(profile.contains("declare var CompressionStream"));
+        assert!(!profile.contains("interface Document"));
+        assert!(!profile.contains("declare var window"));
     }
 
     fn temp_dir(label: &str) -> PathBuf {

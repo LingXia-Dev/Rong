@@ -3,7 +3,7 @@ use flate2::Compression;
 use flate2::write::{
     DeflateDecoder, DeflateEncoder, GzDecoder, GzEncoder, ZlibDecoder, ZlibEncoder,
 };
-use rong::{HostError, JSContext, JSObject, JSResult, JSValue, js_class, js_export, js_method};
+use rong::{HostError, JSContext, JSObject, JSResult, JSValue, js_class, js_method};
 use std::io::{self, Write};
 use tokio::sync::mpsc;
 
@@ -248,7 +248,7 @@ fn build_transform_pair(
     Ok((readable, writable))
 }
 
-#[js_export]
+#[js_class]
 pub struct CompressionStream {
     readable: JSObject,
     writable: JSObject,
@@ -283,7 +283,7 @@ impl CompressionStream {
     }
 }
 
-#[js_export]
+#[js_class]
 pub struct DecompressionStream {
     readable: JSObject,
     writable: JSObject,

@@ -73,7 +73,7 @@ struct ShellResultData {
     exit_code: Option<i32>,
 }
 
-#[js_export(clone)]
+#[js_class(clone)]
 struct ShellCommand {
     command: String,
     cwd: Option<String>,
@@ -82,7 +82,7 @@ struct ShellCommand {
     quiet: bool,
 }
 
-#[js_export(clone)]
+#[js_class(clone)]
 struct ShellError {
     message: String,
     command: String,
@@ -1111,7 +1111,7 @@ impl ShellError {
 
 #[js_class]
 impl ShellCommand {
-    #[js_method(constructor)]
+    #[js_method(constructor, private)]
     fn constructor() -> JSResult<Self> {
         rong::illegal_constructor("ShellCommand cannot be constructed directly. Use Rong.$.")
     }

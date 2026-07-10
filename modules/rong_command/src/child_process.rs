@@ -3,7 +3,7 @@
 use rong::{
     HostError, JSArray, JSContext, JSContextService, JSObject, JSResult, JSValue, Promise,
     function::{Optional, Rest, This},
-    js_class, js_export, js_method,
+    js_class, js_method,
 };
 use rong_event::{Emitter, EmitterExt, EventEmitter};
 use rong_stream::{JSReadableStream, JSWritableStream};
@@ -112,7 +112,7 @@ impl SpawnOptions {
 }
 
 /// ChildProcess class representing a spawned child process
-#[js_export]
+#[js_class]
 pub struct ChildProcess {
     events: EventEmitter,
     pid: Option<u32>,
@@ -141,7 +141,7 @@ impl ChildProcess {
 
 #[js_class]
 impl ChildProcess {
-    #[js_method(constructor)]
+    #[js_method(constructor, private)]
     fn constructor() -> JSResult<Self> {
         rong::illegal_constructor("ChildProcess cannot be constructed directly. Use Rong.spawn().")
     }
@@ -281,7 +281,7 @@ impl Emitter for ChildProcess {
 }
 
 /// Result of exec command
-#[js_export]
+#[js_class]
 pub struct ExecResult {
     stdout: String,
     stderr: String,
@@ -300,7 +300,7 @@ impl ExecResult {
 
 #[js_class]
 impl ExecResult {
-    #[js_method(constructor)]
+    #[js_method(constructor, private)]
     fn constructor() -> JSResult<Self> {
         rong::illegal_constructor(
             "ExecResult cannot be constructed directly. Use Rong.$() or Rong.spawn().",

@@ -67,7 +67,7 @@ jobs:
               [ -n "$file" ] || continue
 
               case "$file" in
-                docs/api/*|docs/skills/*|packages/*|scripts/bump_version.sh|scripts/publish_npm.sh|.github/workflows/ci.yml|.github/workflows/release.yml)
+                docs/api/*|docs/skills/*|packages/*|rong_typedef/profiles/*|scripts/bump_version.sh|scripts/publish_npm.sh|.github/workflows/ci.yml|.github/workflows/release.yml)
                   npm=true
                   ;;
               esac
@@ -186,6 +186,7 @@ jobs:
         run: |
           npm --prefix packages/rong_types install --no-package-lock
           npm --prefix packages/rong_types run build
+          npm --prefix packages/rong_types run check:profiles
 
       - name: Check Rong skill package
         run: |

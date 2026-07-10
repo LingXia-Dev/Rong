@@ -1,10 +1,10 @@
 use http::header::{self, HeaderMap, HeaderName, HeaderValue};
 use rong::{
     function::{Optional, This},
-    js_class, js_export, js_method, *,
+    js_class, js_method, *,
 };
 
-#[js_export]
+#[js_class]
 #[derive(Default)]
 pub struct Headers {
     headers: HeaderMap<HeaderValue>,

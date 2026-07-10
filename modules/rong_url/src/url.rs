@@ -4,7 +4,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 use url::Url;
 
-#[js_export]
+#[js_class]
 pub struct URL {
     shared_data: Rc<SharedUrlData>,
     search_params: Option<URLSearchParams>,
@@ -16,8 +16,10 @@ pub(crate) struct SharedUrlData {
     pub url: RefCell<Url>,
 }
 
+/// WHATWG-style URL parser and mutable URL object.
 #[js_class]
 impl URL {
+    /// Parse an absolute URL or resolve a relative URL against a base.
     #[js_method(constructor)]
     fn new(url: String, base: Optional<String>) -> JSResult<Self> {
         let inner = if let Some(base) = base.0 {
@@ -49,6 +51,7 @@ impl URL {
         })
     }
 
+    /// Fragment identifier including the leading `#`.
     #[js_method(getter, rename = "hash")]
     fn get_hash(&self) -> String {
         self.inner()
@@ -67,6 +70,7 @@ impl URL {
         });
     }
 
+    /// Hostname and port.
     #[js_method(getter, rename = "host")]
     fn get_host(&self) -> String {
         let url = self.inner();
@@ -83,6 +87,7 @@ impl URL {
         let _ = url.set_host(Some(&value));
     }
 
+    /// Hostname without the port.
     #[js_method(getter)]
     fn hostname(&self) -> String {
         self.inner().host_str().unwrap_or_default().to_string()
@@ -94,6 +99,7 @@ impl URL {
         let _ = url.set_host(Some(&value));
     }
 
+    /// Serialized URL.
     #[js_method(getter)]
     fn href(&self) -> String {
         self.inner().to_string()
@@ -117,12 +123,14 @@ impl URL {
         Ok(())
     }
 
+    /// Origin consisting of scheme and host.
     #[js_method(getter)]
     fn origin(&self) -> String {
         let url = self.inner();
         format!("{}://{}", url.scheme(), self.get_host())
     }
 
+    /// Password component.
     #[js_method(getter)]
     fn password(&self) -> String {
         self.inner().password().unwrap_or_default().to_string()
@@ -134,6 +142,7 @@ impl URL {
         let _ = url.set_password(Some(&value));
     }
 
+    /// Path component.
     #[js_method(getter, rename = "pathname")]
     fn pathname(&self) -> String {
         self.inner().path().to_string()
@@ -151,6 +160,7 @@ impl URL {
         url.set_path(&path);
     }
 
+    /// Port as a string.
     #[js_method(getter, rename = "port")]
     fn port(&self) -> String {
         self.inner()
@@ -173,6 +183,7 @@ impl URL {
         let _ = url.set_port(port);
     }
 
+    /// Protocol including the trailing `:`.
     #[js_method(getter, rename = "protocol")]
     fn protocol(&self) -> String {
         format!("{}:", self.inner().scheme())
@@ -193,6 +204,7 @@ impl URL {
         }
     }
 
+    /// Query string including the leading `?`.
     #[js_method(getter, rename = "search")]
     fn search(&self) -> String {
         if let Some(query) = self.inner().query() {
@@ -213,6 +225,7 @@ impl URL {
         self.search_params = None;
     }
 
+    /// Username component.
     #[js_method(getter, rename = "username")]
     fn username(&self) -> String {
         self.inner().username().to_string()
@@ -224,6 +237,7 @@ impl URL {
         let _ = url.set_username(&value);
     }
 
+    /// Live search-parameter view backed by this URL.
     #[js_method(getter, rename = "searchParams")]
     fn search_params(&mut self) -> URLSearchParams {
         self.search_params
@@ -232,11 +246,13 @@ impl URL {
     }
 
     #[allow(clippy::inherent_to_string)]
+    /// Serialize this URL.
     #[js_method(rename = "toString")]
     pub fn to_string(&self) -> String {
         self.inner().to_string()
     }
 
+    /// Serialize this URL for JSON conversion.
     #[js_method(rename = "toJSON")]
     fn to_json(&self) -> String {
         self.inner().to_string()

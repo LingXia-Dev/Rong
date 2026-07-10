@@ -76,7 +76,7 @@ export const HOME: Record<Locale, HomeStrings> = {
       {
         icon: FEATURE_ICONS[1],
         title: "Declarative class bindings",
-        body: "Expose Rust structs to JavaScript with #[js_export], #[js_class], and #[js_method] — constructors, getters, setters, and static methods, all type-checked by Rust.",
+        body: "Expose Rust structs to JavaScript with #[js_class] and #[js_method] — constructors, getters, setters, and static methods, all type-checked by Rust.",
       },
       {
         icon: FEATURE_ICONS[2],
@@ -211,7 +211,7 @@ export const HOME: Record<Locale, HomeStrings> = {
       {
         icon: FEATURE_ICONS[1],
         title: "声明式类绑定",
-        body: "使用 #[js_export]、#[js_class] 和 #[js_method] 将 Rust 结构体暴露给 JavaScript —— 构造函数、getter、setter 与静态方法，全部经过 Rust 类型检查。",
+        body: "使用 #[js_class] 和 #[js_method] 将 Rust 结构体暴露给 JavaScript —— 构造函数、getter、setter 与静态方法，全部经过 Rust 类型检查。",
       },
       {
         icon: FEATURE_ICONS[2],

@@ -1,9 +1,9 @@
 use rong::JSEngineValue;
-use rong_macro::js_export;
+use rong_macro::js_class;
 use rong_test::*;
 use std::cell::Ref;
 
-#[js_export]
+#[js_class]
 struct Point {
     x: i32,
     y: i32,

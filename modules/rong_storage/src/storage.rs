@@ -1,21 +1,25 @@
 use super::*;
 use redb::{Database, ReadableDatabase, ReadableTable};
 use rong::{
-    FromJSObj, HostError, IntoJSIteratorExt, JSContext, JSDate, JSObject, JSResult, JSValue,
-    JsonToJSValue, function::Optional, js_class, js_export, js_method,
+    FromJSObject, HostError, IntoJSIteratorExt, JSContext, JSDate, JSObject, JSResult, JSValue,
+    JsonToJSValue, function::Optional, js_class, js_method,
 };
 use std::cell::RefCell;
 use std::fs;
 use std::path::PathBuf;
 use std::rc::Rc;
 
-#[derive(FromJSObj, Default)]
+#[derive(FromJSObject, Default)]
+/// Optional storage limits in bytes.
 pub struct StorageOptionsInput {
-    #[rename = "maxKeySize"]
+    /// Maximum UTF-8 key size.
+    #[js_name = "maxKeySize"]
     max_key_size: Option<u32>,
-    #[rename = "maxValueSize"]
+    /// Maximum serialized value size.
+    #[js_name = "maxValueSize"]
     max_value_size: Option<u32>,
-    #[rename = "maxDataSize"]
+    /// Maximum total user-data size.
+    #[js_name = "maxDataSize"]
     max_data_size: Option<u32>,
 }
 
@@ -92,7 +96,7 @@ impl Default for StorageConfig {
     }
 }
 
-#[js_export]
+#[js_class]
 pub struct Storage {
     db: Rc<RefCell<Option<Database>>>,
     #[allow(dead_code)]
@@ -193,6 +197,7 @@ impl Storage {
     }
 }
 
+/// Persistent key/value storage backed by a local database.
 #[js_class]
 impl Storage {
     #[js_method(constructor)]

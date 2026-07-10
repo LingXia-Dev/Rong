@@ -228,7 +228,7 @@ promise.into_object()
 
 ### Approach 3: Install on Existing Object
 
-When you have a `#[js_export]` class and want its instances to be async-iterable, you install the protocol on the class prototype.
+When you have a `#[js_class]` class and want its instances to be async-iterable, you install the protocol on the class prototype.
 
 This approach is more involved because you need to bridge between JavaScript's `this` binding and Rust's ownership model. The key challenge: the `next()` closure must borrow a native struct from the JS object, perform async work with it, and restore it for the next call — all while ensuring the receiver isn't dropped mid-iteration.
 
@@ -236,7 +236,7 @@ This approach is more involved because you need to bridge between JavaScript's `
 use rong::*;
 use tokio_stream::wrappers::ReceiverStream;
 
-#[js_export]
+#[js_class]
 pub struct DataCursor {
     // Arc<Mutex<Option<...>>> because:
     // - Arc: shared between the JS closure and the native struct

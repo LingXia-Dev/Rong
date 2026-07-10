@@ -1,9 +1,9 @@
-use rong_macro::FromJSObj;
+use rong_macro::FromJSObject;
 use rong_test::function::JSParameterType;
 use rong_test::*;
 use tokio::time::{Duration, sleep};
 
-#[derive(FromJSObj)]
+#[derive(FromJSObject)]
 struct NestedQueryOptions {
     query: Option<JSObject>,
 }

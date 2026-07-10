@@ -2,18 +2,18 @@ use crate::config::{S3Config, S3ConfigOverlay};
 use rong::*;
 
 /// Options for constructing or overriding an S3 client.
-#[derive(Clone, Debug, Default, FromJSObj)]
+#[derive(Clone, Debug, Default, FromJSObject)]
 pub struct S3ClientOptions {
     /// AWS access key ID.
-    #[rename = "accessKeyId"]
+    #[js_name = "accessKeyId"]
     pub access_key_id: Option<String>,
     /// AWS secret access key.
-    #[rename = "secretAccessKey"]
+    #[js_name = "secretAccessKey"]
     pub secret_access_key: Option<String>,
     /// AWS session token (STS).
-    #[rename = "sessionToken"]
+    #[js_name = "sessionToken"]
     pub session_token: Option<String>,
-    /// AWS region.
+    /// AWS region. Defaults to `us-east-1`.
     pub region: Option<String>,
     /// Custom endpoint URL (for S3-compatible services).
     pub endpoint: Option<String>,
@@ -21,141 +21,141 @@ pub struct S3ClientOptions {
     pub bucket: Option<String>,
     /// Default ACL for uploads (e.g. "public-read").
     pub acl: Option<String>,
-    /// Use virtual-hosted-style URLs instead of path-style.
-    #[rename = "virtualHostedStyle"]
+    /// Use virtual-hosted-style URLs instead of path-style. Defaults to false.
+    #[js_name = "virtualHostedStyle"]
     pub virtual_hosted_style: Option<bool>,
 }
 
 /// Options for write operations.
-#[derive(Clone, Debug, Default, FromJSObj)]
+#[derive(Clone, Debug, Default, FromJSObject)]
 pub struct S3WriteOptions {
-    /// Content-Type header.
-    #[rename = "type"]
+    /// Content-Type header. Defaults to `application/octet-stream` when it cannot be inferred.
+    #[js_name = "type"]
     pub content_type: Option<String>,
 }
 
-#[derive(Clone, Debug, Default, FromJSObj)]
+#[derive(Clone, Debug, Default, FromJSObject)]
 #[ts_skip]
 pub(crate) struct S3ClientWriteOptions {
-    #[rename = "accessKeyId"]
+    #[js_name = "accessKeyId"]
     pub access_key_id: Option<String>,
-    #[rename = "secretAccessKey"]
+    #[js_name = "secretAccessKey"]
     pub secret_access_key: Option<String>,
-    #[rename = "sessionToken"]
+    #[js_name = "sessionToken"]
     pub session_token: Option<String>,
     pub region: Option<String>,
     pub endpoint: Option<String>,
     pub bucket: Option<String>,
     pub acl: Option<String>,
-    #[rename = "virtualHostedStyle"]
+    #[js_name = "virtualHostedStyle"]
     pub virtual_hosted_style: Option<bool>,
-    #[rename = "type"]
+    #[js_name = "type"]
     pub content_type: Option<String>,
 }
 
 /// Options for presigning URLs.
-#[derive(Clone, Debug, Default, FromJSObj)]
+#[derive(Clone, Debug, Default, FromJSObject)]
 pub struct S3PresignOptions {
-    /// Expiration in seconds.
-    #[rename = "expiresIn"]
+    /// Expiration in seconds. Defaults to 86400 (24 hours).
+    #[js_name = "expiresIn"]
     pub expires_in: Option<f64>,
-    /// HTTP method.
+    /// HTTP method. Defaults to `GET`.
     #[ts_type = "\"GET\" | \"PUT\" | \"DELETE\""]
     pub method: Option<String>,
 }
 
-#[derive(Clone, Debug, Default, FromJSObj)]
+#[derive(Clone, Debug, Default, FromJSObject)]
 #[ts_skip]
 pub(crate) struct S3ClientPresignOptions {
-    #[rename = "accessKeyId"]
+    #[js_name = "accessKeyId"]
     pub access_key_id: Option<String>,
-    #[rename = "secretAccessKey"]
+    #[js_name = "secretAccessKey"]
     pub secret_access_key: Option<String>,
-    #[rename = "sessionToken"]
+    #[js_name = "sessionToken"]
     pub session_token: Option<String>,
     pub region: Option<String>,
     pub endpoint: Option<String>,
     pub bucket: Option<String>,
     pub acl: Option<String>,
-    #[rename = "virtualHostedStyle"]
+    #[js_name = "virtualHostedStyle"]
     pub virtual_hosted_style: Option<bool>,
-    #[rename = "expiresIn"]
+    #[js_name = "expiresIn"]
     pub expires_in: Option<f64>,
     #[ts_type = "\"GET\" | \"PUT\" | \"DELETE\""]
     pub method: Option<String>,
 }
 
 /// Options for list operations.
-#[derive(Clone, Debug, Default, FromJSObj)]
+#[derive(Clone, Debug, Default, FromJSObject)]
 pub struct S3ListOptions {
     /// Filter objects by key prefix.
     pub prefix: Option<String>,
     /// Maximum number of keys to return.
-    #[rename = "maxKeys"]
+    #[js_name = "maxKeys"]
     pub max_keys: Option<f64>,
     /// Start listing after this key (for pagination).
-    #[rename = "startAfter"]
+    #[js_name = "startAfter"]
     pub start_after: Option<String>,
 }
 
-#[derive(Clone, Debug, Default, FromJSObj)]
+#[derive(Clone, Debug, Default, FromJSObject)]
 #[ts_skip]
 pub(crate) struct S3ClientListOptions {
-    #[rename = "accessKeyId"]
+    #[js_name = "accessKeyId"]
     pub access_key_id: Option<String>,
-    #[rename = "secretAccessKey"]
+    #[js_name = "secretAccessKey"]
     pub secret_access_key: Option<String>,
-    #[rename = "sessionToken"]
+    #[js_name = "sessionToken"]
     pub session_token: Option<String>,
     pub region: Option<String>,
     pub endpoint: Option<String>,
     pub bucket: Option<String>,
     pub acl: Option<String>,
-    #[rename = "virtualHostedStyle"]
+    #[js_name = "virtualHostedStyle"]
     pub virtual_hosted_style: Option<bool>,
     pub prefix: Option<String>,
-    #[rename = "maxKeys"]
+    #[js_name = "maxKeys"]
     pub max_keys: Option<f64>,
-    #[rename = "startAfter"]
+    #[js_name = "startAfter"]
     pub start_after: Option<String>,
 }
 
 /// Object metadata returned by `stat()`.
-#[derive(Clone, Debug, IntoJSObj)]
+#[derive(Clone, Debug, IntoJSObject)]
 pub struct S3StatResult {
     /// ETag of the object.
     pub etag: Option<String>,
     /// Last modified timestamp (ISO 8601 string).
-    #[rename = "lastModified"]
+    #[js_name = "lastModified"]
     pub last_modified: Option<String>,
     /// Object size in bytes.
     pub size: f64,
     /// Content-Type of the object.
-    #[rename = "type"]
+    #[js_name = "type"]
     pub content_type: Option<String>,
 }
 
 /// Single object entry in a list result.
-#[derive(Clone, Debug, IntoJSObj)]
+#[derive(Clone, Debug, IntoJSObject)]
 pub struct S3ListEntry {
     /// Object key.
     pub key: String,
     /// Object size in bytes.
     pub size: f64,
     /// Last modified timestamp (ISO 8601 string).
-    #[rename = "lastModified"]
+    #[js_name = "lastModified"]
     pub last_modified: String,
     /// ETag of the object.
     pub etag: Option<String>,
 }
 
 /// Result of a list operation.
-#[derive(Clone, Debug, IntoJSObj)]
+#[derive(Clone, Debug, IntoJSObject)]
 pub struct S3ListResult {
     /// List of matching objects.
     pub contents: Vec<S3ListEntry>,
     /// Whether there are more results (use `startAfter` to paginate).
-    #[rename = "isTruncated"]
+    #[js_name = "isTruncated"]
     pub is_truncated: bool,
 }
 

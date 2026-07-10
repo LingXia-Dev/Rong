@@ -3,72 +3,57 @@ use proc_macro2::TokenStream as TokenStream2;
 use quote::quote;
 use syn::{DeriveInput, ItemImpl, parse_macro_input};
 
+mod api;
 mod class;
-mod const_enum;
 mod deserialize;
 mod r#enum;
 mod instance;
+mod numeric_enum;
 mod serialize;
 
-/// Expose a Rust struct or enum as a JavaScript object.
+/// Convert an untagged Rust enum to and from the first matching JavaScript value.
 ///
-/// This macro generates the necessary code to make a Rust type usable in JavaScript,
-/// including type conversions and object registration.
+/// Every variant must contain exactly one unnamed field whose type implements
+/// `FromJSValue` and `IntoJSValue`.
 ///
-/// For structs:
-/// - Generates class instance implementation
-/// - Allows method and property definitions
-/// - Supports constructors and static methods
-/// - Always implements `IntoJSValue` and `JSParameterType`
-/// - Implements `FromJSValue` only with `#[js_export(clone)]`
-///
-/// For enums:
-/// - Implements `FromJSValue`, `IntoJSValue`, and `JSParameterType` traits
-/// - Provides automatic type conversion and error handling
-/// - each variant required to implement `FromJSValue`, `IntoJSValue`
-///
-/// # Example (Struct)
 /// ```ignore
-/// #[js_export]
-/// struct Point {
-///     x: i32,
-///     y: i32,
-/// }
-/// ```
-///
-/// # Example (Enum)
-/// ```ignore
-/// #[js_export]
-/// enum Status {
-///     Pending(String),
-///     Complete(i32),
+/// #[js_union]
+/// enum StringOrNumber {
+///     String(String),
+///     Number(f64),
 /// }
 /// ```
 #[proc_macro_attribute]
-pub fn js_export(attr: TokenStream, item: TokenStream) -> TokenStream {
+pub fn js_union(attr: TokenStream, item: TokenStream) -> TokenStream {
+    if !attr.is_empty() {
+        return syn::Error::new(
+            proc_macro2::Span::call_site(),
+            "#[js_union] does not accept options",
+        )
+        .to_compile_error()
+        .into();
+    }
     let input = parse_macro_input!(item as DeriveInput);
-    let attr2: TokenStream2 = attr.into();
-
-    match &input.data {
-        syn::Data::Enum(_) => match r#enum::impl_enum_conversions(&input) {
-            Ok(expanded) => expanded.into(),
-            Err(err) => err.to_compile_error().into(),
-        },
-        _ => {
-            // For structs, use the existing class implementation
-            let object_attr = syn::parse_quote!(#[js_export(#attr2)]);
-            let mut new_input = input.clone();
-            new_input.attrs.push(object_attr);
-
-            match instance::class_instance_impl(&new_input) {
-                Ok(expanded) => expanded.into(),
-                Err(err) => err.to_compile_error().into(),
-            }
-        }
+    if input.attrs.iter().any(|attr| {
+        attr.path()
+            .segments
+            .last()
+            .is_some_and(|segment| segment.ident == "js_numeric_enum")
+    }) {
+        return syn::Error::new_spanned(
+            &input,
+            "an enum cannot be both #[js_union] and #[js_numeric_enum]",
+        )
+        .to_compile_error()
+        .into();
+    }
+    match r#enum::impl_enum_conversions(&input) {
+        Ok(expanded) => expanded.into(),
+        Err(err) => err.to_compile_error().into(),
     }
 }
 
-/// Expose a numeric constant enum as JavaScript numbers plus a JS constant object.
+/// Expose a numeric enum as JavaScript numbers plus a JS constant object.
 ///
 /// This is for APIs such as `Rong.SeekMode.Start === 0`: each unit variant must
 /// have an explicit integer value. The generated type accepts numbers from JS,
@@ -76,7 +61,7 @@ pub fn js_export(attr: TokenStream, item: TokenStream) -> TokenStream {
 /// registration.
 ///
 /// ```ignore
-/// #[js_const_enum]
+/// #[js_numeric_enum]
 /// enum SeekMode {
 ///     Start = 0,
 ///     Current = 1,
@@ -84,26 +69,72 @@ pub fn js_export(attr: TokenStream, item: TokenStream) -> TokenStream {
 /// }
 /// ```
 #[proc_macro_attribute]
-pub fn js_const_enum(_attr: TokenStream, item: TokenStream) -> TokenStream {
+pub fn js_numeric_enum(attr: TokenStream, item: TokenStream) -> TokenStream {
+    if !attr.is_empty() {
+        return syn::Error::new(
+            proc_macro2::Span::call_site(),
+            "#[js_numeric_enum] does not accept options",
+        )
+        .to_compile_error()
+        .into();
+    }
     let input = parse_macro_input!(item as DeriveInput);
-    match const_enum::impl_const_enum(&input) {
+    if input.attrs.iter().any(|attr| {
+        attr.path()
+            .segments
+            .last()
+            .is_some_and(|segment| segment.ident == "js_union")
+    }) {
+        return syn::Error::new_spanned(
+            &input,
+            "an enum cannot be both #[js_numeric_enum] and #[js_union]",
+        )
+        .to_compile_error()
+        .into();
+    }
+    match numeric_enum::impl_numeric_enum(&input) {
         Ok(expanded) => expanded.into(),
         Err(err) => err.to_compile_error().into(),
     }
 }
 
-/// Define JavaScript methods and properties for a class.
+/// Declare a crate's runtime JavaScript bindings and TypeScript-only API types.
 ///
-/// This macro can only be applied to impl blocks and processes method definitions
-/// marked with `#[js_method]`. Methods can be exposed as:
+/// The declaration generates the namespace registration function and is also
+/// consumed directly from Rust source by `rong-typegen`.
+///
+/// ```ignore
+/// rong::js_api! {
+///     fn register_fs(ctx) {
+///         namespace RongNamespace = ctx.host_namespace();
+///         fn file = rong_file::file;
+///         const SeekMode: "typeof SeekMode" = file::SeekMode::js_object(ctx)?;
+///     }
+/// }
+/// register_fs(ctx)?;
+/// ```
+///
+/// `fn`, `class`, and `const` entries install runtime namespace properties.
+/// `type` entries are TypeScript-only aliases emitted by `rong-typegen`.
+#[proc_macro]
+pub fn js_api(input: TokenStream) -> TokenStream {
+    api::expand(input)
+}
+
+/// Make a Rust struct a JavaScript class, or define its JavaScript members.
+///
+/// Apply it to the struct to generate class-instance conversion. Use
+/// `#[js_class(clone)]` when JavaScript instances may be cloned back into Rust.
+/// Apply it to the impl block to process methods marked with `#[js_method]`.
+/// Methods can be exposed as:
 /// - Regular methods
 /// - Property getters/setters
 /// - Static methods/properties
 /// - Async methods (automatically converted to JavaScript Promises)
 ///
 /// # Attributes
-/// - `rename = "name"`: Use a different name for the class in JavaScript
-///   If not specified, the impl block type name will be used
+/// - Struct: `clone` permits cloning a JavaScript instance back into Rust.
+/// - Impl: `rename = "name"` changes the JavaScript class name.
 ///
 /// # Method Types
 /// - Instance methods: Take `&self` or `&mut self`
@@ -113,9 +144,9 @@ pub fn js_const_enum(_attr: TokenStream, item: TokenStream) -> TokenStream {
 ///
 /// # Example
 /// ```ignore
-/// use rong_macro::{js_export, js_method, js_class};
+/// use rong_macro::{js_class, js_method};
 ///
-/// #[js_export]
+/// #[js_class]
 /// struct Point {
 ///     x: i32,
 ///     y: i32,
@@ -175,34 +206,34 @@ pub fn js_const_enum(_attr: TokenStream, item: TokenStream) -> TokenStream {
 /// ```
 #[proc_macro_attribute]
 pub fn js_class(attr: TokenStream, item: TokenStream) -> TokenStream {
-    // First try to parse as impl block
-    let result = syn::parse::<ItemImpl>(item.clone());
-
-    // Return error if not an impl block
-    if result.is_err() {
-        return syn::Error::new(
-            proc_macro2::Span::call_site(),
-            "#[js_class] can only be used on impl blocks",
-        )
-        .to_compile_error()
+    let attr2: TokenStream2 = attr.into();
+    if let Ok(input) = syn::parse::<ItemImpl>(item.clone()) {
+        let impl_tokens = match class::class_impl(&input, attr2) {
+            Ok(tokens) => tokens,
+            Err(err) => return err.to_compile_error().into(),
+        };
+        return quote! {
+            #input
+            #impl_tokens
+        }
         .into();
     }
 
-    let input = result.unwrap();
-    let attr2: TokenStream2 = attr.into();
-
-    let impl_tokens = match class::class_impl(&input, attr2) {
-        Ok(tokens) => tokens,
-        Err(err) => return err.to_compile_error().into(),
+    let input = match syn::parse::<DeriveInput>(item) {
+        Ok(input) if matches!(&input.data, syn::Data::Struct(_)) => input,
+        Ok(input) => {
+            return syn::Error::new_spanned(input, "#[js_class] requires a struct or impl block")
+                .to_compile_error()
+                .into();
+        }
+        Err(error) => return error.to_compile_error().into(),
     };
-
-    let expanded = quote! {
-        #input
-
-        #impl_tokens
-    };
-
-    TokenStream::from(expanded)
+    let mut input = input;
+    input.attrs.push(syn::parse_quote!(#[js_class(#attr2)]));
+    match instance::class_instance_impl(&input) {
+        Ok(expanded) => expanded.into(),
+        Err(error) => error.to_compile_error().into(),
+    }
 }
 
 /// Configure how a Rust method is exposed to JavaScript.
@@ -220,6 +251,10 @@ pub fn js_class(attr: TokenStream, item: TokenStream) -> TokenStream {
 /// - `enumerable`: Make the property visible in enumerations
 /// - `rename = "name"`: Use a different name in JavaScript
 /// - `constructor`: Mark as the class constructor
+/// - `private`: Render a constructor as private in generated TypeScript; only
+///   valid together with `constructor`
+/// - `ts_params = "..."`: Override the generated TypeScript parameter list
+/// - `ts_return = "..."`: Override the generated TypeScript return type
 /// - `gc_mark`: Use this method to implement garbage collection marking
 ///
 /// # Property Attributes
@@ -229,9 +264,9 @@ pub fn js_class(attr: TokenStream, item: TokenStream) -> TokenStream {
 ///
 /// # Examples
 /// ```ignore
-/// use rong_macro::{js_export, js_method, js_class};
+/// use rong_macro::{js_class, js_method};
 ///
-/// #[js_export]
+/// #[js_class]
 /// struct MyClass {
 ///     value: i32,
 /// }
@@ -267,14 +302,13 @@ pub fn js_method(_attr: TokenStream, item: TokenStream) -> TokenStream {
     item
 }
 
-/// Derive macro for implementing deserialization from JavaScript values to Rust structs.
+/// Derive `FromJSValue` for a named-field Rust struct representing a JS object.
 ///
-/// This macro automatically implements the `FromJSObj` trait for a struct, allowing it
-/// to be deserialized from JavaScript objects. Fields can be renamed using the `rename`
+/// Fields can be renamed using the `js_name`
 /// attribute to match different JavaScript property names.
 ///
 /// # Attributes
-/// - `rename = "name"`: Use a different name for the field in JavaScript
+/// - `js_name = "name"`: Use a different name for the field in JavaScript
 /// - `js_default`: Use `Default::default()` if the field is missing
 /// - `js_default = "value"`: Use a specific default value if the field is missing
 ///
@@ -286,11 +320,11 @@ pub fn js_method(_attr: TokenStream, item: TokenStream) -> TokenStream {
 ///
 /// # Example
 /// ```ignore
-/// #[derive(FromJSObj)]
+/// #[derive(FromJSObject)]
 /// struct Person {
-///     #[rename = "firstName"]
+///     #[js_name = "firstName"]
 ///     first_name: String,
-///     #[rename = "lastName"]
+///     #[js_name = "lastName"]
 ///     last_name: String,
 ///     age: i32,
 ///     // Optional field - will be None if missing
@@ -339,24 +373,35 @@ pub fn js_method(_attr: TokenStream, item: TokenStream) -> TokenStream {
 /// The macro provides detailed error messages:
 /// - Missing required fields: "Required field 'field_name' is missing"
 /// - Type conversion errors: "Failed to convert field 'field_name': [original error]"
-#[proc_macro_derive(FromJSObj, attributes(rename, js_default, ts_type, ts_skip))]
+#[proc_macro_derive(FromJSObject, attributes(js_name, js_default, ts_type, ts_skip))]
 pub fn derive_from_js_object(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
-    TokenStream::from(deserialize::impl_deserialize(input))
+    match deserialize::impl_deserialize(input) {
+        Ok(expanded) => expanded.into(),
+        Err(error) => error.to_compile_error().into(),
+    }
 }
 
 #[proc_macro_derive(FromJSValue)]
 pub fn derive_from_js_value(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
+    if !input.generics.params.is_empty() {
+        return syn::Error::new_spanned(
+            &input.generics,
+            "FromJSValue does not support generic types",
+        )
+        .to_compile_error()
+        .into();
+    }
     let name = &input.ident;
 
     // Generate the FromJSValue implementation
     let expanded = quote! {
         impl rong::FromJSValue<rong::JSEngineValue> for #name
-        where Self: TryFromJSValue,
+        where Self: rong::TryFromJSValue,
         {
             fn from_js_value(_ctx: &rong::JSContext, value: rong::JSValue) -> rong::JSResult<Self> {
-                Self::try_from_js(value)
+                <Self as rong::TryFromJSValue>::try_from_js(value)
             }
         }
 
@@ -366,14 +411,14 @@ pub fn derive_from_js_value(input: TokenStream) -> TokenStream {
     TokenStream::from(expanded)
 }
 
-/// Derive macro for implementing serialization from Rust structs to JavaScript objects.
+/// Derive `IntoJSValue` for a named-field Rust struct representing a JS object.
 ///
 /// This macro automatically implements the `IntoJSValue` trait for a struct, allowing it
-/// to be serialized to JavaScript objects. Fields can be renamed using the `rename`
+/// to be serialized to JavaScript objects. Fields can be renamed using the `js_name`
 /// attribute to match different JavaScript property names.
 ///
 /// # Attributes
-/// - `rename = "name"`: Use a different name for the field in JavaScript
+/// - `js_name = "name"`: Use a different name for the field in JavaScript
 ///
 /// # Field Types
 /// - All field types must implement `IntoJSValue`
@@ -382,11 +427,11 @@ pub fn derive_from_js_value(input: TokenStream) -> TokenStream {
 ///
 /// # Example
 /// ```ignore
-/// #[derive(IntoJSObj)]
+/// #[derive(IntoJSObject)]
 /// struct Person {
-///     #[rename = "firstName"]
+///     #[js_name = "firstName"]
 ///     first_name: String,
-///     #[rename = "lastName"]
+///     #[js_name = "lastName"]
 ///     last_name: String,
 ///     age: i32,
 ///     // Optional field - will be omitted if None
@@ -404,8 +449,11 @@ pub fn derive_from_js_value(input: TokenStream) -> TokenStream {
 ///     nickname: "Johnny"  // Only present if Some(value)
 /// }
 /// ```
-#[proc_macro_derive(IntoJSObj, attributes(rename, ts_type, ts_skip))]
+#[proc_macro_derive(IntoJSObject, attributes(js_name, ts_type, ts_skip))]
 pub fn derive_into_js_object(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
-    TokenStream::from(serialize::impl_serialize(input))
+    match serialize::impl_serialize(input) {
+        Ok(expanded) => expanded.into(),
+        Err(error) => error.to_compile_error().into(),
+    }
 }

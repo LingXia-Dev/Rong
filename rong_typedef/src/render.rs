@@ -1,8 +1,8 @@
 //! Render a [`ModuleTypeDef`] to TypeScript declaration text.
 
 use crate::model::{
-    ClassDef, ConstEnumDef, Field, InterfaceDef, Item, MemberKind, ModuleTypeDef, Param,
-    TypeAliasDef,
+    ClassDef, Field, InterfaceDef, Item, MemberKind, ModuleTypeDef, NamespaceDef, NamespaceMember,
+    NumericEnumDef, Param, TypeAliasDef,
 };
 use std::fmt::Write as _;
 
@@ -12,8 +12,8 @@ pub fn render_module(def: &ModuleTypeDef) -> String {
     let mut out = String::new();
 
     for item in &def.items {
-        if let Item::TypeAlias(a) = item {
-            render_type_alias(&mut out, a);
+        if let Item::TypeAlias(alias) = item {
+            render_type_alias(&mut out, alias);
         }
     }
     for item in &def.items {
@@ -22,8 +22,8 @@ pub fn render_module(def: &ModuleTypeDef) -> String {
         }
     }
     for item in &def.items {
-        if let Item::ConstEnum(e) = item {
-            render_const_enum(&mut out, e);
+        if let Item::NumericEnum(e) = item {
+            render_numeric_enum(&mut out, e);
         }
     }
     for item in &def.items {
@@ -31,11 +31,50 @@ pub fn render_module(def: &ModuleTypeDef) -> String {
             render_class(&mut out, c);
         }
     }
+    for item in &def.items {
+        if let Item::Namespace(namespace) = item {
+            render_namespace(&mut out, namespace);
+        }
+    }
 
     out
 }
 
-fn render_const_enum(out: &mut String, e: &ConstEnumDef) {
+fn render_type_alias(out: &mut String, alias: &TypeAliasDef) {
+    render_docs(out, &alias.docs, "");
+    let _ = writeln!(out, "export type {} = {};\n", alias.name, alias.ts_type);
+}
+
+fn render_namespace(out: &mut String, namespace: &NamespaceDef) {
+    let _ = writeln!(out, "declare global {{");
+    let _ = writeln!(out, "  interface {} {{", namespace.name);
+    for member in &namespace.members {
+        match member {
+            NamespaceMember::Function(function) => {
+                render_docs(out, &function.docs, "    ");
+                let _ = writeln!(
+                    out,
+                    "    {}({}): {};",
+                    property_key(&function.name),
+                    params_text(&function.sig),
+                    function.sig.ret
+                );
+            }
+            NamespaceMember::Value(value) => {
+                let _ = writeln!(
+                    out,
+                    "    readonly {}: {};",
+                    property_key(&value.name),
+                    value.ts_type
+                );
+            }
+        }
+    }
+    let _ = writeln!(out, "  }}");
+    let _ = writeln!(out, "}}\n");
+}
+
+fn render_numeric_enum(out: &mut String, e: &NumericEnumDef) {
     render_docs(out, &e.docs, "");
     let _ = writeln!(out, "export declare const {}: {{", e.name);
     for variant in &e.variants {
@@ -48,11 +87,6 @@ fn render_const_enum(out: &mut String, e: &ConstEnumDef) {
         "export type {} = (typeof {})[keyof typeof {}];\n",
         e.name, e.name, e.name
     );
-}
-
-fn render_type_alias(out: &mut String, a: &TypeAliasDef) {
-    render_docs(out, &a.docs, "");
-    let _ = writeln!(out, "export type {} = {};\n", a.name, a.value);
 }
 
 fn render_interface(out: &mut String, i: &InterfaceDef) {
@@ -68,7 +102,12 @@ fn render_field(out: &mut String, f: &Field) {
     render_docs(out, &f.docs, "  ");
     let readonly = if f.readonly { "readonly " } else { "" };
     let opt = if f.optional { "?" } else { "" };
-    let _ = writeln!(out, "  {readonly}{}{opt}: {};", f.name, f.ts_type);
+    let _ = writeln!(
+        out,
+        "  {readonly}{}{opt}: {};",
+        property_key(&f.name),
+        f.ts_type
+    );
 }
 
 fn render_class(out: &mut String, c: &ClassDef) {
@@ -76,8 +115,10 @@ fn render_class(out: &mut String, c: &ClassDef) {
     let _ = writeln!(out, "export declare class {} {{", c.name);
 
     if c.private_constructor {
+        render_docs(out, &c.constructor_docs, "  ");
         let _ = writeln!(out, "  private constructor();");
     } else if let Some(ctor) = &c.constructor {
+        render_docs(out, &c.constructor_docs, "  ");
         let _ = writeln!(out, "  constructor({});", params_text(ctor));
     }
 
@@ -85,10 +126,15 @@ fn render_class(out: &mut String, c: &ClassDef) {
         render_docs(out, &member.docs, "  ");
         match member.kind {
             MemberKind::Getter => {
-                let _ = writeln!(out, "  readonly {}: {};", member.name, member.sig.ret);
+                let _ = writeln!(
+                    out,
+                    "  readonly {}: {};",
+                    property_key(&member.name),
+                    member.sig.ret
+                );
             }
             MemberKind::Property => {
-                let _ = writeln!(out, "  {}: {};", member.name, member.sig.ret);
+                let _ = writeln!(out, "  {}: {};", property_key(&member.name), member.sig.ret);
             }
             MemberKind::Method | MemberKind::StaticMethod => {
                 let stat = if member.kind == MemberKind::StaticMethod {
@@ -99,7 +145,7 @@ fn render_class(out: &mut String, c: &ClassDef) {
                 let _ = writeln!(
                     out,
                     "  {stat}{}({}): {};",
-                    member.name,
+                    property_key(&member.name),
                     params_text(&member.sig),
                     member.sig.ret
                 );
@@ -110,7 +156,35 @@ fn render_class(out: &mut String, c: &ClassDef) {
     let _ = writeln!(out, "}}\n");
 }
 
-/// A signature's parameter list: the `ts_args` override verbatim if present,
+fn property_key(name: &str) -> String {
+    let mut chars = name.chars();
+    let valid = chars
+        .next()
+        .is_some_and(|c| c == '_' || c == '$' || c.is_ascii_alphabetic())
+        && chars.all(|c| c == '_' || c == '$' || c.is_ascii_alphanumeric());
+    if valid {
+        return name.to_string();
+    }
+
+    let mut out = String::from("\"");
+    for c in name.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c if c.is_control() => {
+                let _ = write!(out, "\\u{:04x}", c as u32);
+            }
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    out
+}
+
+/// A signature's parameter list: the `ts_params` override verbatim if present,
 /// otherwise the mapped params.
 fn params_text(sig: &crate::model::FnSig) -> String {
     match &sig.raw_params {

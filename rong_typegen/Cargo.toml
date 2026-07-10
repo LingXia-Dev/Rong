@@ -2,21 +2,22 @@
 name = "rong_typegen"
 version = "0.4.0"
 edition.workspace = true
-# Dev-only tooling: never published, never in the runtime dependency graph.
-publish = false
-
 description = "Generates TypeScript definitions for RongJS modules from their Rust source"
+readme = "README.md"
 license.workspace = true
 repository.workspace = true
 homepage.workspace = true
 rust-version.workspace = true
+keywords.workspace = true
+categories.workspace = true
+include = ["Cargo.toml", "README.md", "src/**"]
 
 [[bin]]
 name = "rong-typegen"
 path = "src/main.rs"
 
 [dependencies]
-rong_typedef = { path = "../rong_typedef" }
+rong_typedef = { workspace = true, features = ["typegen"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
 syn = { workspace = true }

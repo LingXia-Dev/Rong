@@ -5,7 +5,7 @@ use tokio::fs::OpenOptions;
 use tokio::io::AsyncWriteExt;
 use tokio::sync::Mutex;
 
-#[derive(FromJSObj, Default)]
+#[derive(FromJSObject, Default)]
 pub(crate) struct FileSinkOptions {
     /// If true, open file in append mode. Default is truncate (overwrite).
     pub(crate) append: Option<bool>,
@@ -14,7 +14,7 @@ pub(crate) struct FileSinkOptions {
     pub(crate) mode: Option<u32>,
 }
 
-#[js_export]
+#[js_class]
 pub(crate) struct FileSink {
     file: Arc<Mutex<Option<tokio::fs::File>>>,
 }
@@ -54,14 +54,16 @@ impl FileSink {
     }
 }
 
+/// Incremental writer returned by `RongFile.writer`.
 #[js_class]
 impl FileSink {
-    #[js_method(constructor)]
+    #[js_method(constructor, private)]
     fn new() -> JSResult<Self> {
         rong::illegal_constructor("Not Allowed 'new FileSink()', use Rong.file(path).writer()")
     }
 
-    #[js_method(ts_args = "data: string | ArrayBufferView | ArrayBuffer")]
+    /// Write data and return the number of bytes written.
+    #[js_method(ts_params = "data: string | ArrayBufferView | ArrayBuffer")]
     async fn write(&self, data: JSValue) -> JSResult<f64> {
         // String
         if data.is_string() {
@@ -120,6 +122,7 @@ impl FileSink {
         .into())
     }
 
+    /// Flush buffered data to the file.
     #[js_method]
     async fn flush(&self) -> JSResult<()> {
         let mut file = self.file.lock().await;
@@ -130,6 +133,7 @@ impl FileSink {
             .map_err(|e| HostError::new("FS_IO", format!("Flush failed: {}", e)).into())
     }
 
+    /// Flush and close the writer.
     #[js_method]
     async fn end(&self) -> JSResult<()> {
         let mut file = self.file.lock().await;

@@ -53,8 +53,19 @@ In module code you usually write the engine-erased aliases (`JSValue`,
 | any          | `JSValue`                                   | always succeeds                |
 | Error/thrown | `RongJSError`                               | captures the value             |
 
-For public object-shaped API data, use `FromJSObj` / `IntoJSObj` structs (see
+For public object-shaped API data, use `FromJSObject` / `IntoJSObject` structs (see
 `classes.md`). Keep raw `JSObject` for dynamic or pass-through values.
+
+For an untagged union, use one single-field variant per accepted shape. Variant
+order is runtime matching order, while typegen emits the corresponding TS union:
+
+```rust
+#[js_union]
+enum StringOrBytes {
+    String(String),
+    Bytes(JSArrayBuffer),
+}
+```
 
 ## Explicit conversions
 

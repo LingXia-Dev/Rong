@@ -3,7 +3,7 @@ use rong::{function::*, *};
 use super::Event;
 
 /// CustomEvent constructor options
-#[derive(FromJSObj, Default)]
+#[derive(FromJSObject, Default)]
 pub struct CustomEventOptions {
     #[js_default]
     pub bubbles: bool,
@@ -15,7 +15,7 @@ pub struct CustomEventOptions {
 }
 
 /// Represents a custom event object
-#[js_export]
+#[js_class]
 pub struct CustomEvent {
     detail: Option<JSValue>,
     event: Event,

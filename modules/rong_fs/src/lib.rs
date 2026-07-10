@@ -23,6 +23,31 @@ mod sink;
 mod stat;
 mod write;
 
+rong::js_api! {
+    fn register_fs_namespace(ctx) {
+        namespace RongNamespace = ctx.host_namespace();
+        fn file = rong_file::file;
+        fn write(
+            ts_params = "dest: string | RongFile, data: string | ArrayBufferView | ArrayBuffer | RongFile"
+        ) = write::rong_write;
+        fn mkdir(ts_params = "path: string, options?: MkdirOptions") = dir::mkdir;
+        fn readDir(
+            ts_params = "path: string",
+            ts_return = "AsyncIterableIterator<DirEntry>"
+        ) = dir::readdir;
+        fn remove(ts_params = "path: string, options?: RemoveOptions") = dir::remove;
+        fn chdir(ts_params = "path: string") = dir::chdir;
+        fn symlink(ts_params = "target: string, path: string") = misc::symlink;
+        fn readlink = misc::readlink;
+        fn chmod(cfg = "unix") = misc::chmod;
+        fn chown(cfg = "unix") = misc::chown;
+        fn utime(ts_params = "path: string, options: UTimeOptions") = misc::utime;
+        fn rename(ts_params = "oldPath: string, newPath: string") = misc::rename;
+        fn realPath = misc::real_path;
+        const SeekMode: "typeof SeekMode" = file::SeekMode::js_object(ctx)?;
+    }
+}
+
 /// Internal function to resolve file paths.
 fn grant_file_access(path: &str) -> JSResult<PathBuf> {
     Ok(PathBuf::from(path))
@@ -35,9 +60,9 @@ pub fn init(ctx: &JSContext) -> JSResult<()> {
     sink::init(ctx)?;
     file::init(ctx)?;
     rong_file::init(ctx)?;
-    write::init(ctx)?;
     dir::init(ctx)?;
-    misc::init(ctx)?;
+
+    register_fs_namespace(ctx)?;
 
     Ok(())
 }

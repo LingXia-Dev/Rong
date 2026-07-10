@@ -6,9 +6,9 @@ Classes model stateful objects (e.g. `new Point2D(10, 20)`).
 
 ```rust
 use rong::*;
-use rong::{js_export, js_class, js_method};
+use rong::{js_class, js_method};
 
-#[js_export]
+#[js_class]
 #[derive(Debug)]
 struct Point { x: i32, y: i32 }
 
@@ -19,7 +19,7 @@ impl Point {
 }
 ```
 
-- `#[js_export]` makes the struct available to the macro system.
+- `#[js_class]` makes the struct available to the macro system.
 - `#[js_class(rename = "JsName")]` exposes the impl block; `rename` sets the JS class name.
 - `#[js_method(...)]` marks individual methods to expose.
 
@@ -92,6 +92,7 @@ fn set_x(&mut self, x: i32) { self.x = x; }
 | Attribute       | Meaning                              | Example                              |
 | :---            | :---                                 | :---                                 |
 | `constructor`   | Class constructor                    | `#[js_method(constructor)]`          |
+| `private`       | Private TS constructor (with `constructor`) | `#[js_method(constructor, private)]` |
 | `rename = "x"`  | JS method/property name              | `#[js_method(rename = "moveBy")]`    |
 | `getter`        | Property getter                      | `#[js_method(getter)]`               |
 | `setter`        | Property setter                      | `#[js_method(setter, rename = "x")]` |
@@ -101,8 +102,8 @@ fn set_x(&mut self, x: i32) { self.x = x; }
 
 ## Object-shaped inputs and outputs
 
-Derive `FromJSObj` to accept a JS object as a Rust struct, and `IntoJSObj` to
-return one. Use `#[rename = "jsName"]` to map names; `Option<T>` fields are
+Derive `FromJSObject` to accept a JS object as a Rust struct, and `IntoJSObject` to
+return one. Use `#[js_name = "jsName"]` to map names; `Option<T>` fields are
 optional (omitted when `None` on output).
 
 Default to this for public API shapes. Use raw `JSObject` only for dynamic
@@ -111,21 +112,21 @@ precision, and `#[ts_skip]` for internal derived parser structs that should not
 be exported.
 
 ```rust
-use rong::{FromJSObj, IntoJSObj};
+use rong::{FromJSObject, IntoJSObject};
 use rong::function::Optional;
 
-#[derive(FromJSObj, Default)]
+#[derive(FromJSObject, Default)]
 pub struct StorageOptions {
-    #[rename = "maxSize"] max_size: Option<u32>,
+    #[js_name = "maxSize"] max_size: Option<u32>,
     compression: Option<bool>,
 }
 
-#[derive(IntoJSObj)]
+#[derive(IntoJSObject)]
 pub struct StorageInfo {
-    #[rename = "currentSize"] current_size: u32,
-    #[rename = "keyCount"]    key_count: u32,
+    #[js_name = "currentSize"] current_size: u32,
+    #[js_name = "keyCount"]    key_count: u32,
     #[ts_type = "number | bigint"]
-    #[rename = "lastRowid"]   last_rowid: i64,
+    #[js_name = "lastRowid"]   last_rowid: i64,
 }
 
 #[js_class]
@@ -144,12 +145,12 @@ impl Storage {
 
 ## Numeric constant objects
 
-Use `#[js_const_enum]` for numeric constants exposed as a JS object, such as
+Use `#[js_numeric_enum]` for numeric constants exposed as a JS object, such as
 `Rong.SeekMode.Start === 0`. Typegen emits a const object plus a literal-union
 type; do not write a TS enum prelude for this shape.
 
 ```rust
-#[js_const_enum]
+#[js_numeric_enum]
 enum SeekMode {
     Start = 0,
     Current = 1,

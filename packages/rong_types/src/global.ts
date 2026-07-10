@@ -24,52 +24,14 @@ import type {
 } from './command';
 import type { RongSleepValue } from './timer';
 import type { RongCronFunction } from './cron';
-import type {
-  DirEntry,
-  MkdirOptions,
-  RemoveOptions,
-  RongFile,
-  SeekMode,
-  UTimeOptions,
-} from './fs';
 import type { RedisClientConstructor } from './redis';
 import type { SSEConstructor } from './sse';
-import type { S3Client } from './s3';
-import type { SQLite } from './sqlite';
 
 declare global {
   /**
    * Rong runtime namespace - host APIs exposed by the Rong runtime
    */
-  const Rong: {
-    // Core file API
-    file(path: string): RongFile;
-    write(
-      dest: string | RongFile,
-      data: string | ArrayBufferView | ArrayBuffer | RongFile
-    ): Promise<number>;
-
-    // Directory operations
-    mkdir(path: string, options?: MkdirOptions): Promise<void>;
-    readDir(path: string): Promise<AsyncIterableIterator<DirEntry>>;
-    remove(path: string, options?: RemoveOptions): Promise<void>;
-    chdir(path: string): Promise<void>;
-
-    // Symlink operations
-    symlink(target: string, path: string): Promise<void>;
-    readlink(path: string): Promise<string>;
-
-    /** Change file permissions (Unix only) @platform unix */
-    chmod(path: string, mode: number): Promise<void>;
-    /** Change file ownership (Unix only) @platform unix */
-    chown(path: string, uid: number, gid: number): Promise<void>;
-    utime(path: string, options: UTimeOptions): Promise<void>;
-
-    // Path operations
-    rename(oldPath: string, newPath: string): Promise<void>;
-    realPath(path: string): Promise<string>;
-    readonly SeekMode: typeof SeekMode;
-
+  interface RongNamespace {
     // Runtime APIs
     readonly version: string;
     readonly revision: string;
@@ -119,10 +81,10 @@ declare global {
       prototype: RongShellError;
     };
     readonly RedisClient: RedisClientConstructor;
-    readonly S3Client: typeof S3Client;
-    readonly SQLite: typeof SQLite;
     readonly SSE: SSEConstructor;
-  };
+  }
+
+  const Rong: RongNamespace;
 
   /**
    * Base64 decode - Decode base64 string to binary string
