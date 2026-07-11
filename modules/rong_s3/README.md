@@ -23,9 +23,14 @@ S3-compatible object storage client. Exposed as `Rong.S3Client`.
   - `presign(options?)` — presigned URL
   - `name` / `size` — getters
 
-## Namespaced Injected Clients
+## Host-injected clients
 
-When an `S3Client` is created from Rust with a non-empty `namespace_prefix`, JS code **cannot override S3 config fields** (`accessKeyId`, `secretAccessKey`, `sessionToken`, `region`, `endpoint`, `bucket`, `acl`, `virtualHostedStyle`) in method options. Attempting to do so throws `TypeError`. This prevents JS from escaping the intended bucket/credentials scope.
+Every `S3Client` created from Rust has locked configuration, whether or not it
+uses a namespace prefix. JavaScript cannot override `accessKeyId`,
+`secretAccessKey`, `sessionToken`, `region`, `endpoint`, `bucket`, `acl`, or
+`virtualHostedStyle` in method options. This prevents an injected client from
+escaping the host-owned credentials and endpoint. Clients constructed from
+JavaScript retain the documented per-method configuration overrides.
 
 Allowed option fields per method:
 
@@ -38,5 +43,13 @@ Allowed option fields per method:
 
 ## Rust API
 
-- `S3Client::new(config, namespace_prefix)` — create a pre-configured client from Rust. The optional `namespace_prefix` is transparently prepended to all object keys and stripped from list results.
+- `S3Client::new(config)` — create an unnamespaced host-configured client with locked configuration.
+- `.with_namespace(prefix)` — apply a prefix that is transparently prepended to object keys and stripped from list results.
+- `client.into_js_object(ctx)` — register the required hidden classes and convert the client into an injectable JavaScript object.
 - `S3Config` — configuration struct with public fields (`access_key_id`, `secret_access_key`, `bucket`, `region`, `endpoint`, etc.)
+
+Use `ctx.host_namespace().set("s3", client.into_js_object(ctx)?)` to expose the
+managed instance as `Rong.s3` without creating a separate top-level global.
+`S3Client` stores configuration rather than a live connection, so creating a
+cheap wrapper per fixed namespace is preferred over a dynamic resolver on every
+S3 operation.

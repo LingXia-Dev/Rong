@@ -1,6 +1,8 @@
 // S3 namespace prefix tests.
-// The Rust harness injects a pre-configured `s3` global with namespace prefix "app1/".
+// The Rust harness injects a pre-configured `Rong.s3` with namespace prefix "app1/".
 // JS never calls `new Rong.S3Client` here — it uses the injected instance directly.
+
+const s3 = Rong.s3;
 
 describe("S3 namespace prefix", () => {
   const KEY = `ns-test-${Date.now()}.txt`;
