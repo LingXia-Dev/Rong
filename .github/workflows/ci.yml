@@ -10,19 +10,25 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 env:
   CARGO_HTTP_MULTIPLEXING: "false"
   CARGO_NET_RETRY: "10"
+  RUST_TOOLCHAIN: "1.97.0"
+  RUST_MSRV: "1.90.0"
 
 jobs:
   scope:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
     outputs:
       rust: ${{ steps.scope.outputs.rust }}
       npm: ${{ steps.scope.outputs.npm }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           fetch-depth: 0
 
@@ -67,7 +73,11 @@ jobs:
               [ -n "$file" ] || continue
 
               case "$file" in
-                docs/api/*|docs/skills/*|packages/*|rong_typegen/profiles/*|scripts/bump_version.sh|scripts/publish_npm.sh|.github/workflows/ci.yml|.github/workflows/release.yml)
+                .github/workflows/*|.github/actions/*)
+                  rust=true
+                  npm=true
+                  ;;
+                docs/api/*|docs/skills/*|packages/*|rong_typegen/profiles/*|scripts/bump_version.sh|scripts/publish_npm.sh)
                   npm=true
                   ;;
               esac
@@ -100,18 +110,55 @@ jobs:
   fmt:
     needs: scope
     if: needs.scope.outputs.rust == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           submodules: recursive
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88 # master
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+          components: rustfmt
 
       - name: Format
         run: cargo fmt --all -- --check
+
+  msrv:
+    needs: [scope, fmt]
+    if: needs.scope.outputs.rust == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          submodules: recursive
+
+      - name: Install Rust MSRV
+        uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88 # master
+        with:
+          toolchain: ${{ env.RUST_MSRV }}
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          shared-key: msrv-quickjs-ubuntu-24.04
+
+      - name: Install cargo-make
+        uses: taiki-e/install-action@2ca9b94c269419b7b0c711c09d0b21c4e1d51145 # v2.83.1
+        with:
+          tool: cargo-make
+
+      - name: Check QuickJS at MSRV
+        env:
+          ENGINE: quickjs
+        run: |
+          cargo make check-engine
+          cargo check -p rong_typegen --all-features
 
   typegen:
     needs: scope
@@ -119,15 +166,18 @@ jobs:
     # package changes (preludes / generated / canonical src files) — either can
     # put the committed `.ts` out of sync with the Rust source.
     if: needs.scope.outputs.rust == 'true' || needs.scope.outputs.npm == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           submodules: recursive
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88 # master
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
 
       # Fails if the committed TS definitions are stale vs the Rust source.
       # Run `cargo run -p rong_typegen` to update them.
@@ -139,15 +189,18 @@ jobs:
   # build; the actual gate is publish.sh --check-drift in release planning.
   release-plan:
     if: github.event_name == 'push' && github.ref == 'refs/heads/master'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           fetch-depth: 0
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88 # master
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
 
       - name: Compute pending release plan
         run: |
@@ -172,19 +225,20 @@ jobs:
   npm-package:
     needs: scope
     if: needs.scope.outputs.npm == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
       - name: Install Node
-        uses: actions/setup-node@v5
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
-          node-version: 20
+          node-version: 24
 
       - name: Check Rong type package
         run: |
-          npm --prefix packages/rong_types install --no-package-lock
+          npm --prefix packages/rong_types ci --ignore-scripts --no-audit --no-fund
           npm --prefix packages/rong_types run build
           npm --prefix packages/rong_types run check:profiles
 
@@ -197,10 +251,10 @@ jobs:
           test -f /tmp/rong-skills-ci/rong-module-author/references/module-structure.md
           test -f /tmp/rong-skills-ci/rong-runtime-developer/references/api-http.md
 
-  host-check:
+  host-verify:
     needs: [scope, fmt]
     if: needs.scope.outputs.rust == 'true'
-    name: host-check-${{ matrix.engine }}-${{ matrix.os }}
+    name: host-verify-${{ matrix.engine }}-${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
@@ -208,73 +262,30 @@ jobs:
           - engine: quickjs
             os: windows-2025-vs2026
           - engine: quickjs
-            os: ubuntu-latest
+            os: ubuntu-24.04
           - engine: quickjs
-            os: macos-latest
+            os: macos-15
           - engine: jscore
-            os: macos-latest
+            os: macos-15
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           submodules: recursive
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88 # master
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+          components: clippy
 
       - name: Cache cargo
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
 
       - name: Install cargo-make
-        uses: taiki-e/install-action@v2
-        with:
-          tool: cargo-make
-
-      - name: Install system dependencies (macOS)
-        if: runner.os == 'macOS'
-        env:
-          HOMEBREW_NO_AUTO_UPDATE: "1"
-        run: |
-          brew install llvm
-          echo "LIBCLANG_PATH=$(brew --prefix llvm)/lib" >> "$GITHUB_ENV"
-
-      - name: Check
-        env:
-          ENGINE: ${{ matrix.engine }}
-        run: cargo make check-engine
-
-  host-clippy:
-    needs: [scope, fmt]
-    if: needs.scope.outputs.rust == 'true'
-    name: host-clippy-${{ matrix.engine }}-${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - engine: quickjs
-            os: windows-2025-vs2026
-          - engine: quickjs
-            os: ubuntu-latest
-          - engine: quickjs
-            os: macos-latest
-          - engine: jscore
-            os: macos-latest
-    runs-on: ${{ matrix.os }}
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v5
-        with:
-          submodules: recursive
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache cargo
-        uses: Swatinem/rust-cache@v2
-
-      - name: Install cargo-make
-        uses: taiki-e/install-action@v2
+        uses: taiki-e/install-action@2ca9b94c269419b7b0c711c09d0b21c4e1d51145 # v2.83.1
         with:
           tool: cargo-make
 
@@ -290,48 +301,6 @@ jobs:
         env:
           ENGINE: ${{ matrix.engine }}
         run: cargo make clippy-engine
-
-  host-test:
-    needs: [scope, fmt]
-    if: needs.scope.outputs.rust == 'true'
-    name: host-test-${{ matrix.engine }}-${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - engine: quickjs
-            os: windows-2025-vs2026
-          - engine: quickjs
-            os: ubuntu-latest
-          - engine: quickjs
-            os: macos-latest
-          - engine: jscore
-            os: macos-latest
-    runs-on: ${{ matrix.os }}
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v5
-        with:
-          submodules: recursive
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache cargo
-        uses: Swatinem/rust-cache@v2
-
-      - name: Install cargo-make
-        uses: taiki-e/install-action@v2
-        with:
-          tool: cargo-make
-
-      - name: Install system dependencies (macOS)
-        if: runner.os == 'macOS'
-        env:
-          HOMEBREW_NO_AUTO_UPDATE: "1"
-        run: |
-          brew install llvm
-          echo "LIBCLANG_PATH=$(brew --prefix llvm)/lib" >> "$GITHUB_ENV"
 
       - name: Test (Unix)
         if: runner.os != 'Windows'
@@ -357,6 +326,7 @@ jobs:
         env:
           ENGINE: ${{ matrix.engine }}
           CARGO_TERM_COLOR: never
+          RONG_TEST_TIMEOUT_SECONDS: "600"
         run: |
           $log = Join-Path $env:RUNNER_TEMP "host-test-$env:ENGINE.log"
           & cargo make test-engine 2>&1 | Tee-Object -FilePath $log
@@ -380,17 +350,18 @@ jobs:
             target: aarch64-apple-darwin
           - os: macos-15-intel
             target: x86_64-apple-darwin
-          - os: ubuntu-latest
+          - os: ubuntu-24.04
             target: x86_64-unknown-linux-gnu
           - os: windows-2025-vs2026
             target: x86_64-pc-windows-msvc
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
     env:
       RONG_JSC_CACHE_DIR: ${{ github.workspace }}/.jsc-cache
       RONG_JSC_ARTIFACT_BASE_URL: https://github.com/${{ github.repository }}/releases/download
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           submodules: recursive
 
@@ -408,22 +379,25 @@ jobs:
 
       - name: Install Rust
         if: steps.source-artifact.outputs.run_source == 'true'
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88 # master
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+          components: clippy
 
       - name: Cache JSC source artifact
         if: steps.source-artifact.outputs.run_source == 'true'
-        uses: actions/cache@v5
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ env.RONG_JSC_CACHE_DIR }}/${{ matrix.target }}
           key: jsc-source-${{ matrix.target }}-${{ hashFiles('javascriptcore/sys/webkit-artifacts.tsv') }}
 
       - name: Cache cargo
         if: steps.source-artifact.outputs.run_source == 'true'
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
 
       - name: Install cargo-make
         if: steps.source-artifact.outputs.run_source == 'true'
-        uses: taiki-e/install-action@v2
+        uses: taiki-e/install-action@2ca9b94c269419b7b0c711c09d0b21c4e1d51145 # v2.83.1
         with:
           tool: cargo-make
 
@@ -447,48 +421,6 @@ jobs:
         run: |
           "LIBCLANG_PATH=C:\Program Files\LLVM\bin" | Out-File -FilePath $env:GITHUB_ENV -Append
           "C:\Program Files\LLVM\bin" | Out-File -FilePath $env:GITHUB_PATH -Append
-
-      - name: Check JSC source backend (Unix)
-        if: steps.source-artifact.outputs.run_source == 'true' && runner.os != 'Windows'
-        env:
-          ENGINE: jscore
-          RONG_JSC_SOURCE: "1"
-          RONG_JSC_DOWNLOAD: "1"
-          RONG_JSC_REQUIRE_BYTECODE: "1"
-          CARGO_TERM_COLOR: never
-          RONG_TEST_TIMEOUT_SECONDS: "600"
-        run: |
-          set -o pipefail
-          log="$RUNNER_TEMP/jscore-source-check.log"
-          if ! cargo make check-engine 2>&1 | tee "$log"; then
-            tail_text="$(tail -n 120 "$log")"
-            tail_text="${tail_text//'%'/'%25'}"
-            tail_text="${tail_text//$'\r'/'%0D'}"
-            tail_text="${tail_text//$'\n'/'%0A'}"
-            echo "::error title=JSC source check failed::$tail_text"
-            exit 1
-          fi
-
-      - name: Check JSC source backend (Windows)
-        if: steps.source-artifact.outputs.run_source == 'true' && runner.os == 'Windows'
-        shell: pwsh
-        env:
-          ENGINE: jscore
-          RONG_JSC_SOURCE: "1"
-          RONG_JSC_DOWNLOAD: "1"
-          RONG_JSC_REQUIRE_BYTECODE: "1"
-          CARGO_TERM_COLOR: never
-          RONG_TEST_TIMEOUT_SECONDS: "600"
-        run: |
-          $log = Join-Path $env:RUNNER_TEMP "jscore-source-check.log"
-          & cargo make check-engine 2>&1 | Tee-Object -FilePath $log
-          $exitCode = $LASTEXITCODE
-          if ($exitCode -ne 0) {
-            $tailText = (Get-Content -Path $log -Tail 120) -join "`n"
-            $tailText = $tailText.Replace("%", "%25").Replace("`r", "%0D").Replace("`n", "%0A")
-            Write-Output "::error title=JSC source check failed::$tailText"
-            exit $exitCode
-          }
 
       - name: Clippy JSC source backend (Unix)
         if: steps.source-artifact.outputs.run_source == 'true' && runner.os != 'Windows'
@@ -538,6 +470,7 @@ jobs:
           RONG_JSC_DOWNLOAD: "1"
           RONG_JSC_REQUIRE_BYTECODE: "1"
           CARGO_TERM_COLOR: never
+          RONG_TEST_TIMEOUT_SECONDS: "600"
         run: |
           set -o pipefail
           log="$RUNNER_TEMP/jscore-source-test.log"
@@ -559,6 +492,7 @@ jobs:
           RONG_JSC_DOWNLOAD: "1"
           RONG_JSC_REQUIRE_BYTECODE: "1"
           CARGO_TERM_COLOR: never
+          RONG_TEST_TIMEOUT_SECONDS: "600"
         run: |
           $log = Join-Path $env:RUNNER_TEMP "jscore-source-test.log"
           & cargo make test-engine 2>&1 | Tee-Object -FilePath $log
