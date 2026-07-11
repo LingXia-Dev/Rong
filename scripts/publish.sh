@@ -12,16 +12,17 @@ ALLOW_DIRTY=false
 AUTO_CONFIRM=false
 WAIT_TIMEOUT=180
 POLL_INTERVAL=5
+PUBLISH_DELAY=10
+PUBLISH_ATTEMPTS=4
+RETRY_BASE_DELAY=15
 START_FROM=""
 SKIP_PUBLISHED_CHECK=false
 VERIFY_FEATURES="quickjs"
-CREATE_TAGS=false
+CREATE_PACKAGE_TAGS=false
 CHANGED_SINCE=""
 CHANGED_MODE=false
 CHECK_DRIFT=false
 DRY_RUN=false
-
-WORKSPACE_TOML="Cargo.toml"
 
 # Publishable crates in dependency order.
 CRATES=(
@@ -116,6 +117,7 @@ SELECTED_CRATES=()
 HAS_SELECTOR=false
 
 usage() {
+  local exit_code=${1:-0}
   cat << EOF
 Usage: $0 [OPTIONS]
 
@@ -141,13 +143,17 @@ PUBLISH OPTIONS:
       --skip-published-check Skip crates.io pre-check for existing versions
       --verify-features LIST Cargo features used for crates that need an engine
                              feature during publish verification (default: quickjs)
-      --tag                  Create and push <crate>-v<version> tags for
+      --package-tag          Create and push <crate>-v<version> tags for
                              published or already-published selected crates
       --dry-run              Print the publish plan without requiring tokens or
                              publishing anything
       --check-drift          With --dry-run: exit 2 when a selected crate's
                              current version is already on crates.io (it needs
                              a version bump before it can be published)
+      --publish-delay SEC    Pause after each new upload (default: 10)
+      --publish-attempts N   Maximum attempts for transient upload failures
+                             (default: 4)
+      --retry-base-delay SEC Initial exponential-backoff delay (default: 15)
   -y, --yes                  Skip confirmation prompt
   -t, --timeout SECONDS      Maximum wait time for crates.io sync (default: 180)
   -p, --poll SECONDS         Poll interval for crates.io sync (default: 5)
@@ -157,11 +163,11 @@ EXAMPLES:
   $0 --crate rong_timer
   $0 --crate rong_jscore_sys --crate rong_jscore
   $0 --group engines
-  $0 --group modules --tag
+  $0 --group modules --package-tag
   $0 --changed --dry-run
   $0 --changed-since v0.4.0
 EOF
-  exit 0
+  exit "$exit_code"
 }
 
 contains() {
@@ -221,7 +227,7 @@ add_group() {
       ;;
     *)
       echo -e "${RED}ERROR: unknown group: $group${NC}" >&2
-      usage
+      usage 1
       ;;
   esac
 }
@@ -290,23 +296,55 @@ while [[ $# -gt 0 ]]; do
       VERIFY_FEATURES="$2"
       shift 2
       ;;
-    --tag)
-      CREATE_TAGS=true
+    --package-tag)
+      CREATE_PACKAGE_TAGS=true
       shift
       ;;
     --dry-run)
       DRY_RUN=true
       shift
       ;;
+    --publish-delay)
+      if [[ $# -lt 2 ]]; then
+        echo "Error: --publish-delay requires seconds" >&2
+        exit 1
+      fi
+      PUBLISH_DELAY="$2"
+      shift 2
+      ;;
+    --publish-attempts)
+      if [[ $# -lt 2 ]]; then
+        echo "Error: --publish-attempts requires a count" >&2
+        exit 1
+      fi
+      PUBLISH_ATTEMPTS="$2"
+      shift 2
+      ;;
+    --retry-base-delay)
+      if [[ $# -lt 2 ]]; then
+        echo "Error: --retry-base-delay requires seconds" >&2
+        exit 1
+      fi
+      RETRY_BASE_DELAY="$2"
+      shift 2
+      ;;
     -y|--yes)
       AUTO_CONFIRM=true
       shift
       ;;
     -t|--timeout)
+      if [[ $# -lt 2 ]]; then
+        echo "Error: --timeout requires seconds" >&2
+        exit 1
+      fi
       WAIT_TIMEOUT="$2"
       shift 2
       ;;
     -p|--poll)
+      if [[ $# -lt 2 ]]; then
+        echo "Error: --poll requires seconds" >&2
+        exit 1
+      fi
       POLL_INTERVAL="$2"
       shift 2
       ;;
@@ -315,10 +353,27 @@ while [[ $# -gt 0 ]]; do
       ;;
     *)
       echo "Unknown option: $1" >&2
-      usage
+      usage 1
       ;;
   esac
 done
+
+require_integer() {
+  local name=$1
+  local value=$2
+  local minimum=$3
+
+  if ! [[ "$value" =~ ^[0-9]+$ ]] || [ "$value" -lt "$minimum" ]; then
+    echo "Error: ${name} must be an integer >= ${minimum}, got: ${value}" >&2
+    exit 1
+  fi
+}
+
+require_integer "--timeout" "$WAIT_TIMEOUT" 1
+require_integer "--poll" "$POLL_INTERVAL" 1
+require_integer "--publish-delay" "$PUBLISH_DELAY" 0
+require_integer "--publish-attempts" "$PUBLISH_ATTEMPTS" 1
+require_integer "--retry-base-delay" "$RETRY_BASE_DELAY" 1
 
 if [ "${CI:-}" = "true" ]; then
   AUTO_CONFIRM=true
@@ -422,7 +477,7 @@ precompute_crate_dirs() {
   fi
   for crate in "${CRATES[@]}"; do
     manifest="$(manifest_for_crate "$crate")"
-    CRATE_DIRS_REL+=("$(dirname "${manifest#$WORKSPACE_ROOT/}")")
+    CRATE_DIRS_REL+=("$(dirname "${manifest#"$WORKSPACE_ROOT"/}")")
   done
 }
 
@@ -459,17 +514,27 @@ file_belongs_to_nested_crate() {
   return 1
 }
 
-# Baseline ref for --changed: the crate's own latest package tag, falling back
-# to the latest repo-level release tag. Empty when neither exists.
+# Baseline ref for --changed: the closest reachable package or product release
+# tag. Product releases intentionally use one vX.Y.Z tag, while standalone
+# package releases use <crate>-vX.Y.Z.
 latest_tag_for_crate() {
   local crate=$1
+  local best_tag=""
+  local best_distance=""
+  local distance
   local tag
 
-  tag="$(git tag --list "${crate}-v*" --sort=-v:refname | head -n 1)"
-  if [ -z "$tag" ]; then
-    tag="$(git tag --list "v[0-9]*" --sort=-v:refname | head -n 1)"
-  fi
-  printf '%s' "$tag"
+  while IFS= read -r tag; do
+    [ -n "$tag" ] || continue
+    git merge-base --is-ancestor "$tag" HEAD 2>/dev/null || continue
+    distance="$(git rev-list --count "${tag}..HEAD")"
+    if [ -z "$best_distance" ] || [ "$distance" -lt "$best_distance" ]; then
+      best_tag="$tag"
+      best_distance="$distance"
+    fi
+  done < <(git tag --list "${crate}-v*" "v[0-9]*")
+
+  printf '%s' "$best_tag"
 }
 
 # True when REF..HEAD manifest changes only synchronize internal dependency
@@ -690,10 +755,13 @@ echo -e "Skip published pre-check: ${YELLOW}${SKIP_PUBLISHED_CHECK}${NC}"
 echo -e "Verify features: ${YELLOW}${VERIFY_FEATURES}${NC}"
 echo -e "No verify: ${YELLOW}${NO_VERIFY}${NC}"
 echo -e "Allow dirty: ${YELLOW}${ALLOW_DIRTY}${NC}"
-echo -e "Create crate tags: ${YELLOW}${CREATE_TAGS}${NC}"
+echo -e "Create package tags: ${YELLOW}${CREATE_PACKAGE_TAGS}${NC}"
 echo -e "Auto confirm: ${YELLOW}${AUTO_CONFIRM}${NC}"
 echo -e "Sync timeout: ${YELLOW}${WAIT_TIMEOUT}s${NC}"
 echo -e "Poll interval: ${YELLOW}${POLL_INTERVAL}s${NC}"
+echo -e "Post-publish delay: ${YELLOW}${PUBLISH_DELAY}s${NC}"
+echo -e "Publish attempts: ${YELLOW}${PUBLISH_ATTEMPTS}${NC}"
+echo -e "Retry base delay: ${YELLOW}${RETRY_BASE_DELAY}s${NC}"
 echo ""
 echo -e "${BLUE}Publish plan:${NC}"
 for crate in "${PUBLISH_CRATES[@]}"; do
@@ -726,8 +794,8 @@ if [ "$DRY_RUN" = true ]; then
   exit 0
 fi
 
-if [ "$CREATE_TAGS" = true ] && [ "$ALLOW_DIRTY" != true ] && ! git diff-index --quiet HEAD -- 2>/dev/null; then
-  echo -e "${RED}ERROR: --tag requires a clean tracked working tree unless --allow-dirty is set.${NC}" >&2
+if [ "$CREATE_PACKAGE_TAGS" = true ] && [ "$ALLOW_DIRTY" != true ] && ! git diff-index --quiet HEAD -- 2>/dev/null; then
+  echo -e "${RED}ERROR: --package-tag requires a clean tracked working tree unless --allow-dirty is set.${NC}" >&2
   exit 1
 fi
 
@@ -783,6 +851,32 @@ wait_for_crate() {
   return 1
 }
 
+is_transient_publish_failure() {
+  local output=$1
+
+  tail -n 80 <<< "$output" | grep -Eiq \
+    'got (408|425|429|5[0-9][0-9])|HTTP[^[:digit:]]*(408|425|429|5[0-9][0-9])|spurious network error|connection (reset|refused|timed out)|operation timed out|temporary failure|temporarily unavailable|failed to send request|error sending request|unexpected EOF'
+}
+
+retry_delay() {
+  local failed_attempt=$1
+  local delay=$RETRY_BASE_DELAY
+  local step=1
+  local jitter
+  local jitter_window
+
+  while [ "$step" -lt "$failed_attempt" ] && [ "$delay" -lt 120 ]; do
+    delay=$((delay * 2))
+    step=$((step + 1))
+  done
+  [ "$delay" -gt 120 ] && delay=120
+  jitter_window=$((delay / 4))
+  jitter=$((RANDOM % (jitter_window + 1)))
+  delay=$((delay + jitter))
+  [ "$delay" -gt 120 ] && delay=120
+  printf '%s' "$delay"
+}
+
 ensure_crate_tag() {
   local crate=$1
   local version=$2
@@ -819,7 +913,7 @@ for crate in "${PUBLISH_CRATES[@]}"; do
   if [ "$SKIP_PUBLISHED_CHECK" = false ] && is_crate_published "$crate" "$version"; then
     echo -e "${YELLOW}Skipping ${crate} ${version}; already published.${NC}"
     SKIPPED=$((SKIPPED + 1))
-    if [ "$CREATE_TAGS" = true ]; then
+    if [ "$CREATE_PACKAGE_TAGS" = true ]; then
       ensure_crate_tag "$crate" "$version"
     fi
     continue
@@ -837,14 +931,39 @@ for crate in "${PUBLISH_CRATES[@]}"; do
     cmd+=(--allow-dirty)
   fi
 
-  echo -e "${YELLOW}Running: ${cmd[*]}${NC}"
+  publish_result="failed"
+  publish_output=""
+  attempt=1
+  while [ "$attempt" -le "$PUBLISH_ATTEMPTS" ]; do
+    echo -e "${YELLOW}Running (attempt ${attempt}/${PUBLISH_ATTEMPTS}): ${cmd[*]}${NC}"
+    if publish_output="$("${cmd[@]}" 2>&1)"; then
+      publish_result="published"
+      break
+    fi
 
-  if publish_output="$("${cmd[@]}" 2>&1)"; then
+    if grep -Eq 'already exists on crates\.io index|already uploaded' <<< "$publish_output"; then
+      publish_result="already-published"
+      break
+    fi
+
+    printf '%s\n' "$publish_output"
+    if ! is_transient_publish_failure "$publish_output" \
+      || [ "$attempt" -eq "$PUBLISH_ATTEMPTS" ]; then
+      break
+    fi
+
+    delay="$(retry_delay "$attempt")"
+    echo -e "${YELLOW}Transient crates.io failure; retrying ${crate} in ${delay}s...${NC}"
+    sleep "$delay"
+    attempt=$((attempt + 1))
+  done
+
+  if [ "$publish_result" = "published" ]; then
     printf '%s\n' "$publish_output"
     PUBLISHED=$((PUBLISHED + 1))
     echo -e "${GREEN}Successfully published ${crate} ${version}${NC}"
 
-    if [ "$CREATE_TAGS" = true ]; then
+    if [ "$CREATE_PACKAGE_TAGS" = true ]; then
       ensure_crate_tag "$crate" "$version"
     fi
 
@@ -852,13 +971,17 @@ for crate in "${PUBLISH_CRATES[@]}"; do
       if ! wait_for_crate "$crate" "$version" "$WAIT_TIMEOUT" "$POLL_INTERVAL"; then
         echo -e "${YELLOW}Proceeding despite crates.io index lag for ${crate}.${NC}"
       fi
+      if [ "$PUBLISH_DELAY" -gt 0 ]; then
+        echo -e "${YELLOW}Pacing uploads for ${PUBLISH_DELAY}s before the next crate...${NC}"
+        sleep "$PUBLISH_DELAY"
+      fi
     fi
   else
-    printf '%s\n' "$publish_output"
-    if grep -Eq 'already exists on crates\.io index|already uploaded' <<<"$publish_output"; then
+    if [ "$publish_result" = "already-published" ]; then
+      printf '%s\n' "$publish_output"
       SKIPPED=$((SKIPPED + 1))
       echo -e "${YELLOW}Skipping ${crate} ${version}; already published.${NC}"
-      if [ "$CREATE_TAGS" = true ]; then
+      if [ "$CREATE_PACKAGE_TAGS" = true ]; then
         ensure_crate_tag "$crate" "$version"
       fi
       continue

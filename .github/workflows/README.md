@@ -55,17 +55,24 @@
   - `--crate rong_jscore_sys --crate rong_jscore`
   - `--group engines`
   - `--changed-since v0.4.0`
-- **Input:** `create_tags` creates package-level tags such as
-  `rong_timer-v0.4.1` and `npm-rongjs-rong-v0.4.1`
-- **Runs:** publishes the selected package set; it does not create repo-level
-  `vX.Y.Z` tags or GitHub Releases
+- **Input:** `package_tags` controls package-level tags such as
+  `rong_timer-v0.4.1` and `npm-rongjs-rong-v0.4.1`:
+  - `auto`: create them for standalone package publishes, but use only the
+    product tag when `product_release` is set
+  - `always`: always create package tags
+  - `never`: never create package tags
+- **Input:** `product_release` optionally creates the repo-level `vX.Y.Z` tag
+  and GitHub Release after all selected package jobs succeed
+- **Runs:** publishes the selected package set and optionally creates the
+  coordinated product release
 - **Requirements:** run from `master`; package versions and `CHANGELOG.md` must
   already be updated when relevant
 
 ## Secrets
 
 - `CARGO_REGISTRY_TOKEN` (required for publish)
-- `GITHUB_TOKEN` (default Actions token; used when `create_tags=true`)
+- `GITHUB_TOKEN` (default Actions token; used for package/product tags and
+  GitHub Releases)
 
 npm publishing uses Trusted Publishing through GitHub Actions OIDC. Configure the
 trusted publisher for each repo-maintained npm package in npm package settings;
