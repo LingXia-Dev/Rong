@@ -6,6 +6,33 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 
 ## [Unreleased]
 
+### Type generation and binding macros
+
+- Added the published `rong_typegen` package, combining the shared binding
+  metadata library with the `rong-typegen` CLI for generating TypeScript
+  declarations directly from Rust source. The same tooling supports independent
+  downstream runtimes and includes a versioned, DOM-free `logic-web` profile
+  with standard runtime APIs such as
+  `fetch`, URL, events, buffers, streams, timers, and console.
+- Made the published `fs`, `s3`, `sqlite`, `storage`, and `url` declarations
+  canonical generated outputs, with CI drift checks and explicit
+  canonical/curated policy. Removed unverified generated snapshots that were
+  not compared with the published type surface.
+- Removed SQLite's hand-authored type prelude. SQLite parameter, value, and row
+  aliases now live in the Rust `js_api!` declaration and are generated into the
+  published package without weakening the previous types.
+- Added `js_api!` as the single source for namespace runtime registration,
+  namespace TypeScript augmentation, and TypeScript-only aliases. Downstream
+  runtimes can target their own namespace interface and global object without
+  depending on `@rongjs/rong`.
+- Redesigned the binding macro surface without compatibility aliases, with one
+  consistent class model, explicit untagged and numeric enum bindings,
+  namespaced field metadata, and precise TypeScript signature overrides.
+- Added generated TypeScript aliases for untagged Rust value unions.
+- Made binding metadata fail closed for unknown or incompatible options,
+  duplicate exports, unsupported generic bindings, unresolved namespace
+  functions, malformed CLI configuration, and stale generated outputs.
+
 ## [0.4.1] - 2026-06-10
 
 Rong 0.4.1 is a focused patch release for the timer module and the
