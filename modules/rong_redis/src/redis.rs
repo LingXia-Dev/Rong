@@ -13,6 +13,14 @@ use tokio::sync::{mpsc, oneshot};
 
 type SharedCloseTx = Arc<Mutex<Option<oneshot::Sender<()>>>>;
 type SharedMessageRx = Arc<Mutex<Option<mpsc::Receiver<Result<RedisSubscriptionMessage, String>>>>>;
+type NamespaceResolver = Rc<dyn Fn(&JSContext) -> JSResult<String>>;
+
+#[derive(Clone)]
+enum RedisNamespace {
+    None,
+    Static(String),
+    Dynamic(NamespaceResolver),
+}
 
 struct RedisSubscriptionMessage {
     channel: String,
@@ -128,22 +136,37 @@ impl RedisSubscription {
 pub struct RedisClient {
     url: String,
     conn: Rc<RefCell<Option<redis::aio::MultiplexedConnection>>>,
-    namespace_prefix: Option<String>,
+    namespace: RedisNamespace,
     /// Active subscriptions tracked so `client.close()` can tear them down.
     subs: Rc<RefCell<HashMap<u64, SharedCloseTx>>>,
     next_sub_id: Rc<Cell<u64>>,
 }
 
 impl RedisClient {
-    fn prefixed_name(&self, name: &str) -> String {
-        match self.namespace_prefix.as_deref() {
-            Some(prefix) if !prefix.is_empty() => format!("{prefix}{name}"),
-            _ => name.to_string(),
+    fn apply_namespace(prefix: &str, name: &str) -> JSResult<String> {
+        if prefix.is_empty() {
+            return Err(
+                HostError::new("E_INVALID_ARG", "Redis namespace must not be empty")
+                    .with_name("TypeError")
+                    .into(),
+            );
+        }
+        Ok(format!("{prefix}{name}"))
+    }
+
+    fn prefixed_name(&self, ctx: &JSContext, name: &str) -> JSResult<String> {
+        match &self.namespace {
+            RedisNamespace::None => Ok(name.to_owned()),
+            RedisNamespace::Static(prefix) => Self::apply_namespace(prefix, name),
+            RedisNamespace::Dynamic(resolve) => {
+                let prefix = resolve(ctx)?;
+                Self::apply_namespace(&prefix, name)
+            }
         }
     }
 
     fn namespaced(&self) -> bool {
-        matches!(self.namespace_prefix.as_deref(), Some(prefix) if !prefix.is_empty())
+        !matches!(self.namespace, RedisNamespace::None)
     }
 
     fn ensure_raw_command_allowed(&self) -> JSResult<()> {
@@ -158,19 +181,46 @@ impl RedisClient {
         Ok(())
     }
 
-    /// Create a new `RedisClient` from Rust.
-    ///
-    /// This is the primary Rust-side API for creating pre-configured clients,
-    /// e.g. in environments that inject instances via a platform namespace
-    /// instead of exposing the JS constructor.
-    pub fn new(url: String, namespace_prefix: Option<String>) -> Self {
+    /// Create an unnamespaced host-configured client.
+    pub fn new(url: impl Into<String>) -> Self {
         Self {
-            url,
+            url: url.into(),
             conn: Rc::new(RefCell::new(None)),
-            namespace_prefix,
+            namespace: RedisNamespace::None,
             subs: Rc::new(RefCell::new(HashMap::new())),
             next_sub_id: Rc::new(Cell::new(0)),
         }
+    }
+
+    /// Apply a fixed namespace to this host-configured client.
+    pub fn with_namespace(mut self, prefix: impl Into<String>) -> JSResult<Self> {
+        let prefix = prefix.into();
+        if prefix.is_empty() {
+            return Err(
+                HostError::new("E_INVALID_ARG", "Redis namespace must not be empty")
+                    .with_name("TypeError")
+                    .into(),
+            );
+        }
+        self.namespace = RedisNamespace::Static(prefix);
+        Ok(self)
+    }
+
+    /// Resolve this host-configured client's namespace for each command.
+    /// Subscriptions retain the namespace resolved when they are created.
+    pub fn with_namespace_resolver<F>(mut self, resolver: F) -> Self
+    where
+        F: Fn(&JSContext) -> JSResult<String> + 'static,
+    {
+        self.namespace = RedisNamespace::Dynamic(Rc::new(resolver));
+        self
+    }
+
+    /// Convert this host-configured client into an injectable JavaScript object.
+    /// Required classes are registered without exposing their constructors.
+    pub fn into_js_object(self, ctx: &JSContext) -> JSResult<JSObject> {
+        crate::register_redis_classes(ctx)?;
+        Ok(rong::Class::lookup::<Self>(ctx)?.instance(self))
     }
 
     async fn ensure_conn(&self) -> JSResult<redis::aio::MultiplexedConnection> {
@@ -207,7 +257,7 @@ impl RedisClient {
             )
             .with_name("TypeError")
         })?;
-        Ok(Self::new(url, None))
+        Ok(Self::new(url))
     }
 
     /// Explicitly connect to the Redis server.
@@ -239,17 +289,17 @@ impl RedisClient {
     // ── String operations ────────────────────────────────────────────
 
     #[js_method]
-    async fn set(&self, key: String, value: String) -> JSResult<String> {
+    async fn set(&self, ctx: JSContext, key: String, value: String) -> JSResult<String> {
+        let key = self.prefixed_name(&ctx, &key)?;
         let mut conn = self.ensure_conn().await?;
-        let key = self.prefixed_name(&key);
         let _: () = conn.set(&key, &value).await.map_err(redis_err)?;
         Ok("OK".to_string())
     }
 
     #[js_method]
     async fn get(&self, ctx: JSContext, key: String) -> JSResult<JSValue> {
+        let key = self.prefixed_name(&ctx, &key)?;
         let mut conn = self.ensure_conn().await?;
-        let key = self.prefixed_name(&key);
         let result: Option<String> = conn.get(&key).await.map_err(redis_err)?;
         match result {
             Some(s) => Ok(JSValue::from_rust(&ctx, s)),
@@ -258,33 +308,33 @@ impl RedisClient {
     }
 
     #[js_method]
-    async fn del(&self, key: String) -> JSResult<i32> {
+    async fn del(&self, ctx: JSContext, key: String) -> JSResult<i32> {
+        let key = self.prefixed_name(&ctx, &key)?;
         let mut conn = self.ensure_conn().await?;
-        let key = self.prefixed_name(&key);
         let count: i32 = conn.del(&key).await.map_err(redis_err)?;
         Ok(count)
     }
 
     #[js_method]
-    async fn exists(&self, key: String) -> JSResult<bool> {
+    async fn exists(&self, ctx: JSContext, key: String) -> JSResult<bool> {
+        let key = self.prefixed_name(&ctx, &key)?;
         let mut conn = self.ensure_conn().await?;
-        let key = self.prefixed_name(&key);
         let exists: bool = conn.exists(&key).await.map_err(redis_err)?;
         Ok(exists)
     }
 
     #[js_method]
-    async fn expire(&self, key: String, seconds: i64) -> JSResult<bool> {
+    async fn expire(&self, ctx: JSContext, key: String, seconds: i64) -> JSResult<bool> {
+        let key = self.prefixed_name(&ctx, &key)?;
         let mut conn = self.ensure_conn().await?;
-        let key = self.prefixed_name(&key);
         let result: bool = conn.expire(&key, seconds).await.map_err(redis_err)?;
         Ok(result)
     }
 
     #[js_method]
-    async fn ttl(&self, key: String) -> JSResult<i64> {
+    async fn ttl(&self, ctx: JSContext, key: String) -> JSResult<i64> {
+        let key = self.prefixed_name(&ctx, &key)?;
         let mut conn = self.ensure_conn().await?;
-        let key = self.prefixed_name(&key);
         let ttl: i64 = conn.ttl(&key).await.map_err(redis_err)?;
         Ok(ttl)
     }
@@ -292,17 +342,17 @@ impl RedisClient {
     // ── Numeric operations ───────────────────────────────────────────
 
     #[js_method]
-    async fn incr(&self, key: String) -> JSResult<i64> {
+    async fn incr(&self, ctx: JSContext, key: String) -> JSResult<i64> {
+        let key = self.prefixed_name(&ctx, &key)?;
         let mut conn = self.ensure_conn().await?;
-        let key = self.prefixed_name(&key);
         let val: i64 = conn.incr(&key, 1i64).await.map_err(redis_err)?;
         Ok(val)
     }
 
     #[js_method]
-    async fn decr(&self, key: String) -> JSResult<i64> {
+    async fn decr(&self, ctx: JSContext, key: String) -> JSResult<i64> {
+        let key = self.prefixed_name(&ctx, &key)?;
         let mut conn = self.ensure_conn().await?;
-        let key = self.prefixed_name(&key);
         let val: i64 = conn.decr(&key, 1i64).await.map_err(redis_err)?;
         Ok(val)
     }
@@ -310,17 +360,23 @@ impl RedisClient {
     // ── Hash operations ──────────────────────────────────────────────
 
     #[js_method]
-    async fn hset(&self, key: String, field: String, value: String) -> JSResult<i32> {
+    async fn hset(
+        &self,
+        ctx: JSContext,
+        key: String,
+        field: String,
+        value: String,
+    ) -> JSResult<i32> {
+        let key = self.prefixed_name(&ctx, &key)?;
         let mut conn = self.ensure_conn().await?;
-        let key = self.prefixed_name(&key);
         let result: i32 = conn.hset(&key, &field, &value).await.map_err(redis_err)?;
         Ok(result)
     }
 
     #[js_method]
     async fn hget(&self, ctx: JSContext, key: String, field: String) -> JSResult<JSValue> {
+        let key = self.prefixed_name(&ctx, &key)?;
         let mut conn = self.ensure_conn().await?;
-        let key = self.prefixed_name(&key);
         let result: Option<String> = conn.hget(&key, &field).await.map_err(redis_err)?;
         match result {
             Some(s) => Ok(JSValue::from_rust(&ctx, s)),
@@ -329,7 +385,7 @@ impl RedisClient {
     }
 
     #[js_method]
-    async fn hmset(&self, key: String, fields: Vec<String>) -> JSResult<String> {
+    async fn hmset(&self, ctx: JSContext, key: String, fields: Vec<String>) -> JSResult<String> {
         if !fields.len().is_multiple_of(2) {
             return Err(HostError::new(
                 "E_INVALID_ARG",
@@ -338,8 +394,8 @@ impl RedisClient {
             .with_name("TypeError")
             .into());
         }
+        let key = self.prefixed_name(&ctx, &key)?;
         let mut conn = self.ensure_conn().await?;
-        let key = self.prefixed_name(&key);
         let pairs: Vec<(&str, &str)> = fields
             .chunks(2)
             .map(|c| (c[0].as_str(), c[1].as_str()))
@@ -350,8 +406,8 @@ impl RedisClient {
 
     #[js_method]
     async fn hmget(&self, ctx: JSContext, key: String, fields: Vec<String>) -> JSResult<JSValue> {
+        let key = self.prefixed_name(&ctx, &key)?;
         let mut conn = self.ensure_conn().await?;
-        let key = self.prefixed_name(&key);
         let mut cmd = redis::cmd("HMGET");
         cmd.arg(&key);
         for field in &fields {
@@ -373,9 +429,15 @@ impl RedisClient {
     }
 
     #[js_method]
-    async fn hincrby(&self, key: String, field: String, increment: i64) -> JSResult<i64> {
+    async fn hincrby(
+        &self,
+        ctx: JSContext,
+        key: String,
+        field: String,
+        increment: i64,
+    ) -> JSResult<i64> {
+        let key = self.prefixed_name(&ctx, &key)?;
         let mut conn = self.ensure_conn().await?;
-        let key = self.prefixed_name(&key);
         let val: i64 = conn
             .hincr(&key, &field, increment)
             .await
@@ -384,9 +446,15 @@ impl RedisClient {
     }
 
     #[js_method]
-    async fn hincrbyfloat(&self, key: String, field: String, increment: f64) -> JSResult<f64> {
+    async fn hincrbyfloat(
+        &self,
+        ctx: JSContext,
+        key: String,
+        field: String,
+        increment: f64,
+    ) -> JSResult<f64> {
+        let key = self.prefixed_name(&ctx, &key)?;
         let mut conn = self.ensure_conn().await?;
-        let key = self.prefixed_name(&key);
         let val: f64 = conn
             .hincr(&key, &field, increment)
             .await
@@ -397,33 +465,33 @@ impl RedisClient {
     // ── Set operations ───────────────────────────────────────────────
 
     #[js_method]
-    async fn sadd(&self, key: String, member: String) -> JSResult<i32> {
+    async fn sadd(&self, ctx: JSContext, key: String, member: String) -> JSResult<i32> {
+        let key = self.prefixed_name(&ctx, &key)?;
         let mut conn = self.ensure_conn().await?;
-        let key = self.prefixed_name(&key);
         let result: i32 = conn.sadd(&key, &member).await.map_err(redis_err)?;
         Ok(result)
     }
 
     #[js_method]
-    async fn srem(&self, key: String, member: String) -> JSResult<i32> {
+    async fn srem(&self, ctx: JSContext, key: String, member: String) -> JSResult<i32> {
+        let key = self.prefixed_name(&ctx, &key)?;
         let mut conn = self.ensure_conn().await?;
-        let key = self.prefixed_name(&key);
         let result: i32 = conn.srem(&key, &member).await.map_err(redis_err)?;
         Ok(result)
     }
 
     #[js_method]
-    async fn sismember(&self, key: String, member: String) -> JSResult<bool> {
+    async fn sismember(&self, ctx: JSContext, key: String, member: String) -> JSResult<bool> {
+        let key = self.prefixed_name(&ctx, &key)?;
         let mut conn = self.ensure_conn().await?;
-        let key = self.prefixed_name(&key);
         let result: bool = conn.sismember(&key, &member).await.map_err(redis_err)?;
         Ok(result)
     }
 
     #[js_method]
     async fn smembers(&self, ctx: JSContext, key: String) -> JSResult<JSValue> {
+        let key = self.prefixed_name(&ctx, &key)?;
         let mut conn = self.ensure_conn().await?;
-        let key = self.prefixed_name(&key);
         let results: Vec<String> = conn.smembers(&key).await.map_err(redis_err)?;
         let arr = JSArray::new(&ctx)?;
         for s in &results {
@@ -434,8 +502,8 @@ impl RedisClient {
 
     #[js_method]
     async fn srandmember(&self, ctx: JSContext, key: String) -> JSResult<JSValue> {
+        let key = self.prefixed_name(&ctx, &key)?;
         let mut conn = self.ensure_conn().await?;
-        let key = self.prefixed_name(&key);
         let result: Option<String> = conn.srandmember(&key).await.map_err(redis_err)?;
         match result {
             Some(s) => Ok(JSValue::from_rust(&ctx, s)),
@@ -445,8 +513,8 @@ impl RedisClient {
 
     #[js_method]
     async fn spop(&self, ctx: JSContext, key: String) -> JSResult<JSValue> {
+        let key = self.prefixed_name(&ctx, &key)?;
         let mut conn = self.ensure_conn().await?;
-        let key = self.prefixed_name(&key);
         let result: Option<String> = conn.spop(&key).await.map_err(redis_err)?;
         match result {
             Some(s) => Ok(JSValue::from_rust(&ctx, s)),
@@ -457,25 +525,25 @@ impl RedisClient {
     // ── List operations ──────────────────────────────────────────────
 
     #[js_method]
-    async fn lpush(&self, key: String, value: String) -> JSResult<i32> {
+    async fn lpush(&self, ctx: JSContext, key: String, value: String) -> JSResult<i32> {
+        let key = self.prefixed_name(&ctx, &key)?;
         let mut conn = self.ensure_conn().await?;
-        let key = self.prefixed_name(&key);
         let result: i32 = conn.lpush(&key, &value).await.map_err(redis_err)?;
         Ok(result)
     }
 
     #[js_method]
-    async fn rpush(&self, key: String, value: String) -> JSResult<i32> {
+    async fn rpush(&self, ctx: JSContext, key: String, value: String) -> JSResult<i32> {
+        let key = self.prefixed_name(&ctx, &key)?;
         let mut conn = self.ensure_conn().await?;
-        let key = self.prefixed_name(&key);
         let result: i32 = conn.rpush(&key, &value).await.map_err(redis_err)?;
         Ok(result)
     }
 
     #[js_method]
     async fn lpop(&self, ctx: JSContext, key: String) -> JSResult<JSValue> {
+        let key = self.prefixed_name(&ctx, &key)?;
         let mut conn = self.ensure_conn().await?;
-        let key = self.prefixed_name(&key);
         let result: Option<String> = conn.lpop(&key, None).await.map_err(redis_err)?;
         match result {
             Some(s) => Ok(JSValue::from_rust(&ctx, s)),
@@ -485,8 +553,8 @@ impl RedisClient {
 
     #[js_method]
     async fn rpop(&self, ctx: JSContext, key: String) -> JSResult<JSValue> {
+        let key = self.prefixed_name(&ctx, &key)?;
         let mut conn = self.ensure_conn().await?;
-        let key = self.prefixed_name(&key);
         let result: Option<String> = conn.rpop(&key, None).await.map_err(redis_err)?;
         match result {
             Some(s) => Ok(JSValue::from_rust(&ctx, s)),
@@ -502,8 +570,8 @@ impl RedisClient {
         start: i64,
         stop: i64,
     ) -> JSResult<JSValue> {
+        let key = self.prefixed_name(&ctx, &key)?;
         let mut conn = self.ensure_conn().await?;
-        let key = self.prefixed_name(&key);
         let results: Vec<String> = conn
             .lrange(&key, start as isize, stop as isize)
             .await
@@ -516,9 +584,9 @@ impl RedisClient {
     }
 
     #[js_method]
-    async fn llen(&self, key: String) -> JSResult<i64> {
+    async fn llen(&self, ctx: JSContext, key: String) -> JSResult<i64> {
+        let key = self.prefixed_name(&ctx, &key)?;
         let mut conn = self.ensure_conn().await?;
-        let key = self.prefixed_name(&key);
         let len: i64 = conn.llen(&key).await.map_err(redis_err)?;
         Ok(len)
     }
@@ -526,9 +594,9 @@ impl RedisClient {
     // ── Pub/Sub ──────────────────────────────────────────────────────
 
     #[js_method]
-    async fn publish(&self, channel: String, message: String) -> JSResult<i32> {
+    async fn publish(&self, ctx: JSContext, channel: String, message: String) -> JSResult<i32> {
+        let channel = self.prefixed_name(&ctx, &channel)?;
         let mut conn = self.ensure_conn().await?;
-        let channel = self.prefixed_name(&channel);
         let result: i32 = conn.publish(&channel, &message).await.map_err(redis_err)?;
         Ok(result)
     }
@@ -539,11 +607,11 @@ impl RedisClient {
         &self,
         ctx: JSContext,
         channel: String,
-        options: Optional<JSObject>,
+        options: Optional<JSValue>,
     ) -> JSResult<JSObject> {
         let mut abort_rx = subscribe_abort_receiver_from_options(&options)?;
         let logical_channel = channel;
-        let channel = self.prefixed_name(&logical_channel);
+        let channel = self.prefixed_name(&ctx, &logical_channel)?;
 
         let client = Client::open(self.url.as_str()).map_err(|e| {
             HostError::new("E_INVALID_ARG", format!("Invalid Redis URL: {}", e))
@@ -664,11 +732,17 @@ impl RedisClient {
 }
 
 fn subscribe_abort_receiver_from_options(
-    options: &Optional<JSObject>,
+    options: &Optional<JSValue>,
 ) -> JSResult<Option<rong_abort::AbortReceiver>> {
     let Some(options) = options.0.as_ref() else {
         return Ok(None);
     };
+    if options.is_undefined() || options.is_null() {
+        return Ok(None);
+    }
+    let options = options.clone().into_object().ok_or_else(|| {
+        HostError::new("E_INVALID_ARG", "options must be an object").with_name("TypeError")
+    })?;
     if !options.has_property("signal")? {
         return Ok(None);
     }
