@@ -77,16 +77,21 @@ pub fn init(ctx: &JSContext) -> JSResult<()> {
 
 2. **`rong_modules/Cargo.toml`**:
    - dependency: `rong_<name> = { workspace = true, optional = true }`
-   - per-module feature: `<name> = ["rong_<name>"]`
+   - per-module feature: `<name> = ["rong_<name>", "<runtime-dependency>", ...]`;
+     include every Rong module whose JS API/classes your module needs at runtime
    - add `"<name>"` to the `all = [ ... ]` feature list
    - add engine passthrough to each engine feature: `"rong_<name>?/quickjs"`, `"rong_<name>?/jscore"`, `"rong_<name>?/arkjs"`
 
-3. **`rong_modules/src/lib.rs`** - call your `init` under the feature gate:
+3. **`rong_modules/src/lib.rs`** - add one dependency-first entry to
+   `define_modules!`:
 
 ```rust
-#[cfg(feature = "<name>")]
-rong_<name>::init(ctx)?;
+("<name>", "<name>", ["<runtime-dependency>"], rong_<name>::init),
 ```
+
+The first string is the Cargo feature, the second is the stable runtime module
+name, and the dependency list must match the feature closure above. Registry
+tests reject duplicate names, missing dependencies, and dependency-order drift.
 
 4. **`packages/rong_types/typegen.json`** - if the crate contains `js_api!`,
    `#[js_class]`, `#[js_union]`, `FromJSObject`/`IntoJSObject`, or

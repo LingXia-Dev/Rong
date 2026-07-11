@@ -56,7 +56,11 @@ quickjs = [
     "rong_storage?/quickjs",
     "rong_stream?/quickjs",
     "rong_compression?/quickjs",
+    "rong_command?/quickjs",
+    "rong_redis?/quickjs",
+    "rong_sqlite?/quickjs",
     "rong_worker?/quickjs",
+    "rong_s3?/quickjs",
 ]
 jscore = [
     "rong/jscore",
@@ -75,7 +79,11 @@ jscore = [
     "rong_storage?/jscore",
     "rong_stream?/jscore",
     "rong_compression?/jscore",
+    "rong_command?/jscore",
+    "rong_redis?/jscore",
+    "rong_sqlite?/jscore",
     "rong_worker?/jscore",
+    "rong_s3?/jscore",
 ]
 arkjs = [
     "rong/arkjs",
@@ -94,7 +102,11 @@ arkjs = [
     "rong_storage?/arkjs",
     "rong_stream?/arkjs",
     "rong_compression?/arkjs",
+    "rong_command?/arkjs",
+    "rong_redis?/arkjs",
+    "rong_sqlite?/arkjs",
     "rong_worker?/arkjs",
+    "rong_s3?/arkjs",
 ]
 
 # TLS backend selection is forwarded from the top-level product crate.
@@ -126,21 +138,21 @@ all = [
 
 timer = ["rong_timer"]
 cron = ["rong_cron"]
-http = ["rong_http"]
-encoding = ["rong_encoding"]
 event = ["rong_event"]
-assert = ["rong_assert"]
 exception = ["rong_exception"]
 abort = ["rong_abort"]
+encoding = ["rong_encoding"]
+assert = ["rong_assert"]
 console = ["rong_console"]
 url = ["rong_url"]
 buffer = ["rong_buffer"]
-fs = ["rong_fs"]
-storage = ["rong_storage"]
-stream = ["rong_stream"]
+stream = ["rong_stream", "abort"]
 compression = ["rong_compression"]
-command = ["rong_command"]
-redis = ["rong_redis"]
+command = ["rong_command", "abort", "buffer", "encoding", "stream"]
+http = ["rong_http", "abort", "exception", "buffer", "url", "stream"]
+fs = ["rong_fs", "abort", "exception", "stream"]
+storage = ["rong_storage"]
+redis = ["rong_redis", "abort"]
 sqlite = ["rong_sqlite"]
 worker = ["rong_worker"]
 s3 = ["rong_s3"]

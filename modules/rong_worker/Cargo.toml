@@ -20,9 +20,9 @@ rong_console = { workspace = true }
 tracing = { workspace = true }
 
 [features]
-quickjs = ["rong/quickjs"]
-jscore = ["rong/jscore"]
-arkjs = ["rong/arkjs"]
+quickjs = ["rong/quickjs", "rong_console/quickjs"]
+jscore = ["rong/jscore", "rong_console/jscore"]
+arkjs = ["rong/arkjs", "rong_console/arkjs"]
 tls-aws-lc = ["rong/tls-aws-lc"]
 tls-ring = ["rong/tls-ring"]
 

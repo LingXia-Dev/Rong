@@ -37,7 +37,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         info!(worker_id = interval_worker_id, "Interval task started");
         let ctx = runtime.context();
         // Optional: Initialize modules if needed
-        let _ = rong_modules::init(&ctx).map_err(|e| {
+        let _ = rong_modules::init_all(&ctx).map_err(|e| {
             warn!(worker_id = interval_worker_id, error = ?e, "Failed to init rong_modules (ignoring)");
         });
 

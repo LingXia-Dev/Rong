@@ -169,7 +169,7 @@ async fn main() -> Result<(), RongJSError> {
         }
     } else {
         // Give workers the same module set as the main context
-        rong_modules::worker::set_initializer(rong_modules::init);
+        rong_modules::worker::set_initializer(rong_modules::init_all);
 
         // For commands that need JS execution, use a single Rong worker pool
         Rong::<RongJS>::builder()
@@ -178,7 +178,7 @@ async fn main() -> Result<(), RongJSError> {
             .call(|runtime, _receiver| async move {
                 let ctx = runtime.context();
                 // Initialize all modules
-                rong_modules::init(&ctx)?;
+                rong_modules::init_all(&ctx)?;
                 init_cli_namespace(&ctx)?;
 
                 // Process the command with the initialized context

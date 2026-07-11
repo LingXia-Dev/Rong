@@ -6,6 +6,17 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 
 ## [Unreleased]
 
+### Module registry
+
+- Added a static, dependency-aware `rong_modules` registry for selecting a
+  validated module subset per JavaScript context. Module requests fail before
+  initialization when unavailable, runtime dependencies are explicit Cargo
+  feature dependencies, `init(ctx, names)` is the least-privilege default, and
+  `init_all(ctx)` explicitly opts into the full compiled surface. Repeated
+  registry calls skip modules already initialized in that context. Existing
+  `init(ctx)` callers must use `init_all(ctx)` to preserve the previous full
+  initialization behavior, or pass an explicit module set to `init(ctx, names)`.
+
 ### Host-injected Redis and S3 clients
 
 - Added host-managed Redis client injection with fixed or dynamically resolved
