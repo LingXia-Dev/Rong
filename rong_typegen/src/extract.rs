@@ -13,9 +13,9 @@ use crate::model::{
 };
 use crate::{
     JsFieldOptions, JsMethodOptions, js_class_options, js_field_options, js_method_options,
-    u32_integer_expr,
+    u32_integer_expr, validate_js_method_signature,
 };
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use syn::{
     Attribute, Expr, FnArg, ImplItem, ImplItemFn, ItemEnum, ItemFn, ItemImpl, ItemStruct, Lit,
     Meta, Pat, ReturnType, Signature, Type,
@@ -53,9 +53,10 @@ pub fn extract_impl(input: &ItemImpl) -> syn::Result<Option<Item>> {
             "#[js_class] does not support generic impl blocks",
         ));
     }
-    let Some(name) = class_options.rename.or_else(|| type_name(&input.self_ty)) else {
+    let Some(rust_name) = type_name(&input.self_ty) else {
         return Ok(None);
     };
+    let name = class_options.rename.unwrap_or_else(|| rust_name.clone());
     if name.is_empty() {
         return Ok(None); // e.g. a `#[js_class]` on an unnamed/complex self type
     }
@@ -63,6 +64,7 @@ pub fn extract_impl(input: &ItemImpl) -> syn::Result<Option<Item>> {
     let mut constructor = None;
     let mut constructor_docs = Vec::new();
     let mut private_constructor = false;
+    let mut gc_mark_seen = false;
     let mut members = Vec::new();
 
     // Parse each method's options once.
@@ -74,16 +76,56 @@ pub fn extract_impl(input: &ItemImpl) -> syn::Result<Option<Item>> {
             ))
         })
         .collect::<syn::Result<_>>()?;
+    let mut js_members = HashMap::<(bool, String), (bool, bool, bool)>::new();
+    for (method, options) in &parsed {
+        if options.constructor || options.gc_mark {
+            continue;
+        }
+        let key = (method.sig.receiver().is_none(), js_name(method, options));
+        let seen = js_members.entry(key.clone()).or_default();
+        let duplicate = if options.getter {
+            let duplicate = seen.0 || seen.2;
+            seen.0 = true;
+            duplicate
+        } else if options.setter {
+            let duplicate = seen.1 || seen.2;
+            seen.1 = true;
+            duplicate
+        } else {
+            let duplicate = seen.0 || seen.1 || seen.2;
+            seen.2 = true;
+            duplicate
+        };
+        if duplicate {
+            return Err(syn::Error::new_spanned(
+                method,
+                format!("duplicate JavaScript class member `{}`", key.1),
+            ));
+        }
+    }
     // A getter that also has a setter is a read/write property, not readonly.
-    let setter_names: HashSet<String> = parsed
+    let setter_names: HashSet<(bool, String)> = parsed
         .iter()
         .filter(|(_, o)| o.setter)
-        .map(|(m, o)| js_name(m, o))
+        .map(|(m, o)| (m.sig.receiver().is_none(), js_name(m, o)))
+        .collect();
+    let getter_names: HashSet<(bool, String)> = parsed
+        .iter()
+        .filter(|(_, o)| o.getter)
+        .map(|(m, o)| (m.sig.receiver().is_none(), js_name(m, o)))
         .collect();
 
     for (m, opts) in &parsed {
         let m = *m;
+        validate_js_method_signature(m, opts)?;
         if opts.gc_mark {
+            if gc_mark_seen {
+                return Err(syn::Error::new_spanned(
+                    m,
+                    "a js_class cannot declare more than one gc_mark method",
+                ));
+            }
+            gc_mark_seen = true;
             continue;
         }
         let is_async = m.sig.asyncness.is_some();
@@ -108,21 +150,37 @@ pub fn extract_impl(input: &ItemImpl) -> syn::Result<Option<Item>> {
             }
             continue;
         }
-        if opts.setter {
-            continue; // folded into its getter's property
-        }
-
         let member = if opts.getter {
-            let kind = if setter_names.contains(&member_name) {
-                MemberKind::Property
-            } else {
-                MemberKind::Getter
+            let is_static = m.sig.receiver().is_none();
+            let kind = match (
+                is_static,
+                setter_names.contains(&(is_static, member_name.clone())),
+            ) {
+                (false, false) => MemberKind::Getter,
+                (false, true) => MemberKind::Property,
+                (true, false) => MemberKind::StaticGetter,
+                (true, true) => MemberKind::StaticProperty,
             };
             Member {
                 kind,
                 name: member_name,
                 docs: doc_lines(&m.attrs),
                 sig: make_sig(m, opts, is_async, false, &name),
+            }
+        } else if opts.setter {
+            let is_static = m.sig.receiver().is_none();
+            if getter_names.contains(&(is_static, member_name.clone())) {
+                continue; // represented by the matching getter's property
+            }
+            Member {
+                kind: if is_static {
+                    MemberKind::StaticSetter
+                } else {
+                    MemberKind::Setter
+                },
+                name: member_name,
+                docs: doc_lines(&m.attrs),
+                sig: make_sig(m, opts, is_async, true, &name),
             }
         } else {
             let kind = if m.sig.receiver().is_some() {
@@ -141,6 +199,7 @@ pub fn extract_impl(input: &ItemImpl) -> syn::Result<Option<Item>> {
     }
 
     Ok(Some(Item::Class(ClassDef {
+        rust_name,
         name,
         docs: doc_lines(&input.attrs),
         constructor,
@@ -588,6 +647,26 @@ mod tests {
         assert_eq!(c.members[0].sig.ret, "Blob");
         assert_eq!(c.members[1].sig.ret, "Blob");
         assert_eq!(c.members[1].kind, MemberKind::StaticMethod);
+    }
+
+    #[test]
+    fn preserves_static_and_setter_only_property_kinds() {
+        let c = class(syn::parse_quote! {
+            #[js_class]
+            impl Config {
+                #[js_method(getter, rename = "current")]
+                fn current() -> Self { unimplemented!() }
+
+                #[js_method(setter, rename = "current")]
+                fn set_current(value: Self) { unimplemented!() }
+
+                #[js_method(setter, rename = "token")]
+                fn set_token(&mut self, value: String) { unimplemented!() }
+            }
+        });
+        assert_eq!(c.members[0].kind, MemberKind::StaticProperty);
+        assert_eq!(c.members[1].kind, MemberKind::Setter);
+        assert_eq!(c.members[1].sig.params[0].ts_type, "string");
     }
 
     #[test]

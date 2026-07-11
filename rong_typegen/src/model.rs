@@ -75,6 +75,9 @@ pub struct NumericEnumVariant {
 /// A JS class (`export declare class Name { … }`).
 #[derive(Debug, Clone, PartialEq)]
 pub struct ClassDef {
+    /// Rust type name used by `js_api! class` entries to resolve this class.
+    /// This is metadata only and is not rendered.
+    pub rust_name: String,
     /// TS class name (after any `rename`).
     pub name: String,
     /// Doc lines (from `///`), rendered as a JSDoc block.
@@ -106,8 +109,13 @@ pub enum MemberKind {
     StaticMethod,
     /// A getter with no matching setter renders as `readonly`.
     Getter,
+    StaticGetter,
     /// A getter that also has a setter (rendered as a plain property).
     Property,
+    StaticProperty,
+    /// A setter with no matching getter is rendered as an accessor declaration.
+    Setter,
+    StaticSetter,
 }
 
 /// A callable signature, already lowered to TS types.

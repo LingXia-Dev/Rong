@@ -3,7 +3,7 @@
 
 use syn::parse::{Parse, ParseStream};
 use syn::punctuated::Punctuated;
-use syn::{Attribute, Expr, Lit, LitStr, Meta, Result, Token};
+use syn::{Attribute, Expr, FnArg, ImplItemFn, Lit, LitStr, Meta, Result, Token};
 
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct JsClassOptions {
@@ -188,20 +188,80 @@ pub fn js_method_options(attrs: &[Attribute]) -> Result<Option<JsMethodOptions>>
                 "ts_return is not valid on a setter",
             ));
         }
+        if options.enumerable && !(options.getter || options.setter) {
+            return Err(syn::Error::new_spanned(
+                attr,
+                "enumerable is only valid on a getter or setter",
+            ));
+        }
         if options.gc_mark
             && (options.rename.is_some()
+                || options.getter
+                || options.setter
                 || options.enumerable
                 || options.ts_return.is_some()
                 || options.ts_params.is_some())
         {
             return Err(syn::Error::new_spanned(
                 attr,
-                "gc_mark cannot be combined with rename, enumerable, ts_return, or ts_params",
+                "gc_mark cannot be combined with getter, setter, rename, enumerable, ts_return, or ts_params",
             ));
         }
         result = Some(options);
     }
     Ok(result)
+}
+
+/// Validate the method shape whose option syntax was accepted above. Keeping
+/// this beside the option parser ensures proc-macro expansion and source-based
+/// type generation reject the same invalid accessor/constructor definitions.
+pub fn validate_js_method_signature(method: &ImplItemFn, options: &JsMethodOptions) -> Result<()> {
+    let receiver = method.sig.receiver();
+    let visible_params = method
+        .sig
+        .inputs
+        .iter()
+        .filter(|arg| match arg {
+            FnArg::Receiver(_) => false,
+            FnArg::Typed(value) => !is_injected_type(&value.ty),
+        })
+        .count();
+
+    if options.constructor && receiver.is_some() {
+        return Err(syn::Error::new_spanned(
+            &method.sig.inputs,
+            "a JavaScript constructor cannot have a self receiver",
+        ));
+    }
+    if options.getter && visible_params != 0 {
+        return Err(syn::Error::new_spanned(
+            &method.sig.inputs,
+            "a JavaScript getter cannot accept visible parameters",
+        ));
+    }
+    if options.setter && visible_params != 1 {
+        return Err(syn::Error::new_spanned(
+            &method.sig.inputs,
+            "a JavaScript setter must accept exactly one visible parameter",
+        ));
+    }
+    if options.gc_mark {
+        let valid_receiver = receiver
+            .is_some_and(|receiver| receiver.reference.is_some() && receiver.mutability.is_none());
+        let raw_params = method
+            .sig
+            .inputs
+            .iter()
+            .filter(|arg| matches!(arg, FnArg::Typed(_)))
+            .count();
+        if !valid_receiver || raw_params != 1 {
+            return Err(syn::Error::new_spanned(
+                &method.sig.inputs,
+                "gc_mark requires an `&self` receiver and exactly one mark function parameter",
+            ));
+        }
+    }
+    Ok(())
 }
 
 pub fn js_field_options(attrs: &[Attribute]) -> Result<JsFieldOptions> {
@@ -273,6 +333,15 @@ pub fn path_last_is(path: &syn::Path, name: &str) -> bool {
     path.segments
         .last()
         .is_some_and(|segment| segment.ident == name)
+}
+
+fn is_injected_type(ty: &syn::Type) -> bool {
+    let syn::Type::Path(path) = ty else {
+        return false;
+    };
+    path.path.segments.last().is_some_and(|segment| {
+        segment.ident == "JSContext" || segment.ident == "This" || segment.ident == "ThisMut"
+    })
 }
 
 /// Parse the unsigned integer expression accepted by `#[js_numeric_enum]`.

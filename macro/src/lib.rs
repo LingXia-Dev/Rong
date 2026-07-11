@@ -170,12 +170,11 @@ pub fn js_api(input: TokenStream) -> TokenStream {
 ///         Self { x, y }
 ///     }
 ///
-///     // Async instance method
+///     // Async instance methods use `&self`; use interior mutability when state
+///     // must change across an await point.
 ///     #[js_method]
-///     async fn move_by_async(&mut self, dx: i32, dy: i32) {
-///         // Async operation
-///         self.x += dx;
-///         self.y += dy;
+///     async fn distance_async(&self) -> f64 {
+///         ((self.x.pow(2) + self.y.pow(2)) as f64).sqrt()
 ///     }
 ///
 ///     // Async static method
@@ -199,7 +198,7 @@ pub fn js_api(input: TokenStream) -> TokenStream {
 /// ```javascript
 /// // Using async instance method
 /// let point = new PointX(1, 2);
-/// await point.moveByAsync(10, 20);
+/// const distance = await point.distanceAsync();
 ///
 /// // Using async static method
 /// let newPoint = await PointX.createAsync(5, 6);

@@ -430,7 +430,7 @@ fn module_from_crate(c: &CrateSrc) -> Result<ModuleTypeDef, String> {
     let mut visited = HashSet::new();
     visit_file(&root, &module_dir, &[], &mut visited, &mut extraction)?;
     extraction.resolve_namespaces()?;
-    validate_type_aliases(&extraction.items)?;
+    validate_declarations(&extraction.items)?;
     extraction.items.sort_by_key(sort_key);
     Ok(ModuleTypeDef {
         module: c.name.clone(),
@@ -438,7 +438,7 @@ fn module_from_crate(c: &CrateSrc) -> Result<ModuleTypeDef, String> {
     })
 }
 
-fn validate_type_aliases(items: &[Item]) -> Result<(), String> {
+fn validate_declarations(items: &[Item]) -> Result<(), String> {
     let mut declarations = BTreeMap::<&str, &'static str>::new();
     for item in items {
         let (name, kind) = match item {
@@ -448,11 +448,9 @@ fn validate_type_aliases(items: &[Item]) -> Result<(), String> {
             Item::Class(value) => (value.name.as_str(), "class"),
             Item::Namespace(_) => continue,
         };
-        if let Some(previous) = declarations.insert(name, kind)
-            && (previous == "type alias" || kind == "type alias")
-        {
+        if let Some(previous) = declarations.insert(name, kind) {
             return Err(format!(
-                "TypeScript type alias `{name}` conflicts with a generated {previous}"
+                "duplicate TypeScript declaration `{name}`: generated as both {previous} and {kind}"
             ));
         }
     }
@@ -468,6 +466,15 @@ struct Extraction {
 
 impl Extraction {
     fn resolve_namespaces(&mut self) -> Result<(), String> {
+        let mut classes = BTreeMap::<String, Vec<String>>::new();
+        for item in &self.items {
+            if let Item::Class(class) = item {
+                classes
+                    .entry(class.rust_name.clone())
+                    .or_default()
+                    .push(class.name.clone());
+            }
+        }
         let mut namespaces: BTreeMap<String, Vec<NamespaceMember>> = BTreeMap::new();
         let mut exported_names = BTreeSet::new();
         for (module_path, api) in self.apis.drain(..) {
@@ -535,13 +542,25 @@ impl Extraction {
                         }));
                     }
                     JsApiEntry::Class(export) => {
-                        let class_name = export
+                        let rust_name = export
                             .class
                             .segments
                             .last()
                             .expect("class path has a segment")
                             .ident
                             .to_string();
+                        let matches = classes.get(&rust_name).ok_or_else(|| {
+                            format!(
+                                "registered namespace class `{}` was not found",
+                                path_text(&export.class)
+                            )
+                        })?;
+                        let [class_name] = matches.as_slice() else {
+                            return Err(format!(
+                                "registered namespace class `{}` is ambiguous; use unique Rust class names",
+                                path_text(&export.class)
+                            ));
+                        };
                         members.push(NamespaceMember::Value(NamespaceValueDef {
                             name: export.name.value(),
                             ts_type: format!("typeof {class_name}"),
@@ -1012,7 +1031,7 @@ mod tests {
         std::fs::create_dir_all(&src).unwrap();
         std::fs::write(
             src.join("lib.rs"),
-            "mod api;\njs_api! { fn register(ctx) { namespace RongNamespace = ctx.host_namespace(); type Name = \"string\"; fn ping = api::ping; } }\n",
+            "mod api;\n#[js_class(rename = \"PublicThing\")] impl RustThing {}\njs_api! { fn register(ctx) { namespace RongNamespace = ctx.host_namespace(); type Name = \"string\"; fn ping = api::ping; class Thing = RustThing; } }\n",
         )
         .unwrap();
         std::fs::write(
@@ -1041,6 +1060,15 @@ mod tests {
         assert_eq!(function.sig.params[0].ts_type, "string");
         assert_eq!(function.sig.ret, "Promise<string>");
         assert_eq!(function.docs, ["Ping a name."]);
+        let value = namespace
+            .members
+            .iter()
+            .find_map(|member| match member {
+                NamespaceMember::Value(value) if value.name == "Thing" => Some(value),
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(value.ts_type, "typeof PublicThing");
         let alias = module
             .items
             .iter()
@@ -1051,6 +1079,39 @@ mod tests {
             .unwrap();
         assert_eq!(alias.name, "Name");
         assert_eq!(alias.ts_type, "string");
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn duplicate_declarations_and_missing_registered_classes_fail_closed() {
+        let duplicate = vec![
+            Item::Interface(rong_typegen::InterfaceDef {
+                name: "Options".into(),
+                docs: vec![],
+                fields: vec![],
+            }),
+            Item::TypeAlias(TypeAliasDef {
+                name: "Options".into(),
+                ts_type: "string".into(),
+                docs: vec![],
+            }),
+        ];
+        assert!(validate_declarations(&duplicate).is_err());
+
+        let root = temp_dir("missing-class");
+        let src = root.join("src");
+        std::fs::create_dir_all(&src).unwrap();
+        std::fs::write(
+            src.join("lib.rs"),
+            "js_api! { fn register(ctx) { namespace Lx = ctx.host_namespace(); class Missing = Missing; } }\n",
+        )
+        .unwrap();
+        let error = module_from_crate(&CrateSrc {
+            name: "fixture".into(),
+            src,
+        })
+        .unwrap_err();
+        assert!(error.contains("registered namespace class `Missing` was not found"));
         std::fs::remove_dir_all(root).unwrap();
     }
 

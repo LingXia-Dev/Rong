@@ -71,6 +71,7 @@ fn sqlite_module() -> ModuleTypeDef {
                 ],
             }),
             Item::Class(ClassDef {
+                rust_name: "SQLite".into(),
                 name: "SQLite".into(),
                 docs: vec!["SQLite database connection.".into()],
                 constructor: Some(FnSig {
@@ -171,6 +172,7 @@ fn one_class(c: ClassDef) -> String {
 #[test]
 fn private_constructor_renders() {
     let out = one_class(ClassDef {
+        rust_name: "Stmt".into(),
         name: "Stmt".into(),
         docs: vec![],
         constructor: None,
@@ -184,6 +186,7 @@ fn private_constructor_renders() {
 #[test]
 fn non_trailing_optional_param_uses_union_not_question_mark() {
     let out = one_class(ClassDef {
+        rust_name: "C".into(),
         name: "C".into(),
         docs: vec![],
         constructor: None,
@@ -201,6 +204,41 @@ fn non_trailing_optional_param_uses_union_not_question_mark() {
         out.contains("f(a: number | undefined, b: string): void;"),
         "{out}"
     );
+}
+
+#[test]
+fn renders_static_and_setter_only_properties() {
+    let out = one_class(ClassDef {
+        rust_name: "Config".into(),
+        name: "Config".into(),
+        docs: vec![],
+        constructor: None,
+        constructor_docs: vec![],
+        private_constructor: false,
+        members: vec![
+            Member {
+                kind: MemberKind::StaticGetter,
+                name: "current".into(),
+                docs: vec![],
+                sig: FnSig {
+                    ret: "Config".into(),
+                    ..Default::default()
+                },
+            },
+            Member {
+                kind: MemberKind::Setter,
+                name: "token".into(),
+                docs: vec![],
+                sig: FnSig {
+                    params: vec![param("value", "string", false)],
+                    ret: "void".into(),
+                    ..Default::default()
+                },
+            },
+        ],
+    });
+    assert!(out.contains("static readonly current: Config;"), "{out}");
+    assert!(out.contains("set token(value: string);"), "{out}");
 }
 
 #[test]

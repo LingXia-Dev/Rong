@@ -30,6 +30,7 @@ pub use api::{ClassExport, ConstExport, FunctionExport, JsApiEntry, JsApiInput, 
 pub use attributes::{
     JsClassOptions, JsDefault, JsFieldOptions, JsMethodOptions, js_class_options, js_field_options,
     js_method_options, parse_js_class_args, path_last_is, u32_integer_expr,
+    validate_js_method_signature,
 };
 #[cfg(feature = "typegen")]
 pub use extract::{

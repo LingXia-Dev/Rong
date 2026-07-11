@@ -88,6 +88,10 @@ fn set_x(&mut self, x: i32) { self.x = x; }
 ```
 
 - `enumerable` makes the property show up in `Object.keys()` / `for...in`.
+- A getter accepts no JavaScript-visible parameters; a setter accepts exactly
+  one. Runtime-injected parameters such as `JSContext` do not count.
+- Accessors without a `self` receiver are static. Setter-only accessors are
+  supported and are emitted as TypeScript `set` declarations.
 
 ## Attribute reference
 
@@ -98,7 +102,7 @@ fn set_x(&mut self, x: i32) { self.x = x; }
 | `rename = "x"`  | JS method/property name              | `#[js_method(rename = "moveBy")]`    |
 | `getter`        | Property getter                      | `#[js_method(getter)]`               |
 | `setter`        | Property setter                      | `#[js_method(setter, rename = "x")]` |
-| `enumerable`    | Property enumerable                  | `#[js_method(getter, enumerable)]`   |
+| `enumerable`    | Getter/setter property enumerable    | `#[js_method(getter, enumerable)]`   |
 | `ts_params = "…"` | Exact generated TS parameter list | `#[js_method(ts_params = "value: string")]` |
 | `ts_return = "…"` | Exact generated TS return type     | `#[js_method(ts_return = "ArrayBuffer")]` |
 

@@ -125,16 +125,50 @@ fn render_class(out: &mut String, c: &ClassDef) {
     for member in &c.members {
         render_docs(out, &member.docs, "  ");
         match member.kind {
-            MemberKind::Getter => {
+            MemberKind::Getter | MemberKind::StaticGetter => {
+                let stat = if member.kind == MemberKind::StaticGetter {
+                    "static "
+                } else {
+                    ""
+                };
                 let _ = writeln!(
                     out,
-                    "  readonly {}: {};",
+                    "  {stat}readonly {}: {};",
                     property_key(&member.name),
                     member.sig.ret
                 );
             }
-            MemberKind::Property => {
-                let _ = writeln!(out, "  {}: {};", property_key(&member.name), member.sig.ret);
+            MemberKind::Property | MemberKind::StaticProperty => {
+                let stat = if member.kind == MemberKind::StaticProperty {
+                    "static "
+                } else {
+                    ""
+                };
+                let _ = writeln!(
+                    out,
+                    "  {stat}{}: {};",
+                    property_key(&member.name),
+                    member.sig.ret
+                );
+            }
+            MemberKind::Setter | MemberKind::StaticSetter => {
+                let stat = if member.kind == MemberKind::StaticSetter {
+                    "static "
+                } else {
+                    ""
+                };
+                let param = member
+                    .sig
+                    .params
+                    .first()
+                    .expect("setter extraction validates one parameter");
+                let _ = writeln!(
+                    out,
+                    "  {stat}set {}({}: {});",
+                    property_key(&member.name),
+                    param.name,
+                    param.ts_type
+                );
             }
             MemberKind::Method | MemberKind::StaticMethod => {
                 let stat = if member.kind == MemberKind::StaticMethod {
