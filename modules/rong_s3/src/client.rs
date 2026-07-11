@@ -17,19 +17,38 @@ fn s3_error(msg: impl Into<String>) -> RongJSError {
 pub struct S3Client {
     pub(crate) config: Rc<S3Config>,
     namespace_prefix: Option<String>,
+    config_locked: bool,
 }
 
 impl S3Client {
-    /// Create an `S3Client` from Rust with a pre-built config.
-    ///
-    /// This is the primary Rust-side API for creating pre-configured clients,
-    /// useful for environments that inject instances via a platform namespace
-    /// instead of exposing the JS constructor.
-    pub fn new(config: S3Config, namespace_prefix: Option<String>) -> Self {
+    /// Create an unnamespaced host-configured client with locked configuration.
+    pub fn new(config: S3Config) -> Self {
         Self {
             config: config.into_rc(),
-            namespace_prefix,
+            namespace_prefix: None,
+            config_locked: true,
         }
+    }
+
+    /// Apply a fixed object-key namespace to this host-configured client.
+    pub fn with_namespace(mut self, prefix: impl Into<String>) -> JSResult<Self> {
+        let prefix = prefix.into();
+        if prefix.is_empty() {
+            return Err(
+                HostError::new("E_INVALID_ARG", "S3 namespace must not be empty")
+                    .with_name("TypeError")
+                    .into(),
+            );
+        }
+        self.namespace_prefix = Some(prefix);
+        Ok(self)
+    }
+
+    /// Convert this host-configured client into an injectable JavaScript object.
+    /// Required classes are registered without exposing their constructors.
+    pub fn into_js_object(self, ctx: &JSContext) -> JSResult<JSObject> {
+        crate::register_s3_classes(ctx)?;
+        Ok(Class::lookup::<Self>(ctx)?.instance(self))
     }
 
     fn prefixed_path(&self, path: &str) -> String {
@@ -39,16 +58,12 @@ impl S3Client {
         }
     }
 
-    fn namespaced(&self) -> bool {
-        matches!(self.namespace_prefix.as_deref(), Some(prefix) if !prefix.is_empty())
-    }
-
     fn reject_config_override(
         &self,
         options: &Optional<JSObject>,
         allowed_non_config_keys: &[&str],
     ) -> JSResult<()> {
-        if !self.namespaced() {
+        if !self.config_locked {
             return Ok(());
         }
 
@@ -69,9 +84,7 @@ impl S3Client {
             if obj.has_property(key)? {
                 return Err(HostError::new(
                     "E_INVALID_ARG",
-                    format!(
-                        "Cannot override S3 config field '{key}' on a namespaced injected S3Client"
-                    ),
+                    format!("Cannot override S3 config field '{key}' on a host-injected S3Client"),
                 )
                 .with_name("TypeError")
                 .into());
@@ -82,7 +95,7 @@ impl S3Client {
             if !allowed_non_config_keys.contains(&key.as_str()) {
                 return Err(HostError::new(
                     "E_INVALID_ARG",
-                    format!("Option '{key}' is not allowed on a namespaced injected S3Client"),
+                    format!("Option '{key}' is not allowed on a host-injected S3Client"),
                 )
                 .with_name("TypeError")
                 .into());
@@ -117,6 +130,7 @@ impl S3Client {
         Ok(Self {
             config: config.into_rc(),
             namespace_prefix: None,
+            config_locked: false,
         })
     }
 

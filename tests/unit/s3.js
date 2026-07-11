@@ -2,8 +2,8 @@
 // Uses TEST_S3_* globals set by the Rust test harness (local s3s mock server).
 
 const S3_ENDPOINT = globalThis.TEST_S3_ENDPOINT ?? "http://127.0.0.1:9000";
-const S3_ACCESS_KEY = globalThis.TEST_S3_ACCESS_KEY ?? "minioadmin";
-const S3_SECRET_KEY = globalThis.TEST_S3_SECRET_KEY ?? "minioadmin";
+const S3_ACCESS_KEY = globalThis.TEST_S3_ACCESS_KEY;
+const S3_SECRET_KEY = globalThis.TEST_S3_SECRET_KEY;
 const S3_BUCKET = globalThis.TEST_S3_BUCKET ?? "test-bucket";
 
 function makeClient(overrides) {
