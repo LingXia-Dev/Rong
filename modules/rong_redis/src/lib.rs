@@ -10,34 +10,36 @@ use rong::*;
 mod redis;
 pub use redis::*;
 
-/// Initialize the Redis module — exposes `Rong.RedisClient`.
-pub fn init(ctx: &JSContext) -> JSResult<()> {
+rong::js_api! {
+    fn register_redis_namespace(ctx) {
+        namespace RongNamespace = ctx.host_namespace();
+        class RedisClient = RedisClient;
+    }
+}
+
+pub(crate) fn register_redis_classes(ctx: &JSContext) -> JSResult<()> {
     ctx.register_hidden_class::<RedisClient>()?;
     ctx.register_hidden_class::<RedisSubscription>()?;
-    let ctor = Class::lookup::<RedisClient>(ctx)?.clone();
-    ctx.host_namespace().set("RedisClient", ctor)?;
-
-    ctx.eval::<()>(Source::from_bytes(
-        r#"(function() {
-            const proto = Rong.RedisClient.prototype;
-            const _subscribe = proto.subscribe;
-            proto.subscribe = function subscribe(channel, options) {
-                return options === undefined
-                    ? _subscribe.call(this, channel)
-                    : _subscribe.call(this, channel, options);
-            };
-        })();"#,
-    ))?;
-
     Ok(())
+}
+
+/// Initialize the Redis module — exposes `Rong.RedisClient`.
+pub fn init(ctx: &JSContext) -> JSResult<()> {
+    register_redis_classes(ctx)?;
+    register_redis_namespace(ctx)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use rong_test::*;
+    use std::cell::RefCell;
+    use std::rc::Rc;
     use std::time::Duration;
     use tokio::io::AsyncReadExt;
+
+    #[derive(Clone)]
+    struct TestNamespaceState(Rc<RefCell<String>>);
 
     /// Start a redis-server on a random port. Returns (url, child).
     /// The child is killed when dropped via `kill_on_drop(true)`.
@@ -201,11 +203,11 @@ mod tests {
                 Err(err) => return Err(err),
             };
 
-            // Create a pre-configured client with namespace prefix from Rust,
-            // then inject it as a global `redis` — JS never calls `new Rong.RedisClient`.
-            let client = RedisClient::new(url, Some("app1:".to_string()));
-            let js_client = Class::lookup::<RedisClient>(&ctx)?.instance(client);
-            ctx.global().set("redis", js_client)?;
+            // Create a pre-configured client with namespace prefix from Rust.
+            // JS never calls `new Rong.RedisClient`.
+            let client = RedisClient::new(url).with_namespace("app1:")?;
+            ctx.host_namespace()
+                .set("redis", client.into_js_object(&ctx)?)?;
 
             let passed = UnitJSRunner::load_script(&ctx, "redis_namespace.js")
                 .await?
@@ -213,6 +215,78 @@ mod tests {
                 .await?;
             assert!(passed);
 
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn test_redis_dynamic_namespace() {
+        async_run!(|ctx: JSContext| async move {
+            let (url, _child) = match setup_redis_env(&ctx).await {
+                Ok(values) => values,
+                Err(err) if is_missing_redis_server(&err) => return Ok(()),
+                Err(err) => return Err(err),
+            };
+
+            let namespace_state = TestNamespaceState(Rc::new(RefCell::new("scope-a".to_owned())));
+            ctx.set_state(namespace_state.clone());
+
+            let client = RedisClient::new(url).with_namespace_resolver(|ctx| {
+                let state = ctx.get_state::<TestNamespaceState>().ok_or_else(|| {
+                    HostError::new("E_INVALID_STATE", "missing host namespace context")
+                })?;
+                Ok(format!("{}:", state.0.borrow().as_str()))
+            });
+            ctx.host_namespace()
+                .set("redis", client.into_js_object(&ctx)?)?;
+
+            let set_test_namespace = JSFunc::new(&ctx, move |namespace: String| {
+                *namespace_state.0.borrow_mut() = namespace;
+            })?;
+            ctx.host_namespace()
+                .set("__setTestNamespace", set_test_namespace)?;
+
+            let empty_namespace = RedisClient::new("redis://127.0.0.1:1")
+                .with_namespace_resolver(|_| Ok(String::new()));
+            ctx.host_namespace()
+                .set("emptyNamespaceRedis", empty_namespace.into_js_object(&ctx)?)?;
+
+            let resolver_error =
+                RedisClient::new("not a redis URL").with_namespace_resolver(|_| {
+                    Err(HostError::new("E_TEST_NAMESPACE", "namespace unavailable")
+                        .with_name("TypeError")
+                        .into())
+                });
+            ctx.host_namespace()
+                .set("resolverErrorRedis", resolver_error.into_js_object(&ctx)?)?;
+
+            let passed = UnitJSRunner::load_script(&ctx, "redis_dynamic_namespace.js")
+                .await?
+                .run()
+                .await?;
+            assert!(passed);
+
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn test_redis_injected_api() {
+        async_run!(|ctx: JSContext| async move {
+            assert!(
+                RedisClient::new("redis://127.0.0.1:1")
+                    .with_namespace("")
+                    .is_err()
+            );
+            let client = RedisClient::new("redis://127.0.0.1:1");
+            ctx.host_namespace()
+                .set("redis", client.into_js_object(&ctx)?)?;
+            assert!(ctx.eval::<bool>(Source::from_bytes(
+                r#"typeof Rong.redis.get === "function"
+                    && typeof Rong.redis.subscribe === "function"
+                    && typeof Rong.RedisClient === "undefined"
+                    && typeof RedisSubscription === "undefined""#,
+            ))?);
             Ok(())
         });
     }

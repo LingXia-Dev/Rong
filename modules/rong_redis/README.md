@@ -42,11 +42,27 @@ Async Redis client. Exposed as `Rong.RedisClient`.
 
 ## Namespaced Injected Clients
 
-When a `RedisClient` is created from Rust with a non-empty `namespace_prefix`, the
+When a `RedisClient` is created from Rust with a fixed or dynamic namespace, the
 following JS API restriction applies:
 
 - `send()` is **disabled** — throws `TypeError`. Raw commands could bypass the namespace prefix, breaking isolation. Use the typed methods (`set`, `get`, `hset`, etc.) instead, which automatically apply the prefix.
 
 ## Rust API
 
-- `RedisClient::new(url, namespace_prefix)` — create a pre-configured client from Rust, useful for environments that inject instances via a platform namespace instead of exposing the JS constructor.
+- `RedisClient::new(url)` — create an unnamespaced host-configured client.
+- `.with_namespace(prefix)` — apply a fixed namespace.
+- `.with_namespace_resolver(resolver)` — resolve a trusted namespace for each command; a subscription retains the namespace resolved when it is created.
+- `client.into_js_object(ctx)` — register the required hidden classes and convert the client into an injectable JavaScript object.
+
+Both fixed and dynamic namespaces fail closed: empty prefixes are rejected and
+raw `send()` is disabled. Dynamic resolvers run before connection or network
+I/O for each operation.
+
+Prefer `.with_namespace(prefix)` for a stable scope; it has no resolver or
+context lookup. Use `.with_namespace_resolver(...)` when one reusable Redis
+connection serves changing host-managed scopes.
+
+Keep dynamic namespace state in Rust-owned `JSContext::set_state`/`get_state`
+rather than a JavaScript global. Inject the result into `ctx.host_namespace()`
+when the desired API is `Rong.redis`; neither the namespace state nor a
+top-level `redis` property needs to be exposed.

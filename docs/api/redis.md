@@ -28,6 +28,43 @@ client.close();
 client.connected; // false
 ```
 
+Hosts that inject managed clients can construct `RedisClient` from Rust without
+exposing the URL to JavaScript. `RedisClient::new(url)` creates an unnamespaced
+client. Chain `.with_namespace(prefix)` for a fixed namespace or
+`.with_namespace_resolver(resolver)` to resolve a trusted prefix for each
+command. The resolver runs before connection or network I/O, and an empty
+prefix is rejected instead of falling back to unnamespaced access. A
+subscription retains the prefix resolved when `subscribe()` creates it;
+changing resolver state affects later operations, not an existing subscription.
+Namespaced clients disable raw `send()` so commands cannot bypass key or channel
+rewriting.
+
+Prefer a fixed namespace when one client has one stable scope; that path avoids
+resolver and context lookups. Use a resolver when the same Redis connection must
+be reused across changing host-managed scopes.
+
+Dynamic namespace state should remain host-owned rather than stored in a
+JavaScript global. This prevents application code from changing its own scope
+and avoids a JavaScript property lookup and conversion on every operation:
+
+```rust
+struct NamespacePrefix(String);
+
+ctx.set_state(NamespacePrefix("app-a".to_owned()));
+let client = RedisClient::new(url).with_namespace_resolver(|ctx| {
+    let namespace = ctx
+        .get_state::<NamespacePrefix>()
+        .ok_or_else(|| HostError::new("E_INVALID_STATE", "missing namespace context"))?;
+    Ok(format!("{}:", namespace.0))
+});
+ctx.host_namespace()
+    .set("redis", client.into_js_object(ctx)?)?;
+```
+
+`into_js_object` automatically registers the client and its internal
+subscription class without exposing either constructor. The resulting client
+is available as `Rong.redis`; a top-level `redis` global is not required.
+
 ## Strings
 
 ```javascript
