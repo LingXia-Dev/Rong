@@ -408,6 +408,22 @@ NODE
       FILES_TO_ADD+=("$package_json")
     fi
     echo -e "${GREEN}✓ Updated $package_json to $NEW_VERSION${NC}"
+
+    package_lock="$(dirname "$package_json")/package-lock.json"
+    if [ -f "$package_lock" ]; then
+      node - "$package_lock" "$NEW_VERSION" <<'NODE'
+const fs = require("fs");
+const [file, version] = process.argv.slice(2);
+const lock = JSON.parse(fs.readFileSync(file, "utf8"));
+lock.version = version;
+if (lock.packages?.[""]) lock.packages[""].version = version;
+fs.writeFileSync(file, `${JSON.stringify(lock, null, 2)}\n`);
+NODE
+      if [ ${#FILES_TO_ADD[@]} -eq 0 ] || add_unique "$package_lock" "${FILES_TO_ADD[@]}"; then
+        FILES_TO_ADD+=("$package_lock")
+      fi
+      echo -e "${GREEN}✓ Updated $package_lock to $NEW_VERSION${NC}"
+    fi
   done
 fi
 
