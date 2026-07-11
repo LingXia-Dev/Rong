@@ -39,6 +39,9 @@ git config --local core.hooksPath .githooks
 - Bumps selected Rust crates and/or repo-maintained npm packages
 - Rust package groups: `core`, `engines`, `modules`, `bundles`,
   `non-modules`, `rust`, `all`
+- Transitively includes publishable reverse dependencies when the target
+  version falls outside their current Cargo requirement (for example,
+  `0.4 -> 0.5`), preventing mixed internal ABIs
 - Updates matching `[workspace.dependencies]` version lower bounds for selected
   Rust crates
 - Default is file update only (no git ops)
@@ -54,11 +57,10 @@ git config --local core.hooksPath .githooks
 - Supports `--crate`, `--group`, `--changed`, and `--changed-since` selection
 - `--changed` selects crates with publish-relevant changes since their own
   latest package tag (`<crate>-vX.Y.Z`), falling back to the latest repo tag
-  (`vX.Y.Z`). Internal version churn — the crate's own `[package]`/
-  `[workspace.package]` version and the `bump_version.sh` version syncs on
-  `rong*` dependency entries — and files belonging to nested crates are
-  ignored, so the selection reflects real code changes. External dependency
-  version changes (e.g. bumping `tokio`) still count as changes.
+  (`vX.Y.Z`). Explicit package version bumps count, while the matching
+  `bump_version.sh` lower-bound syncs on `rong*` dependency entries and files
+  belonging to nested crates are ignored. External dependency version changes
+  (e.g. bumping `tokio`) also count.
 - `--changed-since REF` is the same change detection against one explicit ref
 - Defaults to all publishable Rust crates only when no selection is provided,
   preserving the old full-publish behavior

@@ -55,6 +55,13 @@ BUNDLE_CRATES=(
   "rong_cli"
 )
 
+PUBLISHABLE_CRATES=(
+  "${CORE_CRATES[@]}"
+  "${ENGINE_CRATES[@]}"
+  "${MODULE_CRATES[@]}"
+  "${BUNDLE_CRATES[@]}"
+)
+
 usage() {
   cat << EOF
 Usage: $0 <new-version> [OPTIONS]
@@ -246,6 +253,106 @@ fi
 METADATA_FILE="$(mktemp)"
 trap 'rm -f "$METADATA_FILE"' EXIT
 cargo metadata --no-deps --format-version 1 > "$METADATA_FILE"
+
+# A pre-1.0 minor bump is semver-breaking. If a selected crate moves outside
+# an internal dependent's current Cargo requirement, that dependent must also
+# receive the new version; otherwise its already-published manifest keeps
+# resolving the old ABI. Expand transitively so bundles are included too.
+if [ ${#SELECTED_CRATES[@]} -gt 0 ]; then
+  REQUESTED_CRATES=("${SELECTED_CRATES[@]}")
+  EXPANDED_CRATES=()
+  while IFS= read -r crate; do
+    [ -n "$crate" ] && EXPANDED_CRATES+=("$crate")
+  done < <(
+    node - "$METADATA_FILE" "$NEW_VERSION" \
+      "${PUBLISHABLE_CRATES[@]}" --selected-- "${SELECTED_CRATES[@]}" <<'NODE'
+const fs = require("fs");
+const args = process.argv.slice(2);
+const metadataPath = args.shift();
+const newVersion = args.shift();
+const separator = args.indexOf("--selected--");
+if (separator < 0) throw new Error("missing selected-crate separator");
+
+const known = args.slice(0, separator);
+const requested = args.slice(separator + 1);
+const selected = new Set(requested);
+const packages = new Map(
+  JSON.parse(fs.readFileSync(metadataPath, "utf8")).packages
+    .map((pkg) => [pkg.name, pkg]),
+);
+
+function tuple(version) {
+  const match = version.match(/^(\d+)\.(\d+)(?:\.(\d+))?([+-].*)?$/);
+  if (!match) return null;
+  return [Number(match[1]), Number(match[2]), Number(match[3] || 0), match[4] || ""];
+}
+
+function compare(left, right) {
+  for (let index = 0; index < 3; index += 1) {
+    if (left[index] !== right[index]) return left[index] - right[index];
+  }
+  return 0;
+}
+
+function requirementAccepts(requirement, version) {
+  const value = tuple(version);
+  if (!value || value[3]) return false;
+
+  const req = requirement.trim();
+  if (req === "*") return true;
+  if (req.startsWith("=")) {
+    const exact = tuple(req.slice(1).trim());
+    return exact !== null && exact[3] === "" && compare(value, exact) === 0;
+  }
+
+  const base = tuple(req.startsWith("^") ? req.slice(1).trim() : req);
+  if (!base || base[3]) return false;
+
+  let upper;
+  if (base[0] > 0) upper = [base[0] + 1, 0, 0];
+  else if (base[1] > 0) upper = [0, base[1] + 1, 0];
+  else upper = [0, 0, base[2] + 1];
+
+  return compare(value, base) >= 0 && compare(value, upper) < 0;
+}
+
+let expanded = true;
+while (expanded) {
+  expanded = false;
+  for (const name of known) {
+    if (selected.has(name)) continue;
+    const pkg = packages.get(name);
+    if (!pkg) continue;
+
+    const needsBump = pkg.dependencies.some((dependency) =>
+      dependency.path !== null
+      && dependency.kind !== "dev"
+      && selected.has(dependency.name)
+      && !requirementAccepts(dependency.req, newVersion),
+    );
+    if (needsBump) {
+      selected.add(name);
+      expanded = true;
+    }
+  }
+}
+
+for (const name of known) {
+  if (selected.has(name)) process.stdout.write(`${name}\n`);
+}
+for (const name of requested) {
+  if (!known.includes(name)) process.stdout.write(`${name}\n`);
+}
+NODE
+  )
+  SELECTED_CRATES=("${EXPANDED_CRATES[@]}")
+
+  for crate in "${SELECTED_CRATES[@]}"; do
+    if add_unique "$crate" "${REQUESTED_CRATES[@]}"; then
+      echo -e "${YELLOW}Including reverse dependency ${crate} for the ${NEW_VERSION} compatibility boundary.${NC}"
+    fi
+  done
+fi
 
 manifest_for_crate() {
   node - "$METADATA_FILE" "$1" <<'NODE'

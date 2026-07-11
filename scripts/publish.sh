@@ -128,12 +128,11 @@ SELECTION:
                                      non-modules, rust, all
   --changed                  Add crates changed since their own latest package
                              tag (<crate>-vX.Y.Z), falling back to the latest
-                             repo tag (vX.Y.Z). Internal version churn (the
-                             crate's own version and rong* dependency version
-                             syncs) is ignored; external dependency version
-                             changes still count.
+                             repo tag (vX.Y.Z). Explicit crate version bumps
+                             count; rong* dependency lower-bound syncs are
+                             ignored. External dependency changes still count.
   --changed-since REF        Add crates with files changed since REF, with the
-                             same internal version churn filtering.
+                             same internal dependency-sync filtering.
   -s, --start-from NAME      Slice the selected plan from NAME, inclusive
 
 PUBLISH OPTIONS:
@@ -473,27 +472,15 @@ latest_tag_for_crate() {
   printf '%s' "$tag"
 }
 
-# True when REF..HEAD changes to a manifest only touch `version = "..."`
-# values. bump_version.sh syncs versions across [workspace.dependencies], so
-# version-only churn must not count as a publishable change.
-# Strip only internal version-bump churn so it does not count as a change:
-# the crate's own version in [package] (including the legacy
-# `version.workspace = true` form), and version fields on internal `rong*`
-# dependency entries, which bump_version.sh syncs across
-# [workspace.dependencies]. External dependency version changes (e.g. tokio)
-# are real changes and must survive normalization.
+# True when REF..HEAD manifest changes only synchronize internal dependency
+# lower bounds. An explicit package version bump remains publish-relevant so
+# dependency-closure bumps cannot disappear from a --changed plan. External
+# dependency changes (e.g. tokio) also remain publish-relevant.
 normalize_manifest_versions() {
   awk '
     /^\[/ { section = $0 }
     {
       line = $0
-
-      # Own package version (or its workspace form), including the shared
-      # version under [workspace.package]: drop the whole line.
-      if (section ~ /^\[(workspace\.)?package\]/ \
-          && line ~ /^[[:space:]]*version([[:space:]]*=|\.workspace)/) {
-        next
-      }
 
       # Internal rong* dependency entries: strip just the version field.
       if (line ~ /^[[:space:]]*"?rong[a-z0-9_]*"?[[:space:]]*=/ \
@@ -516,7 +503,7 @@ normalize_manifest_versions() {
   '
 }
 
-is_version_only_manifest_change() {
+is_internal_dependency_sync_only() {
   local ref=$1
   local file=$2
   local old new
@@ -542,7 +529,7 @@ crate_changed_since() {
       [ -n "$file" ] || continue
       case "$file" in
         Cargo.toml)
-          is_version_only_manifest_change "$ref" "$file" || return 0
+          is_internal_dependency_sync_only "$ref" "$file" || return 0
           ;;
         README.md|src/*)
           return 0
@@ -558,7 +545,7 @@ crate_changed_since() {
       continue
     fi
     if [ "$file" = "$rel" ]; then
-      is_version_only_manifest_change "$ref" "$file" || return 0
+      is_internal_dependency_sync_only "$ref" "$file" || return 0
     else
       return 0
     fi
