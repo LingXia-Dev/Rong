@@ -24,7 +24,7 @@
   intended build exactly once.
 - **Source backend behavior:** `jscore-source-*` is the production-style prebuilt consumer path. It downloads and caches the pinned artifact through `rong_jscore_sys/build.rs`; if no row exists for a supported target, CI fails instead of silently skipping.
 - **Steps:** `cargo fmt --check` plus `cargo make clippy-engine` and `cargo make test-engine`. Clippy performs the same complete type-check, so a separate host `cargo check` would duplicate compilation without increasing target coverage.
-- **Hardening:** CI has read-only repository permissions, pins third-party actions by commit, uses the latest stable Rust for the main matrix plus Rust 1.90.0 for the explicit MSRV lane, uses versioned runner images, and applies explicit job/test timeouts. Monthly grouped Dependabot updates keep pinned actions and the type-package lockfile current.
+- **Hardening:** CI has read-only repository permissions, pins third-party actions by commit, uses the latest stable Rust for the main matrix plus Rust 1.92.0 for the explicit MSRV lane, uses versioned runner images, and applies explicit job/test timeouts. Monthly grouped Dependabot updates keep pinned actions and the type-package lockfile current.
 - **No standalone Windows JSC workflow:** Windows source support is covered by
   `build-jsc-artifacts.yml` for producing artifacts and `CI`'s
   `jscore-source-x86_64-pc-windows-msvc` job for consuming them.
