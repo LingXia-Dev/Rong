@@ -19,11 +19,15 @@ on:
         required: false
         default: "--group rust"
         type: string
-      create_tags:
-        description: "Create package-level git tags for published or already-published packages."
+      package_tags:
+        description: "Package tag policy. auto creates package tags only for standalone package publishes; product releases use their single vX.Y.Z tag."
         required: true
-        default: true
-        type: boolean
+        default: auto
+        type: choice
+        options:
+          - auto
+          - always
+          - never
       product_release:
         description: "Optional repo-level product tag (e.g. v0.4.1). After publishing, creates the tag and a GitHub Release from its CHANGELOG.md entry. Leave empty to skip."
         required: false
@@ -37,6 +41,8 @@ concurrency:
 jobs:
   validate:
     runs-on: ubuntu-latest
+    outputs:
+      create_package_tags: ${{ steps.scope.outputs.create_package_tags }}
     permissions:
       contents: read
     steps:
@@ -46,10 +52,11 @@ jobs:
           fetch-depth: 0
 
       - name: Resolve publish scope
+        id: scope
         env:
           PACKAGE_SCOPE: ${{ inputs.package_scope }}
           RUST_SELECTION: ${{ inputs.rust_selection }}
-          CREATE_TAGS: ${{ inputs.create_tags }}
+          PACKAGE_TAGS: ${{ inputs.package_tags }}
           PRODUCT_RELEASE: ${{ inputs.product_release }}
         run: |
           if [ "${GITHUB_REF_NAME}" != "master" ]; then
@@ -79,6 +86,27 @@ jobs:
             exit 1
           fi
 
+          case "$PACKAGE_TAGS" in
+            auto)
+              if [ -n "$PRODUCT_RELEASE" ]; then
+                CREATE_PACKAGE_TAGS=false
+              else
+                CREATE_PACKAGE_TAGS=true
+              fi
+              ;;
+            always)
+              CREATE_PACKAGE_TAGS=true
+              ;;
+            never)
+              CREATE_PACKAGE_TAGS=false
+              ;;
+            *)
+              echo "Unsupported package_tags policy: $PACKAGE_TAGS"
+              exit 1
+              ;;
+          esac
+          echo "create_package_tags=$CREATE_PACKAGE_TAGS" >> "$GITHUB_OUTPUT"
+
           if [ -n "$PRODUCT_RELEASE" ]; then
             version="${PRODUCT_RELEASE#v}"
             if ! ./scripts/extract_changelog_entry.sh "$version" > /tmp/product-release-notes.md \
@@ -107,7 +135,8 @@ jobs:
             echo
             echo "- Package scope: \`$PACKAGE_SCOPE\`"
             echo "- Rust selection: \`$RUST_SELECTION\`"
-            echo "- Create package tags: \`$CREATE_TAGS\`"
+            echo "- Package tag policy: \`$PACKAGE_TAGS\`"
+            echo "- Create package tags: \`$CREATE_PACKAGE_TAGS\`"
             echo "- Product release: \`${PRODUCT_RELEASE:-none}\`"
           } >> "$GITHUB_STEP_SUMMARY"
 
@@ -126,7 +155,7 @@ jobs:
           submodules: recursive
 
       - name: Configure git identity for package tags
-        if: inputs.create_tags
+        if: needs.validate.outputs.create_package_tags == 'true'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -156,11 +185,11 @@ jobs:
         env:
           CARGO_REGISTRY_TOKEN: ${{ steps.cargo-auth.outputs.token || secrets.CARGO_REGISTRY_TOKEN }}
           RUST_SELECTION: ${{ inputs.rust_selection }}
-          CREATE_TAGS: ${{ inputs.create_tags }}
+          CREATE_PACKAGE_TAGS: ${{ needs.validate.outputs.create_package_tags }}
         run: |
           read -r -a rust_args <<< "$RUST_SELECTION"
-          if [ "$CREATE_TAGS" = "true" ]; then
-            rust_args+=(--tag)
+          if [ "$CREATE_PACKAGE_TAGS" = "true" ]; then
+            rust_args+=(--package-tag)
           fi
           ./scripts/publish.sh --yes "${rust_args[@]}"
 
@@ -178,7 +207,7 @@ jobs:
           fetch-depth: 0
 
       - name: Configure git identity for package tags
-        if: inputs.create_tags
+        if: needs.validate.outputs.create_package_tags == 'true'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -195,11 +224,11 @@ jobs:
 
       - name: Publish npm packages
         env:
-          CREATE_TAGS: ${{ inputs.create_tags }}
+          CREATE_PACKAGE_TAGS: ${{ needs.validate.outputs.create_package_tags }}
         run: |
           npm_args=()
-          if [ "$CREATE_TAGS" = "true" ]; then
-            npm_args+=(--tag)
+          if [ "$CREATE_PACKAGE_TAGS" = "true" ]; then
+            npm_args+=(--package-tag)
           fi
           ./scripts/publish_npm.sh "${npm_args[@]}"
 

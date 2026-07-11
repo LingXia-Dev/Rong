@@ -50,7 +50,7 @@ git config --local core.hooksPath .githooks
 ## publish.sh
 
 ```
-./scripts/publish.sh [--crate NAME]... [--group NAME]... [--changed] [--changed-since REF] [--tag] [--dry-run] [--check-drift] [--yes]
+./scripts/publish.sh [--crate NAME]... [--group NAME]... [--changed] [--changed-since REF] [--package-tag] [--dry-run] [--check-drift] [--yes]
 ```
 
 - Publishes selected Rust crates in dependency order
@@ -70,7 +70,11 @@ git config --local core.hooksPath .githooks
   with `cargo search` as a network fallback
 - Requires `CARGO_REGISTRY_TOKEN`
 - Smart waiting: polls crates.io until each package is indexed
-- Optional `--tag` creates package-level tags such as `rong_timer-v0.4.1`
+- Paces successful uploads by 10 seconds by default and retries transient
+  crates.io `429`/`5xx`/network failures with bounded exponential backoff;
+  authentication, manifest, and compilation failures still fail immediately
+- Optional `--package-tag` creates package-level tags such as
+  `rong_timer-v0.4.1`
 - `--dry-run` prints the selected publish plan without requiring a token, and
   flags drift: selected crates whose current version is already on crates.io
   (they need a version bump before publishing)
@@ -80,7 +84,7 @@ git config --local core.hooksPath .githooks
 ## publish_npm.sh
 
 ```
-./scripts/publish_npm.sh [--tag]
+./scripts/publish_npm.sh [--package-tag]
 ```
 
 - Publishes all repo-maintained npm packages:
@@ -88,7 +92,7 @@ git config --local core.hooksPath .githooks
   - `@rongjs/rong-skill` from `packages/skill`
 - Runs only in GitHub Actions with npm Trusted Publishing through OIDC
 - Skips the publish if the same npm version already exists
-- Optional `--tag` creates package-level tags such as
+- Optional `--package-tag` creates package-level tags such as
   `npm-rongjs-rong-v0.4.1`
 - First-time npm package creation must happen outside this repository automation
   before trusted publishing can be configured for that package

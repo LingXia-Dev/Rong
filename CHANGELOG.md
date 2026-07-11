@@ -6,6 +6,13 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 
 ## [Unreleased]
 
+### Release automation
+
+- Rust publishing now paces uploads and retries transient crates.io rate-limit,
+  server, and network failures with bounded exponential backoff.
+- Coordinated product releases now create only the product `vX.Y.Z` tag by
+  default; package-level tags are reserved for standalone package releases.
+
 ## [0.5.0] - 2026-07-11
 
 Rong 0.5.0 is a forward-only release focused on generated TypeScript quality,

@@ -2,26 +2,27 @@
 set -euo pipefail
 
 PACKAGE_DIRS=("packages/rong_types" "packages/skill")
-CREATE_TAGS=false
+CREATE_PACKAGE_TAGS=false
 
 usage() {
+  local exit_code=${1:-0}
   cat << EOF
 Usage: $0 [OPTIONS]
 
 Publish repo-maintained npm packages using npm trusted publishing.
 
 OPTIONS:
-  --tag       Create and push npm-<package>-v<version> git tags for published
-              or already-published packages
-  -h, --help  Show this help message
+  --package-tag  Create and push npm-<package>-v<version> git tags for
+                 published or already-published packages
+  -h, --help     Show this help message
 EOF
-  exit 0
+  exit "$exit_code"
 }
 
 while [[ $# -gt 0 ]]; do
   case $1 in
-    --tag)
-      CREATE_TAGS=true
+    --package-tag)
+      CREATE_PACKAGE_TAGS=true
       shift
       ;;
     -h|--help)
@@ -29,7 +30,7 @@ while [[ $# -gt 0 ]]; do
       ;;
     *)
       echo "Unknown option: $1" >&2
-      usage
+      usage 1
       ;;
   esac
 done
@@ -106,7 +107,7 @@ EOF
   existing_version="$(npm view "${package_name}@${package_version}" version 2>/dev/null || true)"
   if [ "$existing_version" = "$package_version" ]; then
     echo "Skipping ${package_name}@${package_version}; already published."
-    if [ "$CREATE_TAGS" = true ]; then
+    if [ "$CREATE_PACKAGE_TAGS" = true ]; then
       ensure_npm_tag "$package_name" "$package_version"
     fi
     continue
@@ -118,7 +119,7 @@ EOF
     npm publish --access public
   )
 
-  if [ "$CREATE_TAGS" = true ]; then
+  if [ "$CREATE_PACKAGE_TAGS" = true ]; then
     ensure_npm_tag "$package_name" "$package_version"
   fi
 done
