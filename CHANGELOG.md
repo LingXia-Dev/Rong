@@ -33,6 +33,14 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
   duplicate exports, unsupported generic bindings, unresolved namespace
   functions, malformed CLI configuration, and stale generated outputs.
 
+### CI and toolchain
+
+- Raised the workspace MSRV to Rust 1.92 to match the current S3 dependency
+  floor, while validating both MSRV and latest-stable Rust in CI.
+- Hardened CI with read-only permissions, commit-pinned actions, deterministic
+  TypeScript 7 installs, fixed runner images, explicit timeouts, and consolidated
+  host jobs that reuse setup and build artifacts without reducing coverage.
+
 ## [0.4.1] - 2026-06-10
 
 Rong 0.4.1 is a focused patch release for the timer module and the
