@@ -1,7 +1,7 @@
 [workspace]
 members = [
     "core",
-    "macro",
+    "rong_macro",
     "quickjs", "quickjs/sys",
     "javascriptcore", "javascriptcore/sys",
     "arkjs", "arkjs/sys",
@@ -46,7 +46,7 @@ rong_jscore = { path = "javascriptcore"      , version = "0.4.1" }
 rong_jscore_sys = { path = "javascriptcore/sys"      , version = "0.4.1" }
 rong_arkjs = { path = "arkjs"      , version = "0.4.0" }
 rong_arkjs_sys = { path = "arkjs/sys"      , version = "0.4.0" }
-rong_macro = { path = "macro"      , version = "0.4.0" }
+rong_macro = { path = "rong_macro"      , version = "0.4.0" }
 rong_test = { path = "testing/rong_test", default-features = false   , version = "0.4.0" }
 rong_test_harness = { path = "testing/rong_test_harness"   , version = "0.4.0" }
 rong_test_device = { path = "testing/rong_test_device"   , version = "0.4.0" }
