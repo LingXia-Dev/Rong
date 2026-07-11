@@ -15,7 +15,7 @@ type EventReceiver = mpsc::Receiver<Result<rong_rt::sse::SseEvent, String>>;
 type OpenedReceiver = oneshot::Receiver<Result<String, String>>;
 
 #[allow(clippy::upper_case_acronyms, clippy::type_complexity)]
-#[js_export]
+#[js_class]
 pub struct SSE {
     url: String,
     close_tx: Arc<Mutex<Option<oneshot::Sender<()>>>>,

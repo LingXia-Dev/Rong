@@ -31,7 +31,7 @@ fn resolve_dest(dest: &JSValue) -> JSResult<PathBuf> {
 ///
 /// dest: string path or RongFile
 /// data: string, TypedArray, ArrayBuffer, or RongFile (copy)
-async fn rong_write(_ctx: JSContext, dest: JSValue, data: JSValue) -> JSResult<f64> {
+pub(crate) async fn rong_write(_ctx: JSContext, dest: JSValue, data: JSValue) -> JSResult<f64> {
     let resolved = resolve_dest(&dest)?;
 
     // Dispatch on data type
@@ -128,13 +128,4 @@ async fn rong_write(_ctx: JSContext, dest: JSValue, data: JSValue) -> JSResult<f
     )
     .with_name("TypeError")
     .into())
-}
-
-pub(crate) fn init(ctx: &JSContext) -> JSResult<()> {
-    let rong = ctx.host_namespace();
-
-    let write_fn = JSFunc::new(ctx, rong_write)?.name("write")?;
-    rong.set("write", write_fn)?;
-
-    Ok(())
 }

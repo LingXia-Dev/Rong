@@ -1,0 +1,20 @@
+{
+  "modules": {
+    "abort": "curated",
+    "buffer": "curated",
+    "command": "curated",
+    "console": "curated",
+    "encoding": "curated",
+    "event": "curated",
+    "exception": "curated",
+    "fs": "canonical",
+    "http": "curated",
+    "redis": "curated",
+    "s3": "canonical",
+    "sqlite": "canonical",
+    "storage": "canonical",
+    "stream": "curated",
+    "url": "canonical",
+    "worker": "curated"
+  }
+}

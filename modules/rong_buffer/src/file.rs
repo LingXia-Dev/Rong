@@ -3,7 +3,7 @@ use bytes::Bytes;
 use rong::{function::Optional, *};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-#[js_export(clone)]
+#[js_class(clone)]
 pub struct File {
     blob: Blob,
     filename: String,

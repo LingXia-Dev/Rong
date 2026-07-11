@@ -1,6 +1,10 @@
 use rong::*;
 use std::rc::Rc;
 
+pub(crate) trait S3ConfigOverlay {
+    fn apply_to_config(&self, config: &mut S3Config);
+}
+
 /// S3 configuration: credentials + bucket + endpoint.
 #[derive(Clone, Debug)]
 pub struct S3Config {
@@ -30,68 +34,22 @@ impl Default for S3Config {
 }
 
 impl S3Config {
-    /// Build config from a JS options object.
-    pub fn from_js_options(obj: &JSObject) -> JSResult<Self> {
+    /// Build config from typed JS options.
+    pub(crate) fn from_options<T: S3ConfigOverlay>(options: Option<T>) -> Self {
         let mut config = Self::default();
-
-        if let Ok(v) = obj.get::<_, String>("accessKeyId") {
-            config.access_key_id = v;
+        if let Some(options) = options {
+            options.apply_to_config(&mut config);
         }
-        if let Ok(v) = obj.get::<_, String>("secretAccessKey") {
-            config.secret_access_key = v;
-        }
-        if let Ok(v) = obj.get::<_, String>("sessionToken") {
-            config.session_token = Some(v);
-        }
-        if let Ok(v) = obj.get::<_, String>("region") {
-            config.region = v;
-        }
-        if let Ok(v) = obj.get::<_, String>("endpoint") {
-            config.endpoint = Some(v);
-        }
-        if let Ok(v) = obj.get::<_, String>("bucket") {
-            config.bucket = v;
-        }
-        if let Ok(v) = obj.get::<_, String>("acl") {
-            config.acl = Some(v);
-        }
-        if let Ok(v) = obj.get::<_, bool>("virtualHostedStyle") {
-            config.virtual_hosted_style = v;
-        }
-
-        Ok(config)
+        config
     }
 
-    /// Overlay JS options on top of this config. Only provided fields are overwritten.
-    pub fn merge_js_options(&self, obj: &JSObject) -> JSResult<Self> {
+    /// Overlay typed JS options on top of this config. Only provided fields are overwritten.
+    pub(crate) fn merge_options<T: S3ConfigOverlay>(&self, options: Option<&T>) -> Self {
         let mut config = self.clone();
-
-        if let Ok(v) = obj.get::<_, String>("accessKeyId") {
-            config.access_key_id = v;
+        if let Some(options) = options {
+            options.apply_to_config(&mut config);
         }
-        if let Ok(v) = obj.get::<_, String>("secretAccessKey") {
-            config.secret_access_key = v;
-        }
-        if let Ok(v) = obj.get::<_, String>("sessionToken") {
-            config.session_token = Some(v);
-        }
-        if let Ok(v) = obj.get::<_, String>("region") {
-            config.region = v;
-        }
-        if let Ok(v) = obj.get::<_, String>("endpoint") {
-            config.endpoint = Some(v);
-        }
-        if let Ok(v) = obj.get::<_, String>("bucket") {
-            config.bucket = v;
-        }
-        if let Ok(v) = obj.get::<_, String>("acl") {
-            config.acl = Some(v);
-        }
-        if let Ok(v) = obj.get::<_, bool>("virtualHostedStyle") {
-            config.virtual_hosted_style = v;
-        }
-
-        Ok(config)
+        config
     }
 
     /// Create an s3::Bucket from this config.

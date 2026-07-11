@@ -42,6 +42,18 @@ describe("S3 namespace prefix", () => {
     assert(threw, "file() config override should be blocked");
   });
 
+  it("rejects unknown options on a namespaced client", () => {
+    let threw = false;
+    try {
+      s3.file(KEY, { typo: true });
+    } catch (e) {
+      threw = true;
+      assert.equal(e.name, "TypeError");
+      assert(e.message.includes("Option 'typo' is not allowed"), e.message);
+    }
+    assert(threw, "unknown namespaced options should be rejected");
+  });
+
   it("exists returns true for namespaced key", async () => {
     assert.equal(await s3.exists(KEY), true);
   });

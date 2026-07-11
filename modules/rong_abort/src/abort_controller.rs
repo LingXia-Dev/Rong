@@ -1,7 +1,7 @@
 use crate::AbortSignal;
 use rong::{function::*, *};
 
-#[js_export]
+#[js_class]
 pub struct AbortController {
     abort_signal: AbortSignal,
 }

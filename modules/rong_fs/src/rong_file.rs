@@ -1,4 +1,4 @@
-use crate::file::{FileHandle, FileOpenOption, open_file_internal};
+use crate::file::{FileHandle, FileOpenOptions, open_file_internal};
 use crate::grant_file_access;
 use crate::sink::{FileSink, FileSinkOptions};
 use crate::stat::FileInfo;
@@ -8,7 +8,7 @@ use rong_stream::JSReadableStream;
 use std::path::PathBuf;
 use tokio::sync::mpsc;
 
-#[js_export]
+#[js_class]
 pub(crate) struct RongFile {
     path: String,
     resolved: PathBuf,
@@ -20,18 +20,21 @@ impl RongFile {
     }
 }
 
+/// Lazy file reference created by `Rong.file(path)`.
 #[js_class]
 impl RongFile {
-    #[js_method(constructor)]
+    #[js_method(constructor, private)]
     fn new() -> JSResult<Self> {
         rong::illegal_constructor("Not Allowed 'new RongFile()', use Rong.file(path)")
     }
 
+    /// Original path supplied to `Rong.file`.
     #[js_method(getter)]
     fn name(&self) -> String {
         self.path.clone()
     }
 
+    /// Read the complete file as UTF-8 text.
     #[js_method]
     async fn text(&self) -> JSResult<String> {
         tokio::fs::read_to_string(&self.resolved)
@@ -39,6 +42,7 @@ impl RongFile {
             .map_err(|e| HostError::new("FS_IO", e.to_string()).into())
     }
 
+    /// Read and parse the complete file as JSON.
     #[js_method]
     async fn json(&self, ctx: JSContext) -> JSResult<JSValue> {
         let text = tokio::fs::read_to_string(&self.resolved)
@@ -48,6 +52,7 @@ impl RongFile {
         text.as_str().json_to_js_value(&ctx)
     }
 
+    /// Read the complete file as bytes.
     #[js_method]
     async fn bytes(&self, ctx: JSContext) -> JSResult<JSTypedArray> {
         let data = tokio::fs::read(&self.resolved)
@@ -59,6 +64,7 @@ impl RongFile {
         JSTypedArray::from_array_buffer(&ctx, ab, 0, Some(len))
     }
 
+    /// Read the complete file as an ArrayBuffer.
     #[js_method(rename = "arrayBuffer")]
     async fn array_buffer(&self, ctx: JSContext) -> JSResult<JSArrayBuffer> {
         let data = tokio::fs::read(&self.resolved)
@@ -68,7 +74,8 @@ impl RongFile {
         JSArrayBuffer::from_bytes_owned(&ctx, data)
     }
 
-    #[js_method]
+    /// Stream the file contents in byte chunks.
+    #[js_method(ts_return = "ReadableStream<Uint8Array>")]
     fn stream(&self, ctx: JSContext) -> Option<JSObject> {
         let resolved = self.resolved.clone();
         let (tx, rx) = mpsc::channel::<Result<Bytes, String>>(16);
@@ -106,11 +113,13 @@ impl RongFile {
             .ok()
     }
 
+    /// Test whether the path exists.
     #[js_method]
     async fn exists(&self) -> bool {
         tokio::fs::metadata(&self.resolved).await.is_ok()
     }
 
+    /// Delete the referenced file.
     #[js_method]
     async fn delete(&self) -> JSResult<()> {
         tokio::fs::remove_file(&self.resolved)
@@ -118,6 +127,7 @@ impl RongFile {
             .map_err(|e| HostError::new("FS_IO", format!("Failed to delete file: {}", e)).into())
     }
 
+    /// Read metadata while following symbolic links.
     #[js_method]
     async fn stat(&self) -> JSResult<FileInfo> {
         tokio::fs::metadata(&self.resolved)
@@ -126,6 +136,7 @@ impl RongFile {
             .map_err(|e| HostError::new("FS_IO", format!("Failed to get file info: {}", e)).into())
     }
 
+    /// Read metadata without following the final symbolic link.
     #[js_method]
     async fn lstat(&self) -> JSResult<FileInfo> {
         tokio::fs::symlink_metadata(&self.resolved)
@@ -134,14 +145,16 @@ impl RongFile {
             .map_err(|e| HostError::new("FS_IO", format!("Failed to get file info: {}", e)).into())
     }
 
+    /// Open a low-level random-access file handle.
     #[js_method]
-    async fn open(&self, option: Optional<FileOpenOption>) -> JSResult<FileHandle> {
-        open_file_internal(&self.resolved, &self.path, option.0).await
+    async fn open(&self, options: Optional<FileOpenOptions>) -> JSResult<FileHandle> {
+        open_file_internal(&self.resolved, &self.path, options.0).await
     }
 
+    /// Open an incremental file writer.
     #[js_method]
-    async fn writer(&self, option: Optional<FileSinkOptions>) -> JSResult<FileSink> {
-        FileSink::create(&self.resolved, &self.path, option.0).await
+    async fn writer(&self, options: Optional<FileSinkOptions>) -> JSResult<FileSink> {
+        FileSink::create(&self.resolved, &self.path, options.0).await
     }
 
     #[js_method(gc_mark)]
@@ -152,18 +165,12 @@ impl RongFile {
     }
 }
 
-fn file(path: String) -> JSResult<RongFile> {
+pub(crate) fn file(path: String) -> JSResult<RongFile> {
     let resolved = grant_file_access(&path)?;
     Ok(RongFile { path, resolved })
 }
 
 pub(crate) fn init(ctx: &JSContext) -> JSResult<()> {
-    let rong = ctx.host_namespace();
-
     ctx.register_hidden_class::<RongFile>()?;
-
-    let file_fn = JSFunc::new(ctx, file)?.name("file")?;
-    rong.set("file", file_fn)?;
-
     Ok(())
 }

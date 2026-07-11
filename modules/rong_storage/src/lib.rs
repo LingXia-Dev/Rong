@@ -41,13 +41,17 @@ pub(crate) const DEFAULT_MAX_KEY_SIZE: usize = 1024; // 1KB
 pub(crate) const DEFAULT_MAX_VALUE_SIZE: usize = 5 * 1024 * 1024; // 5MB
 
 // size is in bytes
-#[derive(IntoJSObj)]
+#[derive(IntoJSObject)]
+/// Current storage usage and configured limits.
 pub struct StorageInfo {
-    #[rename = "currentSize"]
+    /// Current serialized user-data size in bytes.
+    #[js_name = "currentSize"]
     pub(crate) current_size: u32,
-    #[rename = "limitSize"]
+    /// Configured user-data size limit in bytes.
+    #[js_name = "limitSize"]
     pub(crate) limit_size: u32,
-    #[rename = "keyCount"]
+    /// Number of stored keys.
+    #[js_name = "keyCount"]
     pub(crate) key_count: u32,
 }
 

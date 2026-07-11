@@ -3,11 +3,11 @@ use quote::quote;
 use syn::{DeriveInput, Meta, parse::Parse, punctuated::Punctuated};
 
 #[derive(Default)]
-struct JsExportOptions {
+struct JsClassOptions {
     clone: bool,
 }
 
-impl Parse for JsExportOptions {
+impl Parse for JsClassOptions {
     fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
         let mut options = Self::default();
         let metas = Punctuated::<Meta, syn::Token![,]>::parse_terminated(input)?;
@@ -19,7 +19,7 @@ impl Parse for JsExportOptions {
                 _ => {
                     return Err(syn::Error::new_spanned(
                         meta,
-                        "unsupported #[js_export] option; expected `clone`",
+                        "unsupported #[js_class] struct option; expected `clone`",
                     ));
                 }
             }
@@ -30,6 +30,12 @@ impl Parse for JsExportOptions {
 
 /// Main implementation of the object macro
 pub fn class_instance_impl(input: &DeriveInput) -> syn::Result<TokenStream> {
+    if !input.generics.params.is_empty() {
+        return Err(syn::Error::new_spanned(
+            &input.generics,
+            "#[js_class] does not support generic structs",
+        ));
+    }
     let type_name = &input.ident;
     let vis = &input.vis;
     let generics = &input.generics;
@@ -37,8 +43,8 @@ pub fn class_instance_impl(input: &DeriveInput) -> syn::Result<TokenStream> {
     let options = input
         .attrs
         .iter()
-        .find(|attr| attr.path().is_ident("js_export"))
-        .map(|attr| attr.parse_args::<JsExportOptions>())
+        .find(|attr| attr.path().is_ident("js_class"))
+        .map(|attr| attr.parse_args::<JsClassOptions>())
         .transpose()?
         .unwrap_or_default();
 
@@ -46,7 +52,7 @@ pub fn class_instance_impl(input: &DeriveInput) -> syn::Result<TokenStream> {
     let filtered_attrs: Vec<_> = input
         .attrs
         .iter()
-        .filter(|attr| !attr.path().is_ident("js_export"))
+        .filter(|attr| !attr.path().is_ident("js_class"))
         .collect();
 
     // Rebuild type definition with filtered attributes

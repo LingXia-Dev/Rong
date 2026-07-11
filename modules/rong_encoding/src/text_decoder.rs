@@ -22,7 +22,7 @@ struct TextDecoderOptions {
     ignore_bom: bool,
 }
 
-#[js_export]
+#[js_class]
 pub struct TextDecoder {
     // TextDecoder supports different encodings, but we only implement UTF-8 for now
     encoding: &'static str,

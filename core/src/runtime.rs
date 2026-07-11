@@ -141,7 +141,7 @@ impl<R: JSRuntimeImpl> Drop for JSRuntime<R> {
         if Rc::strong_count(&self.inner) == 1 {
             let services_map = self.services.services.borrow();
 
-            for (_type_id, service) in services_map.iter() {
+            for service in services_map.values() {
                 // Call on_shutdown for each service before the inner runtime is dropped
                 service.on_shutdown();
             }

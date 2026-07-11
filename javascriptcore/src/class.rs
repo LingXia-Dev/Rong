@@ -377,9 +377,9 @@ where
             convertToType: None,
         };
 
-        let js_export = jsc::JSClassCreate(&class_def);
+        let js_class = jsc::JSClassCreate(&class_def);
         let native_ctor =
-            jsc::JSObjectMakeConstructor(ctx_raw, js_export, Some(generic_constructor::<JC>));
+            jsc::JSObjectMakeConstructor(ctx_raw, js_class, Some(generic_constructor::<JC>));
         let constructor = build_public_constructor::<JC>(ctx, native_ctor, &class_name_cstr);
 
         // constructor built by JSObjectMakeConstructor does not support JSObjectSetProperty, we
@@ -387,7 +387,7 @@ where
         CLASS
             .write()
             .unwrap()
-            .insert(constructor.as_value() as usize, js_export as usize);
+            .insert(constructor.as_value() as usize, js_class as usize);
 
         constructor
     }

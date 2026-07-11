@@ -37,27 +37,40 @@ fn is_absolute(path: String) -> bool {
 const absolute = Rong.isAbsolute("/usr/bin"); // direct value
 ```
 
-## Registration
+## Registration and generated types
 
-Wrap with `JSFunc::new(ctx, fn)`, name it (for stack traces), and attach it.
+Declare host-namespace functions once with `js_api!`. The macro generates
+the runtime registration function, and `rong_typegen` reads the same declaration
+to emit the named mergeable TypeScript interface. The `namespace` declaration
+pairs that interface with the runtime object, so downstream runtimes can target
+their own namespace rather than `Rong`.
 
 ```rust
+rong::js_api! {
+    fn register_functions(ctx) {
+        namespace RongNamespace = ctx.host_namespace();
+        fn readFile = read_file;
+        fn isAbsolute = is_absolute;
+    }
+}
+
 pub fn init(ctx: &JSContext) -> JSResult<()> {
-    let rong = ctx.host_namespace();
-
-    let read_fn = JSFunc::new(ctx, read_file)?.name("readFile")?;
-    rong.set("readFile", read_fn)?;
-
-    let abs_fn = JSFunc::new(ctx, is_absolute)?.name("isAbsolute")?;
-    rong.set("isAbsolute", abs_fn)?;
-
-    Ok(())
+    register_functions(ctx)
 }
 ```
 
-- `ctx.host_namespace()` returns the host `Rong` object. To attach to the global
-  object or a sub-object instead, use the relevant `JSObject` and `.set(...)`.
-- `.name("...")` sets the function's `.name` (helps stack traces).
+- Rust signatures are inferred automatically; use `ts_params` or `ts_return` in
+  the declaration only when a dynamic Rust boundary type loses TS precision.
+- Use `class Name = RustType` for a constructor installed on the target object;
+  registration and `readonly Name: typeof Name` are generated together.
+- Use `const Name: "TsType" = expression` for a readonly runtime namespace
+  value whose exact TypeScript type cannot be inferred from the expression.
+- Use `type Name = "..."` for a TypeScript-only alias that has no precise Rust
+  representation. Keep it beside the functions that reference it.
+- Use `cfg = "unix"` for a platform-gated runtime registration. Typegen keeps
+  it in the target-agnostic npm declaration union.
+- Direct `JSFunc::new(...).set(...)` remains available for intentionally dynamic
+  registration, but it cannot participate in automatic namespace generation.
 
 ## Optional parameters
 
@@ -82,4 +95,8 @@ The return type is converted automatically (see `type-conversion.md`):
 - `JSResult<T>` - `Ok` returns/resolves, `Err` throws/rejects.
 - `T` directly for infallible sync functions (e.g. `bool`, `String`).
 - `Option<T>` maps to `T` or `null`.
-- Object-shaped returns: derive `IntoJSObj` (see `classes.md`).
+- Object-shaped returns: derive `IntoJSObject` (see `classes.md`).
+
+For public APIs, do not hand-build result objects with `JSObject::new(...).set(...)`
+unless the shape is intentionally dynamic. Use a named `IntoJSObject` struct so the
+same Rust shape also drives generated TypeScript.

@@ -8,6 +8,34 @@ mod statement;
 
 use statement::Statement;
 
+rong::js_api! {
+    fn register_sqlite_namespace(ctx) {
+        namespace RongNamespace = ctx.host_namespace();
+
+        /// A value bindable as a SQLite statement parameter.
+        type SQLiteParam = "null | boolean | number | bigint | string | ArrayBuffer | Uint8Array";
+        /// Ordered positional parameters bound to a SQLite statement.
+        type SQLiteParams = "SQLiteParam[]";
+        /// A value returned by SQLite.
+        type SQLiteValue = "null | number | bigint | string | ArrayBuffer";
+        /// A SQLite result row keyed by column name.
+        type SQLiteRow = "Record<string, SQLiteValue>";
+
+        class SQLite = SQLite;
+    }
+}
+
+/// Result of a write (INSERT/UPDATE/DELETE).
+#[derive(Clone, Debug, IntoJSObject)]
+pub(crate) struct RunResult {
+    /// Number of rows changed.
+    changes: f64,
+    /// Row id of the last inserted row; large values come back as `bigint`.
+    #[js_name = "lastInsertRowid"]
+    #[ts_type = "number | bigint"]
+    last_insert_rowid: i64,
+}
+
 fn sqlite_error(msg: impl Into<String>) -> RongJSError {
     HostError::new("ERR_SQLITE", msg)
         .with_name("SQLiteError")
@@ -18,14 +46,16 @@ fn sqlite_error(msg: impl Into<String>) -> RongJSError {
 pub(crate) type SharedConn = Rc<RefCell<Option<rusqlite::Connection>>>;
 
 /// SQLite database connection.
-#[js_export]
+#[js_class]
 pub struct SQLite {
     pub(crate) conn: SharedConn,
     filename: String,
 }
 
+/// Synchronous SQLite database connection.
 #[js_class]
 impl SQLite {
+    /// Open a database file, or an in-memory database when filename is omitted.
     #[js_method(constructor)]
     fn new(filename: Optional<String>) -> JSResult<Self> {
         let filename = filename.0.unwrap_or_else(|| ":memory:".to_string());
@@ -61,8 +91,8 @@ impl SQLite {
 
     /// Execute a single statement with optional parameters.
     /// Returns `{ changes, lastInsertRowid }`.
-    #[js_method]
-    fn run(&self, ctx: JSContext, sql: String, params: Optional<JSArray>) -> JSResult<JSObject> {
+    #[js_method(ts_params = "sql: string, params?: SQLiteParams")]
+    fn run(&self, sql: String, params: Optional<JSArray>) -> JSResult<RunResult> {
         let borrow = self.conn.borrow();
         let conn = borrow
             .as_ref()
@@ -77,14 +107,17 @@ impl SQLite {
             .execute(&sql, param_refs.as_slice())
             .map_err(|e| sqlite_error(e.to_string()))?;
 
-        let result = JSObject::new(&ctx);
-        result.set("changes", changes as f64)?;
-        result.set("lastInsertRowid", conn.last_insert_rowid())?;
-        Ok(result)
+        Ok(RunResult {
+            changes: changes as f64,
+            last_insert_rowid: conn.last_insert_rowid(),
+        })
     }
 
     /// Execute a query and return all matching rows as an array of objects.
-    #[js_method]
+    #[js_method(
+        ts_return = "SQLiteRow[]",
+        ts_params = "sql: string, params?: SQLiteParams"
+    )]
     fn query(&self, ctx: JSContext, sql: String, params: Optional<JSArray>) -> JSResult<JSArray> {
         let borrow = self.conn.borrow();
         let conn = borrow
@@ -94,7 +127,7 @@ impl SQLite {
     }
 
     /// Create a prepared statement for repeated execution.
-    #[js_method]
+    #[js_method(ts_return = "Statement")]
     fn prepare(&self, ctx: JSContext, sql: String) -> JSResult<JSObject> {
         {
             let borrow = self.conn.borrow();
@@ -110,7 +143,7 @@ impl SQLite {
     }
 
     /// Run a function inside a transaction. Commits on success, rolls back on error.
-    #[js_method]
+    #[js_method(ts_params = "callback: () => void")]
     fn transaction(&self, callback: JSFunc) -> JSResult<()> {
         {
             let borrow = self.conn.borrow();
@@ -143,6 +176,7 @@ impl SQLite {
         }
     }
 
+    /// Filename used to open the database.
     #[js_method(getter)]
     fn filename(&self) -> String {
         self.filename.clone()
@@ -158,6 +192,7 @@ impl SQLite {
         Ok(!conn.is_autocommit())
     }
 
+    /// Close the database. Further operations fail.
     #[js_method]
     fn close(&self) -> JSResult<()> {
         let conn = self.conn.borrow_mut().take();
@@ -335,9 +370,7 @@ pub(crate) fn query_rows(
 pub fn init(ctx: &JSContext) -> JSResult<()> {
     ctx.register_hidden_class::<SQLite>()?;
     ctx.register_hidden_class::<Statement>()?;
-    let ctor = Class::lookup::<SQLite>(ctx)?.clone();
-    ctx.host_namespace().set("SQLite", ctor)?;
-    Ok(())
+    register_sqlite_namespace(ctx)
 }
 
 #[cfg(test)]

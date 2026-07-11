@@ -19,7 +19,7 @@ This guide explains how to expose Rust functions and classes to JavaScript in th
   - [Static Methods](#static-methods)
   - [Mutable Methods](#mutable-methods)
 - [Advanced Topics](#advanced-topics)
-  - [Complex Input Types with FromJSObj](#complex-input-types-with-fromjsobj)
+  - [Complex Input Types with FromJSObject](#complex-input-types-with-fromjsobject)
   - [Attribute Reference](#attribute-reference)
 - [Complete Examples](#complete-examples)
 
@@ -36,7 +36,7 @@ Rong provides two main approaches for exposing Rust to JavaScript:
 
 **Key macros:**
 
-- `#[js_export]` — Mark a struct to be exposed to JavaScript
+- `#[js_class]` — Mark a struct to be exposed to JavaScript
 - `#[js_class]` — Mark an `impl` block to define JS class methods
 - `#[js_method]` — Mark individual methods to expose to JavaScript
 
@@ -159,15 +159,15 @@ await Rong.file("file.txt").arrayBuffer();
 
 ### Class Definition
 
-Use `#[js_export]` on the struct and `#[js_class]` on the impl block.
+Use `#[js_class]` on the struct and `#[js_class]` on the impl block.
 
 **Basic example:**
 
 ```rust
 use rong::*;
-use rong::{js_export, js_class, js_method};
+use rong::{js_class, js_method};
 
-#[js_export]
+#[js_class]
 #[derive(Debug)]
 struct Point {
     x: i32,
@@ -190,7 +190,7 @@ const p = new Point2D(10, 20);
 ```
 
 **Notes:**
-- `#[js_export]` makes the struct available to the macro system
+- `#[js_class]` makes the struct available to the macro system
 - `rename = "Point2D"` sets the JavaScript class name (optional, defaults to struct name)
 - `#[derive(Debug)]` is optional but helpful for debugging
 
@@ -417,28 +417,28 @@ p.scale(2);       // p is now (30, 50)
 
 ## Advanced Topics
 
-### Complex Input Types with FromJSObj
+### Complex Input Types with FromJSObject
 
-For methods that accept JavaScript objects, use `#[derive(FromJSObj)]`.
+For methods that accept JavaScript objects, use `#[derive(FromJSObject)]`.
 
 **Example:** Storage options (input)
 
 ```rust
-use rong::FromJSObj;
+use rong::FromJSObject;
 
-#[derive(FromJSObj, Default)]
+#[derive(FromJSObject, Default)]
 pub struct StorageOptions {
-    #[rename = "maxKeySize"]
+    #[js_name = "maxKeySize"]
     max_key_size: Option<u32>,
 
-    #[rename = "maxValueSize"]
+    #[js_name = "maxValueSize"]
     max_value_size: Option<u32>,
 
-    #[rename = "maxDataSize"]
+    #[js_name = "maxDataSize"]
     max_data_size: Option<u32>,
 }
 
-#[js_export]
+#[js_class]
 pub struct Storage {
     // ...
 }
@@ -464,30 +464,30 @@ const storage = new Storage("./data.db", {
 });
 ```
 
-**FromJSObj features:**
+**FromJSObject features:**
 - Automatically converts JavaScript objects to Rust structs
-- `#[rename = "jsName"]` maps JS property names to Rust field names
+- `#[js_name = "jsName"]` maps JS property names to Rust field names
 - Works with `Option<T>` for optional fields
 - Supports nested objects and arrays
 
-### Returning Complex Objects with IntoJSObj
+### Returning Complex Objects with IntoJSObject
 
-For methods that return JavaScript objects, use `#[derive(IntoJSObj)]`.
+For methods that return JavaScript objects, use `#[derive(IntoJSObject)]`.
 
 **Example:** Storage info (output)
 
 ```rust
-use rong::IntoJSObj;
+use rong::IntoJSObject;
 
-#[derive(IntoJSObj)]
+#[derive(IntoJSObject)]
 pub struct StorageInfo {
-    #[rename = "currentSize"]
+    #[js_name = "currentSize"]
     current_size: u32,
 
-    #[rename = "limitSize"]
+    #[js_name = "limitSize"]
     limit_size: u32,
 
-    #[rename = "keyCount"]
+    #[js_name = "keyCount"]
     key_count: u32,
 }
 
@@ -515,9 +515,9 @@ console.log(info.keyCount);     // 42
 console.log(Object.keys(info)); // ['currentSize', 'limitSize', 'keyCount']
 ```
 
-**IntoJSObj features:**
+**IntoJSObject features:**
 - Automatically converts Rust structs to JavaScript objects
-- `#[rename = "jsName"]` maps Rust field names to JS property names
+- `#[js_name = "jsName"]` maps Rust field names to JS property names
 - `Option<T>` fields are omitted if `None`
 - Supports nested structs and common types (`String`, `i32`, `f64`, `bool`, etc.)
 
@@ -658,12 +658,12 @@ See: `modules/rong_event/src/event_emitter.rs`
 
 ### Attribute Reference
 
-#### `#[js_export]`
+#### `#[js_class]`
 
 Must be applied to structs you want to expose to JavaScript.
 
 ```rust
-#[js_export]
+#[js_class]
 struct MyClass { /* ... */ }
 ```
 
@@ -761,9 +761,9 @@ await Rong.write("output.txt", "Hello, World!");
 
 ```rust
 use rong::*;
-use rong::{js_export, js_class, js_method};
+use rong::{js_class, js_method};
 
-#[js_export]
+#[js_class]
 #[derive(Debug, Clone)]
 struct Point {
     x: i32,
@@ -856,18 +856,18 @@ fn main() {
 
 ```rust
 use rong::*;
-use rong::{js_export, js_class, js_method, FromJSObj};
+use rong::{js_class, js_method, FromJSObject};
 use rong::function::Optional;
 
-#[derive(FromJSObj, Default)]
+#[derive(FromJSObject, Default)]
 pub struct StorageOptions {
-    #[rename = "maxSize"]
+    #[js_name = "maxSize"]
     max_size: Option<u32>,
 
     compression: Option<bool>,
 }
 
-#[js_export]
+#[js_class]
 pub struct Storage {
     path: String,
     max_size: u32,

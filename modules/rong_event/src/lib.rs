@@ -99,7 +99,7 @@ mod tests {
     fn test_emit_error() {
         async_run!(|ctx: JSContext| async move {
             // Create a test error emitter
-            #[js_export]
+            #[js_class]
             struct TestEmitter {
                 events: EventEmitter,
             }

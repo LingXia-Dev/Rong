@@ -1,6 +1,7 @@
 use proc_macro2::TokenStream;
 use quote::quote;
-use syn::{Expr, ItemImpl, Lit, Meta};
+use rong_typegen::{js_method_options, parse_js_class_args, validate_js_method_signature};
+use syn::ItemImpl;
 
 /// Configuration options for JavaScript method/property bindings.
 ///
@@ -33,9 +34,9 @@ use syn::{Expr, ItemImpl, Lit, Meta};
 /// # Examples
 ///
 /// ```ignore
-/// use rong_macro::{js_export, js_method, js_class};
+/// use rong_macro::{js_class, js_method};
 ///
-/// #[js_export]
+/// #[js_class]
 /// struct MyStruct {
 ///     value: i32,
 /// }
@@ -46,7 +47,7 @@ use syn::{Expr, ItemImpl, Lit, Meta};
 ///     #[js_method(getter, enumerable)]
 ///     fn value(&self) -> i32 { self.value }
 ///
-///     #[js_method(setter)]
+///     #[js_method(setter, rename = "value")]
 ///     fn set_value(&mut self, v: i32) { self.value = v; }
 ///
 ///     // Read-only property (getter only)
@@ -54,35 +55,24 @@ use syn::{Expr, ItemImpl, Lit, Meta};
 ///     fn computed(&self) -> i32 { self.value * 2 }
 /// }
 /// ```
-#[derive(Default)]
-struct MethodOpts {
-    rename: Option<String>,
-    getter: bool,
-    setter: bool,
-    enumerable: bool,
-    gc_mark: bool,
-}
-
 /// Process method attributes and generate JavaScript bindings
 pub fn class_impl(input: &ItemImpl, attr: TokenStream) -> syn::Result<TokenStream> {
+    if !input.generics.params.is_empty() {
+        return Err(syn::Error::new_spanned(
+            &input.generics,
+            "#[js_class] does not support generic impl blocks",
+        ));
+    }
     let impl_type = &input.self_ty;
 
     // Get class name from js_class attribute if present
-    let mut js_export_name = quote!(#impl_type).to_string();
+    let mut js_class_name = quote!(#impl_type).to_string();
 
-    // Parse the rename attribute from the macro arguments
-    if !attr.is_empty() {
-        let meta = syn::parse2::<Meta>(attr)?;
-        if let Meta::NameValue(nv) = meta
-            && nv.path.is_ident("rename")
-            && let Expr::Lit(expr_lit) = nv.value
-            && let Lit::Str(s) = expr_lit.lit
-        {
-            js_export_name = s.value();
-        }
+    if let Some(rename) = parse_js_class_args(attr)?.rename {
+        js_class_name = rename;
     }
 
-    let js_export_name = syn::LitStr::new(&js_export_name, proc_macro2::Span::call_site());
+    let js_class_name = syn::LitStr::new(&js_class_name, proc_macro2::Span::call_site());
 
     let mut instance_methods = Vec::new();
     let mut static_methods = Vec::new();
@@ -91,10 +81,10 @@ pub fn class_impl(input: &ItemImpl, attr: TokenStream) -> syn::Result<TokenStrea
 
     // Type alias for property definition tuple
     type PropertyDef = (Option<TokenStream>, Option<TokenStream>, bool);
-    let mut instance_properties: std::collections::HashMap<String, PropertyDef> =
-        std::collections::HashMap::new();
-    let mut static_properties: std::collections::HashMap<String, PropertyDef> =
-        std::collections::HashMap::new();
+    let mut instance_properties = std::collections::BTreeMap::<String, PropertyDef>::new();
+    let mut static_properties = std::collections::BTreeMap::<String, PropertyDef>::new();
+    let mut instance_method_names = std::collections::HashSet::new();
+    let mut static_method_names = std::collections::HashSet::new();
 
     // Process each method in the impl block
     for method in &input.items {
@@ -103,88 +93,49 @@ pub fn class_impl(input: &ItemImpl, attr: TokenStream) -> syn::Result<TokenStrea
             _ => continue,
         };
 
-        // Skip methods that don't have #[js_method] attribute
-        if !method
-            .attrs
-            .iter()
-            .any(|attr| attr.path().is_ident("js_method"))
-        {
+        let Some(opts) = js_method_options(&method.attrs)? else {
             continue;
-        }
+        };
+        validate_js_method_signature(method, &opts)?;
 
         let method_name = &method.sig.ident;
         let is_async = method.sig.asyncness.is_some();
 
-        // Parse method attributes
-        let mut opts = MethodOpts::default();
-        for attr in &method.attrs {
-            if attr.path().is_ident("js_method")
-                && let Meta::List(list) = &attr.meta
-            {
-                for nested in list.parse_args_with(
-                    syn::punctuated::Punctuated::<Meta, syn::Token![,]>::parse_terminated,
-                )? {
-                    match nested {
-                        Meta::Path(path) => {
-                            if path.is_ident("getter") {
-                                opts.getter = true;
-                            } else if path.is_ident("setter") {
-                                opts.setter = true;
-                            } else if path.is_ident("enumerable") {
-                                opts.enumerable = true;
-                            } else if path.is_ident("gc_mark") {
-                                opts.gc_mark = true;
-                            }
-                        }
-                        Meta::NameValue(nv) => {
-                            if nv.path.is_ident("rename")
-                                && let Expr::Lit(expr_lit) = &nv.value
-                                && let Lit::Str(s) = &expr_lit.lit
-                            {
-                                opts.rename = Some(s.value());
-                            }
-                        }
-                        _ => {}
-                    }
-                }
-            }
-        }
-
         let js_name = syn::LitStr::new(
-            &opts.rename.unwrap_or_else(|| method_name.to_string()),
+            &opts
+                .rename
+                .clone()
+                .unwrap_or_else(|| method_name.to_string()),
             method_name.span(),
         );
 
         // Check if this is a gc_mark method (special handling)
         if opts.gc_mark {
-            // Make sure it's a method with &self receiver (not static)
-            if let Some(receiver) = method.sig.receiver()
-                && receiver.mutability.is_none()
-            {
-                // Generate direct JSClass::gc_mark_with implementation
-                gc_mark_impl = Some(quote! {
-                    // Implement gc_mark_with by calling the user's method
-                    fn gc_mark_with<F>(&self, mark_fn: F)
-                    where
-                        F: FnMut(&rong::JSValue)
-                    {
-                        Self::#method_name(self, mark_fn);
-                    }
-                });
-                continue;
+            if gc_mark_impl.is_some() {
+                return Err(syn::Error::new_spanned(
+                    method,
+                    "a js_class cannot declare more than one gc_mark method",
+                ));
             }
+            // Generate direct JSClass::gc_mark_with implementation.
+            gc_mark_impl = Some(quote! {
+                fn gc_mark_with<F>(&self, mark_fn: F)
+                where
+                    F: FnMut(&rong::JSValue)
+                {
+                    Self::#method_name(self, mark_fn);
+                }
+            });
+            continue;
         }
 
-        // Check if this is a constructor
-        if method.attrs.iter().any(|attr| {
-            attr.path().is_ident("js_method")
-                && attr
-                    .meta
-                    .require_list()
-                    .ok()
-                    .and_then(|list| list.parse_args::<Meta>().ok())
-                    .is_some_and(|meta| meta.path().is_ident("constructor"))
-        }) {
+        if opts.constructor {
+            if constructor.is_some() {
+                return Err(syn::Error::new_spanned(
+                    method,
+                    "a js_class cannot declare more than one constructor",
+                ));
+            }
             constructor = Some(quote! {
                 fn data_constructor() -> rong::function::Constructor<rong::JSEngineValue> {
                     rong::function::Constructor::new(Self::#method_name)
@@ -305,17 +256,43 @@ pub fn class_impl(input: &ItemImpl, attr: TokenStream) -> syn::Result<TokenStrea
                     }
                 };
 
+                if instance_method_names.contains(&js_name.value()) {
+                    return Err(syn::Error::new_spanned(
+                        method,
+                        format!("duplicate JavaScript instance member `{}`", js_name.value()),
+                    ));
+                }
                 let entry = instance_properties
                     .entry(js_name.value())
                     .or_insert_with(|| (None, None, opts.enumerable));
 
                 if opts.getter {
+                    if entry.0.is_some() {
+                        return Err(syn::Error::new_spanned(
+                            method,
+                            format!("duplicate JavaScript getter `{}`", js_name.value()),
+                        ));
+                    }
                     entry.0 = Some(func);
                 } else {
+                    if entry.1.is_some() {
+                        return Err(syn::Error::new_spanned(
+                            method,
+                            format!("duplicate JavaScript setter `{}`", js_name.value()),
+                        ));
+                    }
                     entry.1 = Some(func);
                 }
                 entry.2 |= opts.enumerable;
             } else {
+                if instance_properties.contains_key(&js_name.value())
+                    || !instance_method_names.insert(js_name.value())
+                {
+                    return Err(syn::Error::new_spanned(
+                        method,
+                        format!("duplicate JavaScript instance member `{}`", js_name.value()),
+                    ));
+                }
                 // Handle regular instance methods
                 let method_def = if is_async {
                     quote! {
@@ -368,17 +345,43 @@ pub fn class_impl(input: &ItemImpl, attr: TokenStream) -> syn::Result<TokenStrea
                     }
                 };
 
+                if static_method_names.contains(&js_name.value()) {
+                    return Err(syn::Error::new_spanned(
+                        method,
+                        format!("duplicate JavaScript static member `{}`", js_name.value()),
+                    ));
+                }
                 let entry = static_properties
                     .entry(js_name.value())
                     .or_insert_with(|| (None, None, opts.enumerable));
 
                 if opts.getter {
+                    if entry.0.is_some() {
+                        return Err(syn::Error::new_spanned(
+                            method,
+                            format!("duplicate JavaScript getter `{}`", js_name.value()),
+                        ));
+                    }
                     entry.0 = Some(func);
                 } else {
+                    if entry.1.is_some() {
+                        return Err(syn::Error::new_spanned(
+                            method,
+                            format!("duplicate JavaScript setter `{}`", js_name.value()),
+                        ));
+                    }
                     entry.1 = Some(func);
                 }
                 entry.2 |= opts.enumerable;
             } else {
+                if static_properties.contains_key(&js_name.value())
+                    || !static_method_names.insert(js_name.value())
+                {
+                    return Err(syn::Error::new_spanned(
+                        method,
+                        format!("duplicate JavaScript static member `{}`", js_name.value()),
+                    ));
+                }
                 // Handle regular static method
                 let method_def = if is_async {
                     quote! {
@@ -468,7 +471,7 @@ pub fn class_impl(input: &ItemImpl, attr: TokenStream) -> syn::Result<TokenStrea
 
     let output = quote! {
         impl rong::JSClass<rong::JSEngineValue> for #impl_type {
-            const NAME: &'static str = #js_export_name;
+            const NAME: &'static str = #js_class_name;
 
             #constructor
 
@@ -484,4 +487,43 @@ pub fn class_impl(input: &ItemImpl, attr: TokenStream) -> syn::Result<TokenStrea
 
     // println!("Generated code:\n{}", output.to_string());
     Ok(output)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn qualified_js_method_attributes_match_runtime_extraction() {
+        let path: syn::Path = syn::parse_quote!(rong::js_method);
+        assert!(rong_typegen::path_last_is(&path, "js_method"));
+    }
+
+    #[test]
+    fn accessor_and_gc_signatures_fail_closed() {
+        let getter: syn::ImplItemFn = syn::parse_quote! {
+            #[js_method(getter)]
+            fn value(&self, unexpected: String) -> String { unexpected }
+        };
+        let options = rong_typegen::js_method_options(&getter.attrs)
+            .unwrap()
+            .unwrap();
+        assert!(validate_js_method_signature(&getter, &options).is_err());
+
+        let setter: syn::ImplItemFn = syn::parse_quote! {
+            #[js_method(setter)]
+            fn value(&mut self, ctx: JSContext, value: String) {}
+        };
+        let options = rong_typegen::js_method_options(&setter.attrs)
+            .unwrap()
+            .unwrap();
+        assert!(validate_js_method_signature(&setter, &options).is_ok());
+
+        let gc: syn::ImplItemFn = syn::parse_quote! {
+            #[js_method(gc_mark)]
+            fn gc_mark(mark: F) {}
+        };
+        let options = rong_typegen::js_method_options(&gc.attrs).unwrap().unwrap();
+        assert!(validate_js_method_signature(&gc, &options).is_err());
+    }
 }

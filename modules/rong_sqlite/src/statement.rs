@@ -1,21 +1,23 @@
 use crate::{
-    SharedConn, js_array_to_params, query_rows, set_sqlite_value, sqlite_error, sqlite_value_to_js,
+    RunResult, SharedConn, js_array_to_params, query_rows, set_sqlite_value, sqlite_error,
+    sqlite_value_to_js,
 };
 use rong::function::Optional;
 use rong::*;
 use rusqlite::types::Value;
 
 /// Prepared statement. Shares the SQLite connection via Rc.
-#[js_export]
+#[js_class]
 pub struct Statement {
     conn: SharedConn,
     sql: String,
     finalized: bool,
 }
 
+/// Prepared SQLite statement created by `SQLite.prepare`.
 #[js_class]
 impl Statement {
-    #[js_method(constructor)]
+    #[js_method(constructor, private)]
     fn new() -> JSResult<Self> {
         rong::illegal_constructor("Not allowed 'new Statement()'. Use db.prepare(sql) instead.")
     }
@@ -29,8 +31,8 @@ impl Statement {
     }
 
     /// Execute the statement. Returns `{ changes, lastInsertRowid }`.
-    #[js_method]
-    fn run(&self, ctx: JSContext, params: Optional<JSArray>) -> JSResult<JSObject> {
+    #[js_method(ts_params = "params?: SQLiteParams")]
+    fn run(&self, params: Optional<JSArray>) -> JSResult<RunResult> {
         self.check_finalized()?;
         let borrow = self.conn.borrow();
         let conn = borrow
@@ -47,14 +49,14 @@ impl Statement {
             .execute(&self.sql, param_refs.as_slice())
             .map_err(|e| sqlite_error(e.to_string()))?;
 
-        let result = JSObject::new(&ctx);
-        result.set("changes", changes as f64)?;
-        result.set("lastInsertRowid", conn.last_insert_rowid())?;
-        Ok(result)
+        Ok(RunResult {
+            changes: changes as f64,
+            last_insert_rowid: conn.last_insert_rowid(),
+        })
     }
 
     /// Execute and return all rows as array of objects.
-    #[js_method]
+    #[js_method(ts_return = "SQLiteRow[]", ts_params = "params?: SQLiteParams")]
     fn all(&self, ctx: JSContext, params: Optional<JSArray>) -> JSResult<JSArray> {
         self.check_finalized()?;
         let borrow = self.conn.borrow();
@@ -65,7 +67,7 @@ impl Statement {
     }
 
     /// Execute and return the first row, or null if no match.
-    #[js_method]
+    #[js_method(ts_return = "SQLiteRow | null", ts_params = "params?: SQLiteParams")]
     fn get(&self, ctx: JSContext, params: Optional<JSArray>) -> JSResult<JSValue> {
         self.check_finalized()?;
         let borrow = self.conn.borrow();
@@ -110,7 +112,7 @@ impl Statement {
     }
 
     /// Execute and return all rows as arrays of values (column-order tuples).
-    #[js_method]
+    #[js_method(ts_return = "SQLiteValue[][]", ts_params = "params?: SQLiteParams")]
     fn values(&self, ctx: JSContext, params: Optional<JSArray>) -> JSResult<JSArray> {
         self.check_finalized()?;
         let borrow = self.conn.borrow();

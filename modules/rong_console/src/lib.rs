@@ -985,7 +985,7 @@ fn escape_string(s: &str) -> String {
     result
 }
 
-#[js_export]
+#[js_class]
 pub struct Console {}
 
 #[js_class]

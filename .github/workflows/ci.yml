@@ -67,7 +67,7 @@ jobs:
               [ -n "$file" ] || continue
 
               case "$file" in
-                docs/api/*|docs/skills/*|packages/*|scripts/bump_version.sh|scripts/publish_npm.sh|.github/workflows/ci.yml|.github/workflows/release.yml)
+                docs/api/*|docs/skills/*|packages/*|rong_typegen/profiles/*|scripts/bump_version.sh|scripts/publish_npm.sh|.github/workflows/ci.yml|.github/workflows/release.yml)
                   npm=true
                   ;;
               esac
@@ -112,6 +112,27 @@ jobs:
 
       - name: Format
         run: cargo fmt --all -- --check
+
+  typegen:
+    needs: scope
+    # Run when Rust source changes (may alter generated types) OR when the type
+    # package changes (preludes / generated / canonical src files) — either can
+    # put the committed `.ts` out of sync with the Rust source.
+    if: needs.scope.outputs.rust == 'true' || needs.scope.outputs.npm == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          submodules: recursive
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      # Fails if the committed TS definitions are stale vs the Rust source.
+      # Run `cargo run -p rong_typegen` to update them.
+      - name: Check generated types
+        run: cargo run -p rong_typegen -- --check
 
   # Informational only: shows which crates have publish-relevant changes since
   # their last release tag, and which need a version bump. Never fails the
@@ -165,6 +186,7 @@ jobs:
         run: |
           npm --prefix packages/rong_types install --no-package-lock
           npm --prefix packages/rong_types run build
+          npm --prefix packages/rong_types run check:profiles
 
       - name: Check Rong skill package
         run: |

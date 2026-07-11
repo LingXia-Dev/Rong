@@ -1,0 +1,306 @@
+//! End-to-end descriptor rendering.
+
+use rong_typegen::model::*;
+use rong_typegen::render_module;
+
+fn method(name: &str, docs: &[&str], params: Vec<Param>, ret: &str) -> Member {
+    Member {
+        kind: MemberKind::Method,
+        name: name.into(),
+        docs: docs.iter().map(|s| s.to_string()).collect(),
+        sig: FnSig {
+            params,
+            ret: ret.into(),
+            ..Default::default()
+        },
+    }
+}
+
+fn param(name: &str, ts_type: &str, optional: bool) -> Param {
+    Param {
+        name: name.into(),
+        ts_type: ts_type.into(),
+        optional,
+        rest: false,
+    }
+}
+
+fn sqlite_module() -> ModuleTypeDef {
+    ModuleTypeDef {
+        module: "sqlite".into(),
+        items: vec![
+            Item::Interface(InterfaceDef {
+                name: "RunResult".into(),
+                docs: vec!["Result of a write operation.".into()],
+                fields: vec![
+                    Field {
+                        name: "changes".into(),
+                        ts_type: "number".into(),
+                        optional: false,
+                        readonly: false,
+                        docs: vec!["Number of rows changed.".into()],
+                    },
+                    Field {
+                        name: "lastInsertRowid".into(),
+                        ts_type: "number | bigint".into(),
+                        optional: false,
+                        readonly: false,
+                        docs: vec![],
+                    },
+                ],
+            }),
+            Item::NumericEnum(NumericEnumDef {
+                name: "SeekMode".into(),
+                docs: vec!["Seek origin.".into()],
+                variants: vec![
+                    NumericEnumVariant {
+                        name: "Start".into(),
+                        value: 0,
+                        docs: vec!["Seek from start.".into()],
+                    },
+                    NumericEnumVariant {
+                        name: "Current".into(),
+                        value: 1,
+                        docs: vec![],
+                    },
+                    NumericEnumVariant {
+                        name: "End".into(),
+                        value: 2,
+                        docs: vec![],
+                    },
+                ],
+            }),
+            Item::Class(ClassDef {
+                rust_name: "SQLite".into(),
+                name: "SQLite".into(),
+                docs: vec!["SQLite database connection.".into()],
+                constructor: Some(FnSig {
+                    params: vec![param("filename", "string", true)],
+                    ret: String::new(),
+                    ..Default::default()
+                }),
+                constructor_docs: vec![],
+                private_constructor: false,
+                members: vec![
+                    Member {
+                        kind: MemberKind::Getter,
+                        name: "filename".into(),
+                        docs: vec![],
+                        sig: FnSig {
+                            params: vec![],
+                            ret: "string".into(),
+                            ..Default::default()
+                        },
+                    },
+                    method(
+                        "exec",
+                        &["Execute SQL."],
+                        vec![param("sql", "string", false)],
+                        "void",
+                    ),
+                    method(
+                        "query",
+                        &[],
+                        vec![
+                            param("sql", "string", false),
+                            param("params", "SQLiteParams", true),
+                        ],
+                        "Record<string, any>[]",
+                    ),
+                ],
+            }),
+        ],
+    }
+}
+
+#[test]
+fn renders_expected_declarations() {
+    let out = render_module(&sqlite_module());
+    let expected = "\
+/** Result of a write operation. */
+export interface RunResult {
+  /** Number of rows changed. */
+  changes: number;
+  lastInsertRowid: number | bigint;
+}
+
+/** Seek origin. */
+export declare const SeekMode: {
+  /** Seek from start. */
+  readonly Start: 0;
+  readonly Current: 1;
+  readonly End: 2;
+};
+export type SeekMode = (typeof SeekMode)[keyof typeof SeekMode];
+
+/** SQLite database connection. */
+export declare class SQLite {
+  constructor(filename?: string);
+  readonly filename: string;
+  /** Execute SQL. */
+  exec(sql: string): void;
+  query(sql: string, params?: SQLiteParams): Record<string, any>[];
+}
+
+";
+    assert_eq!(out, expected);
+}
+
+#[test]
+fn renders_documented_type_alias() {
+    let out = render_module(&ModuleTypeDef {
+        module: "sqlite".into(),
+        items: vec![Item::TypeAlias(TypeAliasDef {
+            name: "SQLiteParam".into(),
+            ts_type: "null | string | Uint8Array".into(),
+            docs: vec!["A bindable value.".into()],
+        })],
+    });
+    assert_eq!(
+        out,
+        "/** A bindable value. */\nexport type SQLiteParam = null | string | Uint8Array;\n\n"
+    );
+}
+
+fn one_class(c: ClassDef) -> String {
+    render_module(&ModuleTypeDef {
+        module: "x".into(),
+        items: vec![Item::Class(c)],
+    })
+}
+
+#[test]
+fn private_constructor_renders() {
+    let out = one_class(ClassDef {
+        rust_name: "Stmt".into(),
+        name: "Stmt".into(),
+        docs: vec![],
+        constructor: None,
+        constructor_docs: vec![],
+        private_constructor: true,
+        members: vec![],
+    });
+    assert!(out.contains("private constructor();"), "{out}");
+}
+
+#[test]
+fn non_trailing_optional_param_uses_union_not_question_mark() {
+    let out = one_class(ClassDef {
+        rust_name: "C".into(),
+        name: "C".into(),
+        docs: vec![],
+        constructor: None,
+        constructor_docs: vec![],
+        private_constructor: false,
+        members: vec![method(
+            "f",
+            &[],
+            vec![param("a", "number", true), param("b", "string", false)],
+            "void",
+        )],
+    });
+    // `a` is optional but not trailing, so it must not use `?`.
+    assert!(
+        out.contains("f(a: number | undefined, b: string): void;"),
+        "{out}"
+    );
+}
+
+#[test]
+fn renders_static_and_setter_only_properties() {
+    let out = one_class(ClassDef {
+        rust_name: "Config".into(),
+        name: "Config".into(),
+        docs: vec![],
+        constructor: None,
+        constructor_docs: vec![],
+        private_constructor: false,
+        members: vec![
+            Member {
+                kind: MemberKind::StaticGetter,
+                name: "current".into(),
+                docs: vec![],
+                sig: FnSig {
+                    ret: "Config".into(),
+                    ..Default::default()
+                },
+            },
+            Member {
+                kind: MemberKind::Setter,
+                name: "token".into(),
+                docs: vec![],
+                sig: FnSig {
+                    params: vec![param("value", "string", false)],
+                    ret: "void".into(),
+                    ..Default::default()
+                },
+            },
+        ],
+    });
+    assert!(out.contains("static readonly current: Config;"), "{out}");
+    assert!(out.contains("set token(value: string);"), "{out}");
+}
+
+#[test]
+fn jsdoc_escapes_comment_terminator() {
+    let out = render_module(&ModuleTypeDef {
+        module: "x".into(),
+        items: vec![Item::Interface(InterfaceDef {
+            name: "I".into(),
+            docs: vec!["ratio w/h */ danger".into()],
+            fields: vec![],
+        })],
+    });
+    assert!(!out.contains("*/ danger"), "unescaped terminator: {out}");
+    assert!(out.contains("*\\/ danger"), "{out}");
+}
+
+#[test]
+fn renders_mergeable_namespace_augmentation() {
+    let output = render_module(&ModuleTypeDef {
+        module: "fs".into(),
+        items: vec![Item::Namespace(NamespaceDef {
+            name: "RongNamespace".into(),
+            members: vec![
+                NamespaceMember::Function(FunctionDef {
+                    name: "file".into(),
+                    docs: vec!["Create a file reference.".into()],
+                    sig: FnSig {
+                        params: vec![param("path", "string", false)],
+                        ret: "RongFile".into(),
+                        ..Default::default()
+                    },
+                }),
+                NamespaceMember::Value(NamespaceValueDef {
+                    name: "SeekMode".into(),
+                    ts_type: "typeof SeekMode".into(),
+                }),
+            ],
+        })],
+    });
+    assert!(output.contains("interface RongNamespace"), "{output}");
+    assert!(output.contains("file(path: string): RongFile;"), "{output}");
+    assert!(
+        output.contains("readonly SeekMode: typeof SeekMode;"),
+        "{output}"
+    );
+}
+
+#[test]
+fn quotes_non_identifier_property_names() {
+    let output = render_module(&ModuleTypeDef {
+        module: "x".into(),
+        items: vec![Item::Namespace(NamespaceDef {
+            name: "Lx".into(),
+            members: vec![NamespaceMember::Function(FunctionDef {
+                name: "open-file".into(),
+                docs: vec![],
+                sig: FnSig {
+                    ret: "void".into(),
+                    ..Default::default()
+                },
+            })],
+        })],
+    });
+    assert!(output.contains("\"open-file\"(): void;"), "{output}");
+}

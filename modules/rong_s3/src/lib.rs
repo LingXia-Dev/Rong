@@ -5,21 +5,30 @@
 mod client;
 mod config;
 mod file;
+mod types;
 
 pub use client::S3Client;
 pub use config::S3Config;
 pub use file::S3File;
+pub use types::{
+    S3ClientOptions, S3ListEntry, S3ListOptions, S3ListResult, S3PresignOptions, S3StatResult,
+    S3WriteOptions,
+};
 
 use rong::*;
+
+rong::js_api! {
+    fn register_s3_namespace(ctx) {
+        namespace RongNamespace = ctx.host_namespace();
+        class S3Client = S3Client;
+    }
+}
 
 /// Register `Rong.S3Client` and keep S3File internal-only.
 pub fn init(ctx: &JSContext) -> JSResult<()> {
     ctx.register_hidden_class::<S3File>()?;
     ctx.register_hidden_class::<S3Client>()?;
-    let ctor = Class::lookup::<S3Client>(ctx)?.clone();
-    ctx.host_namespace().set("S3Client", ctor)?;
-
-    Ok(())
+    register_s3_namespace(ctx)
 }
 
 #[cfg(test)]

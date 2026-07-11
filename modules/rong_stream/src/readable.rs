@@ -40,14 +40,14 @@ impl JSRuntimeService for AsyncReaderTaskRegistry {
     }
 }
 
-#[js_export]
+#[js_class]
 pub struct ReadableStream {
     // A single-consumer source guarded by a lock; getReader() takes ownership.
     pub(crate) rx_slot: SharedReceiverSlot,
     initializer: StreamInitializer,
 }
 
-#[js_export]
+#[js_class]
 pub struct ReadableStreamDefaultReader {
     // Reference to the owning stream's slot so releaseLock can return ownership.
     slot: SharedReceiverSlot,
@@ -56,7 +56,7 @@ pub struct ReadableStreamDefaultReader {
     canceled: Arc<AtomicBool>,
 }
 
-#[js_export]
+#[js_class]
 pub struct ReadableStreamDefaultController {
     tx: SharedSender,
 }
@@ -81,13 +81,13 @@ impl ReadableStream {
 }
 
 // Options for pipeTo
-#[derive(FromJSObj, Default, Clone)]
+#[derive(FromJSObject, Default, Clone)]
 struct PipeToOptions {
-    #[rename = "preventClose"]
+    #[js_name = "preventClose"]
     prevent_close: Option<bool>,
-    #[rename = "preventAbort"]
+    #[js_name = "preventAbort"]
     prevent_abort: Option<bool>,
-    #[rename = "preventCancel"]
+    #[js_name = "preventCancel"]
     prevent_cancel: Option<bool>,
     signal: Option<AbortSignal>,
 }
@@ -438,7 +438,7 @@ impl ReadableStream {
 
 #[js_class]
 impl ReadableStreamDefaultReader {
-    #[js_method(constructor)]
+    #[js_method(constructor, private)]
     fn new() -> JSResult<Self> {
         rong::illegal_constructor("Illegal constructor")
     }
@@ -555,7 +555,7 @@ impl ReadableStreamDefaultReader {
 
 #[js_class]
 impl ReadableStreamDefaultController {
-    #[js_method(constructor)]
+    #[js_method(constructor, private)]
     fn new() -> JSResult<Self> {
         rong::illegal_constructor("Illegal constructor")
     }

@@ -5,16 +5,17 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 use tokio::fs;
 
-#[js_export]
+#[js_class]
 pub struct DirEntry {
     name: String,
     file_type: bool,
     is_symlink: bool,
 }
 
+/// One directory entry returned by `Rong.readDir`.
 #[js_class]
 impl DirEntry {
-    #[js_method(constructor)]
+    #[js_method(constructor, private)]
     fn new(_name: String, _file_type: bool, _is_symlink: bool) -> JSResult<Self> {
         rong::illegal_constructor("DirEntry cannot be constructed directly. Use Rong.readDir().")
     }
@@ -47,16 +48,16 @@ impl DirEntry {
     }
 }
 
-#[derive(FromJSObj, Default)]
-struct MkdirOptions {
-    // If true, parent folders will be created if they don't exist
+#[derive(FromJSObject, Default)]
+pub(crate) struct MkdirOptions {
+    /// Create missing parent directories. Defaults to false.
     recursive: Option<bool>,
-    // Permissions to set on the created directory
+    /// Unix permissions mode for the created directory.
     #[cfg(unix)]
     mode: Option<u32>,
 }
 
-async fn mkdir(path: String, option: Optional<MkdirOptions>) -> JSResult<()> {
+pub(crate) async fn mkdir(path: String, option: Optional<MkdirOptions>) -> JSResult<()> {
     let resolved = grant_file_access(&path)?;
     let options = option.0.unwrap_or_default();
 
@@ -171,7 +172,7 @@ impl Stream for DirEntryStream {
     }
 }
 
-async fn readdir(ctx: JSContext, path: String) -> JSResult<JSObject> {
+pub(crate) async fn readdir(ctx: JSContext, path: String) -> JSResult<JSObject> {
     let resolved = grant_file_access(&path)?;
     let entries = fs::read_dir(&resolved)
         .await
@@ -181,13 +182,13 @@ async fn readdir(ctx: JSContext, path: String) -> JSResult<JSObject> {
     stream.to_js_async_iter(&ctx)
 }
 
-#[derive(FromJSObj, Default)]
-struct RemoveOptions {
-    // If set to true, path will be removed even if it's a non-empty directory.
-    recursive: bool,
+#[derive(FromJSObject, Default)]
+pub(crate) struct RemoveOptions {
+    /// Recursively remove non-empty directories. Defaults to false.
+    recursive: Option<bool>,
 }
 
-async fn remove(path: String, option: Optional<RemoveOptions>) -> JSResult<()> {
+pub(crate) async fn remove(path: String, option: Optional<RemoveOptions>) -> JSResult<()> {
     let resolved = grant_file_access(&path)?;
     let options = option.0.unwrap_or_default();
 
@@ -199,7 +200,7 @@ async fn remove(path: String, option: Optional<RemoveOptions>) -> JSResult<()> {
                     HostError::new("FS_IO", format!("Failed to remove file: {}", e)).into()
                 })
             } else if metadata.is_dir() {
-                if options.recursive {
+                if options.recursive.unwrap_or(false) {
                     fs::remove_dir_all(&resolved).await.map_err(|e| {
                         HostError::new(
                             "FS_IO",
@@ -220,28 +221,13 @@ async fn remove(path: String, option: Optional<RemoveOptions>) -> JSResult<()> {
     }
 }
 
-async fn chdir(directory: String) -> JSResult<()> {
+pub(crate) async fn chdir(directory: String) -> JSResult<()> {
     let resolved = grant_file_access(&directory)?;
     std::env::set_current_dir(&resolved)
         .map_err(|e| HostError::new("FS_IO", format!("Failed to change directory: {}", e)).into())
 }
 
 pub(crate) fn init(ctx: &JSContext) -> JSResult<()> {
-    let rong = ctx.host_namespace();
-
     ctx.register_hidden_class::<DirEntry>()?;
-
-    let mkdir_fn = JSFunc::new(ctx, mkdir)?.name("mkdir")?;
-    rong.set("mkdir", mkdir_fn)?;
-
-    let remove_fn = JSFunc::new(ctx, remove)?.name("remove")?;
-    rong.set("remove", remove_fn)?;
-
-    let readdir_fn = JSFunc::new(ctx, readdir)?.name("readDir")?;
-    rong.set("readDir", readdir_fn)?;
-
-    let chdir_fn = JSFunc::new(ctx, chdir)?.name("chdir")?;
-    rong.set("chdir", chdir_fn)?;
-
     Ok(())
 }

@@ -20,7 +20,7 @@ use rong::*;
 
 /// Implementation of the JavaScript `TextEncoder` interface.
 /// Encodes strings into UTF-8 byte sequences. Currently supports only UTF-8 encoding.
-#[js_export]
+#[js_class]
 pub struct TextEncoder {}
 
 #[js_class]

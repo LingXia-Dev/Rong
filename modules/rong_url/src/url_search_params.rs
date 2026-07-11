@@ -6,7 +6,7 @@ use url::{Url, form_urlencoded};
 
 /// URLSearchParams implementation following the Web spec
 /// https://url.spec.whatwg.org/#interface-urlsearchparams
-#[js_export]
+#[js_class]
 pub struct URLSearchParams {
     // Use Vec instead of HashMap to maintain insertion order
     params: RefCell<Vec<(String, String)>>,
@@ -14,9 +14,14 @@ pub struct URLSearchParams {
     shared_data: Option<Rc<SharedUrlData>>,
 }
 
+/// Ordered query-string parameters following the URLSearchParams API.
 #[js_class]
 impl URLSearchParams {
-    #[js_method(constructor)]
+    /// Construct from a query string, pair array, or string record.
+    #[js_method(
+        constructor,
+        ts_params = "init?: string | Array<[string, string]> | Record<string, string>"
+    )]
     fn new(init: Optional<JSValue>) -> JSResult<Self> {
         let mut params = Vec::new();
 
@@ -76,6 +81,7 @@ impl URLSearchParams {
         }
     }
 
+    /// Append a value without removing existing values.
     #[js_method]
     fn append(&mut self, name: String, value: String) {
         {
@@ -85,6 +91,7 @@ impl URLSearchParams {
         self.sync_url();
     }
 
+    /// Delete every value associated with a name.
     #[js_method]
     fn delete(&mut self, name: String) {
         {
@@ -94,6 +101,7 @@ impl URLSearchParams {
         self.sync_url();
     }
 
+    /// Return the first value for a name, or null.
     #[js_method]
     fn get(&self, name: String) -> Option<String> {
         self.params
@@ -103,6 +111,7 @@ impl URLSearchParams {
             .map(|(_, v)| v.clone())
     }
 
+    /// Return every value associated with a name.
     #[js_method(rename = "getAll")]
     fn get_all(&self, name: String) -> Vec<String> {
         self.params
@@ -113,11 +122,13 @@ impl URLSearchParams {
             .collect()
     }
 
+    /// Test whether a name is present.
     #[js_method]
     fn has(&self, name: String) -> bool {
         self.params.borrow().iter().any(|(k, _)| k == &name)
     }
 
+    /// Replace existing values for a name.
     #[js_method]
     fn set(&mut self, name: String, value: String) {
         {
@@ -150,6 +161,7 @@ impl URLSearchParams {
         self.sync_url();
     }
 
+    /// Sort parameters by name.
     #[js_method]
     fn sort(&mut self) {
         {
@@ -159,12 +171,14 @@ impl URLSearchParams {
         self.sync_url();
     }
 
+    /// Number of stored name/value pairs.
     #[js_method(getter)]
     fn size(&self) -> u32 {
         self.params.borrow().len() as u32
     }
 
-    #[js_method]
+    /// Return all name/value pairs.
+    #[js_method(ts_return = "Array<[string, string]>")]
     fn entries(&self, ctx: JSContext) -> JSResult<JSArray> {
         let array = JSArray::new(&ctx)?;
         let params = self.params.borrow();
@@ -178,19 +192,25 @@ impl URLSearchParams {
         Ok(array)
     }
 
+    /// Return all parameter names.
     #[js_method]
     fn keys(&self) -> Vec<String> {
         let params = self.params.borrow();
         params.iter().map(|(k, _)| k.clone()).collect()
     }
 
+    /// Return all parameter values.
     #[js_method]
     fn values(&self) -> Vec<String> {
         let params = self.params.borrow();
         params.iter().map(|(_, v)| v.clone()).collect()
     }
 
-    #[js_method(rename = "forEach")]
+    /// Invoke a callback for each parameter.
+    #[js_method(
+        rename = "forEach",
+        ts_params = "callback: (value: string, key: string) => void, thisArg?: any"
+    )]
     fn for_each(&self, callback: JSFunc, this_arg: Optional<JSObject>) -> JSResult<()> {
         let params = self.params.borrow();
 
@@ -208,6 +228,7 @@ impl URLSearchParams {
     }
 
     #[allow(clippy::inherent_to_string)]
+    /// Serialize as a query string without a leading `?`.
     #[js_method(rename = "toString")]
     pub fn to_string(&self) -> String {
         let params = self.params.borrow();

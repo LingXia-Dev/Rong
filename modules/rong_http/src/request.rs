@@ -17,7 +17,7 @@ pub struct RequestParts {
     pub body: HostBody,
 }
 
-#[js_export]
+#[js_class]
 pub struct Request {
     pub(crate) url: Uri,
     pub(crate) method: Method,

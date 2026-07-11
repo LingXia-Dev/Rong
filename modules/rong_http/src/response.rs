@@ -25,7 +25,7 @@ pub struct ResponseParts {
 }
 
 #[derive(Default)]
-#[js_export]
+#[js_class]
 pub struct Response {
     url: Uri,
     method: Method,

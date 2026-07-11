@@ -1,7 +1,7 @@
 use rong::{function::*, *};
 
 /// Event constructor options
-#[derive(FromJSObj, Default)]
+#[derive(FromJSObject, Default)]
 pub struct EventOptions {
     #[js_default]
     pub bubbles: bool,
@@ -12,7 +12,7 @@ pub struct EventOptions {
 }
 
 /// Represents an event object
-#[js_export]
+#[js_class]
 #[derive(Default)]
 pub struct Event {
     pub(crate) type_: String,

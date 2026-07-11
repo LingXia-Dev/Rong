@@ -4,8 +4,8 @@ description: >-
   Author and modify RongJS (Rong) modules - expose Rust functions and classes to
   JavaScript, convert values across the Rust<->JS boundary, raise JS errors from
   Rust, and wire a new `rong_<name>` module crate into the runtime. Use when
-  writing or editing Rong module code: `#[js_export]` / `#[js_class]` /
-  `#[js_method]`, `JSFunc::new` registration, `FromJSObj` / `IntoJSObj` types,
+  writing or editing Rong module code: `js_api!`, `#[js_class]`, `#[js_method]`,
+  `#[js_union]`, `#[js_numeric_enum]`, `FromJSObject` / `IntoJSObject` types,
   `JSResult`/`HostError` error handling, a module `init(ctx)` function, or
   registering a class with `register_class` / `register_hidden_class`.
 license: MIT OR Apache-2.0
@@ -17,99 +17,57 @@ metadata:
 
 # Authoring RongJS modules
 
-Rong (RongJS) is an embeddable, multi-engine JavaScript runtime (QuickJS,
-JavaScriptCore, ArkJS) with a single Rust API. A **module** is a Rust crate that
-exposes Rust functions and classes to JavaScript through that API. This skill
-helps you write correct, idiomatic module code.
+Use the smallest reference needed:
 
-Use the reference files in this skill for depth - load the one that matches the
-task:
+- `references/functions.md`: free functions, `js_api!`, registration.
+- `references/classes.md`: classes, methods, object shapes, `#[js_numeric_enum]`.
+- `references/type-conversion.md`: Rust<->JS mapping and dynamic values.
+- `references/errors.md`: `JSResult`, `HostError`, preserving JS-thrown values.
+- `references/module-structure.md`: new crate wiring and tests.
 
-- **[references/functions.md](references/functions.md)** - sync/async functions, `JSFunc`, optional params, registration.
-- **[references/classes.md](references/classes.md)** - `#[js_export]`/`#[js_class]`/`#[js_method]`, constructors, getters/setters, static & mutable methods, `FromJSObj`/`IntoJSObj`, union-type params.
-- **[references/type-conversion.md](references/type-conversion.md)** - the Rust<->JS type mapping, `JSValue`/`JSObject`/`JSArray` ops, type-checking helpers.
-- **[references/errors.md](references/errors.md)** - `JSResult`, `HostError`, error codes, preserving thrown JS values, throw vs no-throw APIs.
-- **[references/module-structure.md](references/module-structure.md)** - create a new `rong_<name>` crate, the `init(ctx)` pattern, wiring into `rong_modules`, and writing tests.
+## Core Rules
 
-## Mental model
+- Every module exposes `pub fn init(ctx: &JSContext) -> JSResult<()>`.
+- Use `JSResult<T>` for fallible APIs: `Ok` returns/resolves, `Err` throws/rejects.
+- Use `async fn` for I/O; it becomes a JS `Promise`.
+- Public option/result objects should be named Rust structs with `FromJSObject` /
+  `IntoJSObject`, not hand-parsed or hand-built `JSObject`.
+- Use `#[ts_type = "..."]` only when generated TypeScript needs precision Rust
+  cannot infer; use `#[ts_skip]` only for internal derived parser structs.
+- Numeric constant objects such as `Rong.SeekMode` should use `#[js_numeric_enum]`,
+  not TS enum preludes or hand-built JS objects.
+- Untagged value unions should use `#[js_union]`; put the most specific runtime
+  shape first because conversion tries variants in declaration order.
+- Preserve JS-thrown values with `RongJSError::from_thrown_value(value)`. Detect
+  thrown values with `value.is_exception()`, not `is_error()`.
 
-- A module crate exposes one entry point: `pub fn init(ctx: &JSContext) -> JSResult<()>`. Inside it you register functions and classes onto the context.
-- **Functions** are for standalone utilities/APIs (`Rong.cwd()`); **classes** are for stateful objects (`new Point2D(10, 20)`).
-- The Rust<->JS bridge type is `JSResult<T>`. This is a hard rule everywhere:
-  - `Ok(v)` -> JS normal return / `Promise.resolve(v)`
-  - `Err(e)` -> JS `throw` / `Promise.reject`
-- `async fn` becomes a JS `Promise` automatically; sync `fn` returns directly (use sync only for non-blocking work).
-
-## The three macros
-
-```rust
-#[js_export]                 // mark a struct as a JS-exposable class
-#[derive(Debug)]
-struct Point { x: i32, y: i32 }
-
-#[js_class(rename = "Point2D")]   // impl block -> JS class methods (rename optional)
-impl Point {
-    #[js_method(constructor)]      // mark methods to expose; see classes.md for getter/setter/static
-    fn new(x: i32, y: i32) -> Self { Self { x, y } }
-
-    #[js_method]
-    fn distance(&self) -> f64 { ((self.x.pow(2) + self.y.pow(2)) as f64).sqrt() }
-}
-```
-
-## Registering in `init`
+## Registration Sketch
 
 ```rust
 use rong::*;
 
-pub fn init(ctx: &JSContext) -> JSResult<()> {
-    // A class with a global constructor (JS: `new Point2D(...)`)
-    ctx.register_class::<Point>()?;
-
-    // A free function on the host `Rong` namespace (JS: `Rong.cwd()`)
-    let rong = ctx.host_namespace();
-    let cwd_fn = JSFunc::new(ctx, cwd)?.name("cwd")?;
-    rong.set("cwd", cwd_fn)?;
-
-    Ok(())
+rong::js_api! {
+    fn register_module(ctx) {
+        namespace RongNamespace = ctx.host_namespace();
+        fn doWork = do_work;
+        class Thing = Thing;
+    }
 }
 
-fn cwd() -> JSResult<String> {
-    std::env::current_dir()
-        .map(|p| p.to_string_lossy().into_owned())
-        .map_err(|e| HostError::new(rong::error::E_IO, e.to_string()).into())
+pub fn init(ctx: &JSContext) -> JSResult<()> {
+    ctx.register_hidden_class::<Thing>()?;
+    register_module(ctx)
 }
 ```
 
-Use `register_hidden_class::<T>()` for Rust-owned interop types that need a
-prototype but should **not** get a global JS constructor (create instances from
-Rust with `Class::lookup::<T>(ctx)?.instance(value)`).
+Use `register_class::<T>()` only when the constructor should be globally visible.
 
-## Errors (summary - see errors.md)
+## Checklist
 
-Build host errors with `HostError::new(CODE, msg)`, optionally `.with_name("TypeError")`
-and `.with_data(rong::err_data!({ ... }))`, then `.into()` a `RongJSError`. To
-re-throw a value that came from JS (callback/promise/abort reason), preserve it
-with `RongJSError::from_thrown_value(value)` rather than wrapping it. Detect
-exceptions with `value.is_exception()` - **not** `is_error()`.
-
-## Type conversion (summary - see type-conversion.md)
-
-Rust <-> JS conversion is automatic for primitives (`bool`, integer types, `f64`,
-`String`/`&str`), `Option<T>` (<-> `null`), `Vec<T>` (<-> Array), `SystemTime` (<->
-Date), and the wrapper types (`JSValue`, `JSObject`, `JSArray`, `JSFunc`,
-`JSDate`, `JSSymbol`, `Promise`). For object-shaped params/returns, derive
-`FromJSObj` / `IntoJSObj` with `#[rename = "jsName"]`. Use `Optional<T>` (from
-`rong::function`) for optional arguments.
-
-## Working checklist
-
-1. Decide functions vs classes (or both).
-2. Write the Rust with the macros; return `JSResult<T>` for anything fallible.
-3. Implement `pub fn init(ctx: &JSContext) -> JSResult<()>` and register everything.
-4. For a new module crate, wire it into `rong_modules` behind a feature flag (see module-structure.md).
-5. Add a `#[cfg(test)]` test using `rong_test` (and a JS unit script via `UnitJSRunner` if useful).
-6. Verify against an engine: `cargo test -p rong_<name> --features quickjs` (and `jscore`).
-
-Match the conventions of existing modules under `modules/` - read a neighbor
-(`rong_url`, `rong_fs`, `rong_http`) before adding new patterns.
+1. Read a nearby module (`rong_url`, `rong_fs`, `rong_http`) and match patterns.
+2. Choose free functions, classes, or both.
+3. Model public API shapes in Rust so `rong_typegen` can generate declarations.
+4. Wire `init(ctx)` and, for new crates, `rong_modules` feature plumbing.
+5. Add engine-backed tests.
+6. Run `cargo run -p rong_typegen`, `cargo run -p rong_typegen -- --check`, and
+   `cargo test -p rong_<name> --features quickjs`.

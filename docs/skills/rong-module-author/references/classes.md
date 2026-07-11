@@ -6,9 +6,9 @@ Classes model stateful objects (e.g. `new Point2D(10, 20)`).
 
 ```rust
 use rong::*;
-use rong::{js_export, js_class, js_method};
+use rong::{js_class, js_method};
 
-#[js_export]
+#[js_class]
 #[derive(Debug)]
 struct Point { x: i32, y: i32 }
 
@@ -19,7 +19,9 @@ impl Point {
 }
 ```
 
-- `#[js_export]` makes the struct available to the macro system.
+- `#[js_class]` makes the struct available to the macro system.
+- `#[js_class(clone)]` additionally permits cloning a JS class instance back
+  into an owned Rust value.
 - `#[js_class(rename = "JsName")]` exposes the impl block; `rename` sets the JS class name.
 - `#[js_method(...)]` marks individual methods to expose.
 
@@ -86,39 +88,53 @@ fn set_x(&mut self, x: i32) { self.x = x; }
 ```
 
 - `enumerable` makes the property show up in `Object.keys()` / `for...in`.
+- A getter accepts no JavaScript-visible parameters; a setter accepts exactly
+  one. Runtime-injected parameters such as `JSContext` do not count.
+- Accessors without a `self` receiver are static. Setter-only accessors are
+  supported and are emitted as TypeScript `set` declarations.
 
 ## Attribute reference
 
 | Attribute       | Meaning                              | Example                              |
 | :---            | :---                                 | :---                                 |
 | `constructor`   | Class constructor                    | `#[js_method(constructor)]`          |
+| `private`       | Private TS constructor (with `constructor`) | `#[js_method(constructor, private)]` |
 | `rename = "x"`  | JS method/property name              | `#[js_method(rename = "moveBy")]`    |
 | `getter`        | Property getter                      | `#[js_method(getter)]`               |
 | `setter`        | Property setter                      | `#[js_method(setter, rename = "x")]` |
-| `enumerable`    | Property enumerable                  | `#[js_method(getter, enumerable)]`   |
+| `enumerable`    | Getter/setter property enumerable    | `#[js_method(getter, enumerable)]`   |
+| `ts_params = "…"` | Exact generated TS parameter list | `#[js_method(ts_params = "value: string")]` |
+| `ts_return = "…"` | Exact generated TS return type     | `#[js_method(ts_return = "ArrayBuffer")]` |
 
 `#[js_class(rename = "JsName")]` sets the class name on the impl block.
 
 ## Object-shaped inputs and outputs
 
-Derive `FromJSObj` to accept a JS object as a Rust struct, and `IntoJSObj` to
-return one. Use `#[rename = "jsName"]` to map names; `Option<T>` fields are
+Derive `FromJSObject` to accept a JS object as a Rust struct, and `IntoJSObject` to
+return one. Use `#[js_name = "jsName"]` to map names; `Option<T>` fields are
 optional (omitted when `None` on output).
 
+Default to this for public API shapes. Use raw `JSObject` only for dynamic
+dictionaries or pass-through values. Use `#[ts_type = "..."]` for field-level TS
+precision, and `#[ts_skip]` for internal derived parser structs that should not
+be exported.
+
 ```rust
-use rong::{FromJSObj, IntoJSObj};
+use rong::{FromJSObject, IntoJSObject};
 use rong::function::Optional;
 
-#[derive(FromJSObj, Default)]
+#[derive(FromJSObject, Default)]
 pub struct StorageOptions {
-    #[rename = "maxSize"] max_size: Option<u32>,
+    #[js_name = "maxSize"] max_size: Option<u32>,
     compression: Option<bool>,
 }
 
-#[derive(IntoJSObj)]
+#[derive(IntoJSObject)]
 pub struct StorageInfo {
-    #[rename = "currentSize"] current_size: u32,
-    #[rename = "keyCount"]    key_count: u32,
+    #[js_name = "currentSize"] current_size: u32,
+    #[js_name = "keyCount"]    key_count: u32,
+    #[ts_type = "number | bigint"]
+    #[js_name = "lastRowid"]   last_rowid: i64,
 }
 
 #[js_class]
@@ -132,6 +148,32 @@ impl Storage {
 
     #[js_method]
     fn info(&self) -> JSResult<StorageInfo> { todo!() }
+}
+```
+
+## Numeric constant objects
+
+Use `#[js_numeric_enum]` for numeric constants exposed as a JS object, such as
+`Rong.SeekMode.Start === 0`. Typegen emits a const object plus a literal-union
+type; do not write a TS enum prelude for this shape.
+
+```rust
+#[js_numeric_enum]
+enum SeekMode {
+    Start = 0,
+    Current = 1,
+    End = 2,
+}
+
+rong::js_api! {
+    fn register_file_api(ctx) {
+        namespace RongNamespace = ctx.host_namespace();
+        const SeekMode: "typeof SeekMode" = SeekMode::js_object(ctx)?;
+    }
+}
+
+pub(crate) fn init(ctx: &JSContext) -> JSResult<()> {
+    register_file_api(ctx)
 }
 ```
 
@@ -155,19 +197,15 @@ fn new(input: JSValue, init: Optional<RequestInit>) -> JSResult<Self> {
 }
 ```
 
-**2. A reusable enum implementing `FromJSValue`** - when the same union appears
-in multiple APIs.
+**2. A reusable `#[js_union]` enum** - when the same union appears in multiple
+APIs. Variants are tried in declaration order, so put the most specific shape
+first. Typegen emits the matching TypeScript union alias.
 
 ```rust
-pub enum EventKey { String(String), Symbol(JSSymbol) }
-
-impl FromJSValue<JSEngineValue> for EventKey {
-    fn from_js_value(ctx: &JSContext, value: JSValue) -> JSResult<Self> {
-        if let Ok(s) = String::from_js_value(ctx, value.clone()) { return Ok(EventKey::String(s)); }
-        if let Ok(sym) = JSSymbol::from_js_value(ctx, value) { return Ok(EventKey::Symbol(sym)); }
-        Err(HostError::new(rong::error::E_INVALID_ARG, "string or symbol")
-            .with_name("TypeError").into())
-    }
+#[js_union]
+pub enum EventKey {
+    Symbol(JSSymbol),
+    String(String),
 }
 ```
 

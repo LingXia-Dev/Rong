@@ -1,4 +1,5 @@
 use crate::config::S3Config;
+use crate::types::{S3PresignOptions, S3StatResult, S3WriteOptions};
 use rong::function::*;
 use rong::*;
 use std::rc::Rc;
@@ -14,7 +15,7 @@ fn type_error(msg: impl Into<String>) -> RongJSError {
 }
 
 /// Lazy reference to an S3 object. No network request on creation.
-#[js_export]
+#[js_class]
 pub struct S3File {
     config: Rc<S3Config>,
     key: String,
@@ -23,9 +24,10 @@ pub struct S3File {
     range_end: Option<u64>,
 }
 
+/// Lazy reference to an S3 object. No network request on creation.
 #[js_class]
 impl S3File {
-    #[js_method(constructor)]
+    #[js_method(constructor, private)]
     fn new() -> JSResult<Self> {
         rong::illegal_constructor(
             "S3File cannot be constructed directly. Use S3Client.file() instead.",
@@ -42,6 +44,7 @@ impl S3File {
         }
     }
 
+    /// Object key as exposed by this reference.
     #[js_method(getter)]
     fn name(&self) -> String {
         self.display_name.clone()
@@ -53,6 +56,7 @@ impl S3File {
         f64::NAN
     }
 
+    /// Download the object as UTF-8 text.
     #[js_method]
     async fn text(&self) -> JSResult<String> {
         let bucket = self.config.create_bucket()?;
@@ -65,6 +69,7 @@ impl S3File {
         String::from_utf8(bytes.to_vec()).map_err(|e| s3_error(format!("invalid UTF-8: {}", e)))
     }
 
+    /// Download and parse the object as JSON.
     #[js_method]
     async fn json(&self, ctx: JSContext) -> JSResult<JSValue> {
         let text = Self::text(self).await?;
@@ -72,7 +77,8 @@ impl S3File {
         Ok(JSValue::from_rust(&ctx, obj))
     }
 
-    #[js_method]
+    /// Download the object as an ArrayBuffer.
+    #[js_method(ts_return = "ArrayBuffer")]
     async fn bytes(&self, ctx: JSContext) -> JSResult<JSValue> {
         let bucket = self.config.create_bucket()?;
         let response = bucket
@@ -86,18 +92,19 @@ impl S3File {
         Ok(JSValue::from_rust(&ctx, ab))
     }
 
-    #[js_method(rename = "arrayBuffer")]
+    /// Download the object as an ArrayBuffer (alias of `bytes`).
+    #[js_method(rename = "arrayBuffer", ts_return = "ArrayBuffer")]
     async fn array_buffer(&self, ctx: JSContext) -> JSResult<JSValue> {
         Self::bytes(self, ctx).await
     }
 
     /// Write data to this S3 object.
-    #[js_method]
-    async fn write(&self, data: JSValue, options: Optional<JSObject>) -> JSResult<f64> {
+    #[js_method(ts_params = "data: string | ArrayBuffer | Uint8Array, options?: S3WriteOptions")]
+    async fn write(&self, data: JSValue, options: Optional<S3WriteOptions>) -> JSResult<f64> {
         let bucket = self.config.create_bucket()?;
         let (content_bytes, content_type) = resolve_body(&data)?;
         let ct = if let Some(opts) = options.0 {
-            opts.get::<_, String>("type").ok().or(content_type)
+            opts.content_type.or(content_type)
         } else {
             content_type
         };
@@ -111,6 +118,7 @@ impl S3File {
         Ok(content_bytes.len() as f64)
     }
 
+    /// Delete this object.
     #[js_method]
     async fn delete(&self) -> JSResult<()> {
         let bucket = self.config.create_bucket()?;
@@ -121,11 +129,13 @@ impl S3File {
         Ok(())
     }
 
+    /// Delete this object (alias of `delete`).
     #[js_method]
     async fn unlink(&self) -> JSResult<()> {
         Self::delete(self).await
     }
 
+    /// Test whether this object exists.
     #[js_method]
     async fn exists(&self) -> JSResult<bool> {
         let bucket = self.config.create_bucket()?;
@@ -135,43 +145,38 @@ impl S3File {
         }
     }
 
+    /// Read object metadata without downloading its body.
     #[js_method]
-    async fn stat(&self, ctx: JSContext) -> JSResult<JSObject> {
+    async fn stat(&self) -> JSResult<S3StatResult> {
         let bucket = self.config.create_bucket()?;
         let (head, _status) = bucket
             .head_object(&self.key)
             .await
             .map_err(|e| s3_error(format!("HEAD {}: {}", self.key, e)))?;
 
-        let result = JSObject::new(&ctx);
-        if let Some(etag) = head.e_tag {
-            result.set("etag", etag)?;
-        }
-        if let Some(last_modified) = head.last_modified {
-            result.set("lastModified", last_modified)?;
-        }
-        if let Some(ct) = head.content_type {
-            result.set("type", ct)?;
-        }
-        result.set("size", head.content_length.unwrap_or(0) as f64)?;
-        Ok(result)
+        Ok(S3StatResult {
+            etag: head.e_tag,
+            last_modified: head.last_modified,
+            size: head.content_length.unwrap_or(0) as f64,
+            content_type: head.content_type,
+        })
     }
 
     /// Generate a presigned URL (async in rust-s3).
     #[js_method]
-    async fn presign(&self, options: Optional<JSObject>) -> JSResult<String> {
+    async fn presign(&self, options: Optional<S3PresignOptions>) -> JSResult<String> {
         let bucket = self.config.create_bucket()?;
         let expires_in = options
             .0
             .as_ref()
-            .and_then(|o| o.get::<_, f64>("expiresIn").ok())
+            .and_then(|o| o.expires_in)
             .map(|v| v as u32)
             .unwrap_or(86400);
 
         let method = options
             .0
             .as_ref()
-            .and_then(|o| o.get::<_, String>("method").ok())
+            .and_then(|o| o.method.clone())
             .unwrap_or_else(|| "GET".to_string());
 
         match method.to_uppercase().as_str() {
@@ -195,7 +200,8 @@ impl S3File {
         }
     }
 
-    #[js_method]
+    /// Create a lazy reference to a byte range of this object.
+    #[js_method(ts_return = "S3File")]
     fn slice(&self, ctx: JSContext, start: f64, end: Optional<f64>) -> JSResult<JSObject> {
         let file = S3File {
             config: self.config.clone(),

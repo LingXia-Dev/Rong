@@ -98,10 +98,10 @@ pub struct EventListener {
 ///
 /// # Example
 /// ```ignore
-/// use rong::js_export;
+/// use rong::js_class;
 /// use event::EventEmitter;
 ///
-/// #[js_export]
+/// #[js_class]
 /// struct MyEmitter {
 ///     events: EventEmitter,
 /// }
@@ -571,7 +571,7 @@ impl EventEmitter {
             }
             None => {
                 // Clear all listeners and ensure proper cleanup
-                for (_, listeners) in events.listeners.iter_mut() {
+                for listeners in events.listeners.values_mut() {
                     // Use drain to ensure each listener is properly dropped
                     listeners.drain(..).for_each(|_| {});
                 }
@@ -622,7 +622,7 @@ impl EventEmitter {
 /// - Support for multiple listeners per event
 /// - Configurable maximum number of listeners
 /// - Once-only event listeners
-#[js_export]
+#[js_class]
 pub struct EventEmitter {
     inner: Rc<Mutex<EventEmitterInner>>,
 }

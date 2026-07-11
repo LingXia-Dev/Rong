@@ -14,7 +14,7 @@ type SharedErrorSlot = Arc<StdMutex<Option<String>>>;
 type SinkSlot = Rc<StdMutex<Option<JSObject>>>;
 type WriterChannel = (ByteSender, Option<DoneReceiver>);
 
-#[js_export]
+#[js_class]
 pub struct WritableStream {
     // A single writer lock; getWriter() takes ownership.
     pub(crate) tx_slot: SharedSenderSlot,
@@ -26,7 +26,7 @@ pub struct WritableStream {
     sink_slot: SinkSlot,
 }
 
-#[js_export]
+#[js_class]
 pub struct WritableStreamDefaultWriter {
     // Reference back to the stream's slot to support releaseLock
     slot: SharedSenderSlot,
@@ -192,7 +192,7 @@ impl WritableStream {
 
 #[js_class]
 impl WritableStreamDefaultWriter {
-    #[js_method(constructor)]
+    #[js_method(constructor, private)]
     fn new() -> JSResult<Self> {
         rong::illegal_constructor("Illegal constructor")
     }

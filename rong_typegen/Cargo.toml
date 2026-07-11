@@ -1,0 +1,39 @@
+[package]
+name = "rong_typegen"
+version = "0.4.0"
+edition.workspace = true
+description = "Shared binding metadata and TypeScript generation for RongJS"
+readme = "README.md"
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation = "https://docs.rs/rong_typegen"
+rust-version.workspace = true
+keywords.workspace = true
+categories.workspace = true
+include = ["Cargo.toml", "README.md", "src/**", "tests/**", "profiles/**"]
+
+[features]
+default = ["cli"]
+cli = ["typegen", "dep:serde", "dep:serde_json"]
+typegen = []
+
+[[bin]]
+name = "rong-typegen"
+path = "src/bin/rong-typegen.rs"
+required-features = ["cli"]
+
+[[test]]
+name = "mapping"
+required-features = ["typegen"]
+
+[[test]]
+name = "render"
+required-features = ["typegen"]
+
+[dependencies]
+proc-macro2 = "1.0"
+quote = "1.0"
+serde = { workspace = true, optional = true }
+serde_json = { workspace = true, optional = true }
+syn = { workspace = true }
