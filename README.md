@@ -1,6 +1,6 @@
 # Rong (融) - JavaScript Runtime for Rust
 
-[![Rust](https://img.shields.io/badge/rust-1.92+-orange.svg)](https://www.rust-lang.org)
+[![Rust](https://img.shields.io/badge/rust-1.95+-orange.svg)](https://www.rust-lang.org)
 [![License](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](LICENSE-APACHE)
 
 **Rong** is a JavaScript runtime for Rust with a unified API over multiple JS

@@ -16,7 +16,7 @@ readme = "README.md"
 [dependencies]
 rong = { workspace = true }
 tokio = { workspace = true }
-rust-s3 = { version = "0.36", default-features = false, features = ["tokio-rustls-tls", "fail-on-err"] }
+rust-s3 = { version = "0.37", default-features = false, features = ["tokio-rustls-tls", "fail-on-err"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
 bytes = { workspace = true }
@@ -34,7 +34,7 @@ rong_test = { path = "../../testing/rong_test" }
 rong_assert = { workspace = true }
 rong_console = { workspace = true }
 rong_timer = { workspace = true }
-s3s = "0.13"
-s3s-fs = "0.13"
+s3s = "0.14"
+s3s-fs = "0.14"
 hyper-util = { version = "0.1", features = ["server-auto", "tokio"] }
 tempfile = "3"
