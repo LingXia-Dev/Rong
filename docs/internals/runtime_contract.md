@@ -11,8 +11,16 @@
 ## Runtime Contract
 
 - `globalThis.Rong` is always present.
-- The embedder decides which modules to install (e.g. `rong_modules::init(&ctx)`).
+- The embedder decides which modules to install:
+  `rong_modules::init(&ctx, names)` installs a validated, dependency-closed set
+  for one context, while `rong_modules::init_all(&ctx)` explicitly installs
+  everything compiled into the binary. Unknown or uncompiled names fail before
+  the context is modified.
 - Web-style globals (e.g. `fetch`, `URL`, `ReadableStream`, `AbortController`, `console`) are installed by their respective modules.
+
+Module dependencies are part of the effective installed surface. Embedders can
+inspect that closure with `rong_modules::resolve_modules` before creating a
+context policy.
 
 For how native modules register into the runtime, see [Module Development](./module_development.md).
 
