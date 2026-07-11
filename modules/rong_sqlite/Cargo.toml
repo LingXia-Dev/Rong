@@ -15,7 +15,7 @@ readme = "README.md"
 
 [dependencies]
 rong = { workspace = true }
-rusqlite = { version = "0.32", features = ["bundled"] }
+rusqlite = { version = "0.40", features = ["bundled"] }
 
 [features]
 default = []
