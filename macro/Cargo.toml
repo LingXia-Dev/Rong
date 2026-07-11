@@ -16,7 +16,7 @@ readme = "README.md"
 proc-macro = true
 
 [dependencies]
-rong_typedef = { workspace = true }
+rong_typegen = { workspace = true }
 syn = { workspace = true, features = ["full"] }
 quote = "1.0"
 proc-macro2 = "1.0"

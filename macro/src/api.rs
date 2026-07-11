@@ -1,6 +1,6 @@
 use proc_macro::TokenStream;
 use quote::quote;
-use rong_typedef::{JsApiEntry, JsApiInput};
+use rong_typegen::{JsApiEntry, JsApiInput};
 use syn::parse_macro_input;
 
 pub(crate) fn expand(input: TokenStream) -> TokenStream {

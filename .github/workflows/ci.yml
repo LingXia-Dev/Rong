@@ -67,7 +67,7 @@ jobs:
               [ -n "$file" ] || continue
 
               case "$file" in
-                docs/api/*|docs/skills/*|packages/*|rong_typedef/profiles/*|scripts/bump_version.sh|scripts/publish_npm.sh|.github/workflows/ci.yml|.github/workflows/release.yml)
+                docs/api/*|docs/skills/*|packages/*|rong_typegen/profiles/*|scripts/bump_version.sh|scripts/publish_npm.sh|.github/workflows/ci.yml|.github/workflows/release.yml)
                   npm=true
                   ;;
               esac

@@ -20,6 +20,8 @@ impl Point {
 ```
 
 - `#[js_class]` makes the struct available to the macro system.
+- `#[js_class(clone)]` additionally permits cloning a JS class instance back
+  into an owned Rust value.
 - `#[js_class(rename = "JsName")]` exposes the impl block; `rename` sets the JS class name.
 - `#[js_method(...)]` marks individual methods to expose.
 
@@ -97,6 +99,8 @@ fn set_x(&mut self, x: i32) { self.x = x; }
 | `getter`        | Property getter                      | `#[js_method(getter)]`               |
 | `setter`        | Property setter                      | `#[js_method(setter, rename = "x")]` |
 | `enumerable`    | Property enumerable                  | `#[js_method(getter, enumerable)]`   |
+| `ts_params = "…"` | Exact generated TS parameter list | `#[js_method(ts_params = "value: string")]` |
+| `ts_return = "…"` | Exact generated TS return type     | `#[js_method(ts_return = "ArrayBuffer")]` |
 
 `#[js_class(rename = "JsName")]` sets the class name on the impl block.
 
@@ -157,9 +161,15 @@ enum SeekMode {
     End = 2,
 }
 
+rong::js_api! {
+    fn register_file_api(ctx) {
+        namespace RongNamespace = ctx.host_namespace();
+        const SeekMode: "typeof SeekMode" = SeekMode::js_object(ctx)?;
+    }
+}
+
 pub(crate) fn init(ctx: &JSContext) -> JSResult<()> {
-    ctx.host_namespace().set("SeekMode", SeekMode::js_object(ctx)?)?;
-    Ok(())
+    register_file_api(ctx)
 }
 ```
 
@@ -183,19 +193,15 @@ fn new(input: JSValue, init: Optional<RequestInit>) -> JSResult<Self> {
 }
 ```
 
-**2. A reusable enum implementing `FromJSValue`** - when the same union appears
-in multiple APIs.
+**2. A reusable `#[js_union]` enum** - when the same union appears in multiple
+APIs. Variants are tried in declaration order, so put the most specific shape
+first. Typegen emits the matching TypeScript union alias.
 
 ```rust
-pub enum EventKey { String(String), Symbol(JSSymbol) }
-
-impl FromJSValue<JSEngineValue> for EventKey {
-    fn from_js_value(ctx: &JSContext, value: JSValue) -> JSResult<Self> {
-        if let Ok(s) = String::from_js_value(ctx, value.clone()) { return Ok(EventKey::String(s)); }
-        if let Ok(sym) = JSSymbol::from_js_value(ctx, value) { return Ok(EventKey::Symbol(sym)); }
-        Err(HostError::new(rong::error::E_INVALID_ARG, "string or symbol")
-            .with_name("TypeError").into())
-    }
+#[js_union]
+pub enum EventKey {
+    Symbol(JSSymbol),
+    String(String),
 }
 ```
 

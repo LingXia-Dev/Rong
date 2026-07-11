@@ -1,4 +1,4 @@
-// Generated from rong_typedef's versioned `logic-web` runtime profile.
+// Versioned `logic-web` runtime profile published with rong_typegen.
 // Do not edit downstream copies by hand.
 //
 // Ambient globals implemented by the Rong Logic runtime without requiring the

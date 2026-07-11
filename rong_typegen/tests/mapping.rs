@@ -1,6 +1,6 @@
 //! Rust→TS mapping coverage.
 
-use rong_typedef::map::{is_injected, map_return, rust_type_to_ts};
+use rong_typegen::map::{is_injected, map_return, rust_type_to_ts};
 
 fn ts(src: &str) -> String {
     let ty: syn::Type = syn::parse_str(src).unwrap();

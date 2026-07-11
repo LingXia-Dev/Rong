@@ -4,8 +4,8 @@ description: >-
   Author and modify RongJS (Rong) modules - expose Rust functions and classes to
   JavaScript, convert values across the Rust<->JS boundary, raise JS errors from
   Rust, and wire a new `rong_<name>` module crate into the runtime. Use when
-  writing or editing Rong module code: `#[js_class]` / `#[js_class]` /
-  `#[js_method]`, `JSFunc::new` registration, `FromJSObject` / `IntoJSObject` types,
+  writing or editing Rong module code: `js_api!`, `#[js_class]`, `#[js_method]`,
+  `#[js_union]`, `#[js_numeric_enum]`, `FromJSObject` / `IntoJSObject` types,
   `JSResult`/`HostError` error handling, a module `init(ctx)` function, or
   registering a class with `register_class` / `register_hidden_class`.
 license: MIT OR Apache-2.0
@@ -19,7 +19,7 @@ metadata:
 
 Use the smallest reference needed:
 
-- `references/functions.md`: free functions, `JSFunc`, registration.
+- `references/functions.md`: free functions, `js_api!`, registration.
 - `references/classes.md`: classes, methods, object shapes, `#[js_numeric_enum]`.
 - `references/type-conversion.md`: Rust<->JS mapping and dynamic values.
 - `references/errors.md`: `JSResult`, `HostError`, preserving JS-thrown values.

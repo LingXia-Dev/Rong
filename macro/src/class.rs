@@ -1,6 +1,6 @@
 use proc_macro2::TokenStream;
 use quote::quote;
-use rong_typedef::{js_method_options, parse_js_class_args};
+use rong_typegen::{js_method_options, parse_js_class_args};
 use syn::ItemImpl;
 
 /// Configuration options for JavaScript method/property bindings.
@@ -441,6 +441,6 @@ mod tests {
     #[test]
     fn qualified_js_method_attributes_match_runtime_extraction() {
         let path: syn::Path = syn::parse_quote!(rong::js_method);
-        assert!(rong_typedef::path_last_is(&path, "js_method"));
+        assert!(rong_typegen::path_last_is(&path, "js_method"));
     }
 }

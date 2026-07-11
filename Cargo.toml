@@ -22,7 +22,7 @@ members = [
     "modules/rong_redis",
     "modules/rong_s3",
     "rong_modules", "rong_cli",
-    "rong_typedef", "rong_typegen",
+    "rong_typegen",
 ]
 exclude = ["testing/harmony/rong_harmony_smoke"]
 
@@ -52,7 +52,7 @@ rong_test_harness = { path = "testing/rong_test_harness"   , version = "0.4.0" }
 rong_test_device = { path = "testing/rong_test_device"   , version = "0.4.0" }
 rong_modules = { path = "rong_modules"      , version = "0.4.0" }
 rong_rt = { path = "rong_rt"   , default-features = false   , version = "0.4.0" }
-rong_typedef = { path = "rong_typedef", default-features = false, version = "0.4.0" }
+rong_typegen = { path = "rong_typegen", default-features = false, version = "0.4.0" }
 
 # Module dependencies
 rong_timer = { path = "modules/rong_timer"   , default-features = false   , version = "0.4.1" }

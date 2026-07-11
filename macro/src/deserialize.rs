@@ -1,6 +1,6 @@
 use proc_macro2::TokenStream as TokenStream2;
 use quote::quote;
-use rong_typedef::{JsDefault, js_field_options};
+use rong_typegen::{JsDefault, js_field_options};
 use syn::{Data, Fields, GenericArgument, PathArguments, Type, TypePath};
 
 /// Check if a type is Option<T> and return the inner type T

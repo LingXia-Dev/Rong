@@ -5,10 +5,10 @@
 //! deliberately curated TypeScript surface. Single-crate mode writes to an
 //! explicit `--out` directory.
 
-use rong_typedef::model::{
+use rong_typegen::model::{
     Item, ModuleTypeDef, NamespaceDef, NamespaceMember, NamespaceValueDef, TypeAliasDef,
 };
-use rong_typedef::{
+use rong_typegen::{
     JsApiEntry, JsApiInput, extract_function, extract_impl, extract_numeric_enum, extract_struct,
     extract_union, render_module,
 };
@@ -200,7 +200,7 @@ fn ts_identifier(value: &str) -> bool {
 
 fn runtime_profile(profile: RuntimeProfile) -> &'static str {
     match profile {
-        RuntimeProfile::LogicWeb => rong_typedef::LOGIC_WEB_PROFILE,
+        RuntimeProfile::LogicWeb => rong_typegen::LOGIC_WEB_PROFILE,
     }
 }
 
@@ -623,7 +623,7 @@ fn collect_items(
                         "could not extract #[js_class] impl in {}",
                         current_file.display()
                     ));
-                } else if rong_typedef::has_orphan_js_methods(i) {
+                } else if rong_typegen::has_orphan_js_methods(i) {
                     return Err(format!(
                         "#[js_method] appears in an impl without #[js_class] in {}",
                         current_file.display()

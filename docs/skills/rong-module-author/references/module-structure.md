@@ -88,9 +88,9 @@ pub fn init(ctx: &JSContext) -> JSResult<()> {
 rong_<name>::init(ctx)?;
 ```
 
-4. **`packages/rong_types/typegen.json`** - if the crate contains
-   `#[js_class]`, `FromJSObject`/`IntoJSObject`, or `#[js_numeric_enum]` items, classify
-   its generated output explicitly:
+4. **`packages/rong_types/typegen.json`** - if the crate contains `js_api!`,
+   `#[js_class]`, `#[js_union]`, `FromJSObject`/`IntoJSObject`, or
+   `#[js_numeric_enum]` items, classify its generated output explicitly:
    - use `canonical` when the generated declaration is the published
      `src/<name>.ts`;
    - use `curated` when `src/<name>.ts` remains hand-authored because generation

@@ -1,7 +1,7 @@
 //! End-to-end descriptor rendering.
 
-use rong_typedef::model::*;
-use rong_typedef::render_module;
+use rong_typegen::model::*;
+use rong_typegen::render_module;
 
 fn method(name: &str, docs: &[&str], params: Vec<Param>, ret: &str) -> Member {
     Member {

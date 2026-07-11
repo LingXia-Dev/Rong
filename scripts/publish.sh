@@ -25,7 +25,6 @@ WORKSPACE_TOML="Cargo.toml"
 
 # Publishable crates in dependency order.
 CRATES=(
-  "rong_typedef"
   "rong_typegen"
   "rong_macro"
   "rong_rt"
@@ -69,7 +68,6 @@ CRATES=(
 )
 
 CORE_CRATES=(
-  "rong_typedef"
   "rong_typegen"
   "rong_macro"
   "rong_rt"

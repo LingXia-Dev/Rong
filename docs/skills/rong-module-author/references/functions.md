@@ -63,6 +63,8 @@ pub fn init(ctx: &JSContext) -> JSResult<()> {
   the declaration only when a dynamic Rust boundary type loses TS precision.
 - Use `class Name = RustType` for a constructor installed on the target object;
   registration and `readonly Name: typeof Name` are generated together.
+- Use `const Name: "TsType" = expression` for a readonly runtime namespace
+  value whose exact TypeScript type cannot be inferred from the expression.
 - Use `type Name = "..."` for a TypeScript-only alias that has no precise Rust
   representation. Keep it beside the functions that reference it.
 - Use `cfg = "unix"` for a platform-gated runtime registration. Typegen keeps

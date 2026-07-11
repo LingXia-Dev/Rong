@@ -1,6 +1,6 @@
 use proc_macro2::{Span, TokenStream};
 use quote::quote;
-use rong_typedef::u32_integer_expr;
+use rong_typegen::u32_integer_expr;
 use syn::{Data, DeriveInput, Error, Fields};
 
 pub(crate) fn impl_numeric_enum(input: &DeriveInput) -> Result<TokenStream, Error> {

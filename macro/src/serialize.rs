@@ -1,6 +1,6 @@
 use proc_macro2::TokenStream as TokenStream2;
 use quote::quote;
-use rong_typedef::js_field_options;
+use rong_typegen::js_field_options;
 use syn::{Data, Fields};
 
 pub(crate) fn impl_serialize(input: syn::DeriveInput) -> syn::Result<TokenStream2> {

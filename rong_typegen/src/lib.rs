@@ -2,8 +2,8 @@
 //! bindings.
 //!
 //! [`api`] is the single `js_api!` syntax model used by both `rong_macro` and
-//! `rong_typegen`, keeping runtime registration and published types aligned.
-//! The default `typegen` feature also provides the engine-free type-generation
+//! the `rong-typegen` CLI, keeping runtime registration and published types aligned.
+//! The `typegen` feature provides the engine-free type-generation
 //! core, driven entirely from parsed Rust source:
 //!
 //! - [`model`] — a descriptor of a module's JS-facing API.
