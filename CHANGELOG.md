@@ -6,6 +6,15 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 
 ## [Unreleased]
 
+### Host-injected Redis and S3 clients
+
+- Added host-managed Redis client injection with fixed or dynamically resolved
+  namespaces. Namespaced clients reject empty prefixes and raw commands, and
+  subscriptions retain the namespace resolved when they are created.
+- Added host-managed S3 client injection with fixed namespaces. Host-provided
+  credentials, endpoints, regions, buckets, and addressing settings are locked
+  against JavaScript overrides.
+
 ### Type generation and binding macros
 
 - Added the published `rong_typegen` package, combining the shared binding
