@@ -6,6 +6,13 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-07-11
+
+Rong 0.5.0 is a forward-only release focused on generated TypeScript quality,
+explicit per-context module capabilities, and secure host-managed Redis and S3
+clients. It also raises the Rust MSRV to 1.95 and refreshes the supported
+dependency stack.
+
 ### Module registry
 
 - Added a static, dependency-aware `rong_modules` registry for selecting a
@@ -60,6 +67,8 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 - Hardened CI with read-only permissions, commit-pinned actions, deterministic
   TypeScript 7 installs, fixed runner images, explicit timeouts, and consolidated
   host jobs that reuse setup and build artifacts without reducing coverage.
+- Restored `rong_sqlite` to workspace release validation and made npm version
+  bumps update package lockfiles together with their package manifests.
 
 ## [0.4.1] - 2026-06-10
 
