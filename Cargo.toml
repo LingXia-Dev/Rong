@@ -75,7 +75,7 @@ rong_storage = { path = "modules/rong_storage"   , default-features = false   , 
 rong_worker = { path = "modules/rong_worker"   , default-features = false   , version = "0.5.0" }
 rong_redis = { path = "modules/rong_redis"   , default-features = false   , version = "0.5.0" }
 rong_sqlite = { path = "modules/rong_sqlite"   , default-features = false   , version = "0.5.0" }
-rong_s3 = { path = "modules/rong_s3"   , version = "0.5.0", default-features = false }
+rong_s3 = { path = "modules/rong_s3"   , version = "0.5.1", default-features = false }
 
 # External dependencies
 tokio = { version = "1.52", features = ["rt", "rt-multi-thread", "time", "macros", "sync", "fs", "io-util", "process", "io-std"] }
