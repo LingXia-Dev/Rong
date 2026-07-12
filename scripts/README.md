@@ -56,8 +56,8 @@ git config --local core.hooksPath .githooks
 - Publishes selected Rust crates in dependency order
 - Supports `--crate`, `--group`, `--changed`, and `--changed-since` selection
 - `--changed` selects crates with publish-relevant changes since their own
-  latest package tag (`<crate>-vX.Y.Z`), falling back to the latest repo tag
-  (`vX.Y.Z`). Explicit package version bumps count, while the matching
+  nearest reachable package or product tag (`<crate>-vX.Y.Z` or `vX.Y.Z`).
+  Explicit package version bumps count, while the matching
   `bump_version.sh` lower-bound syncs on `rong*` dependency entries and files
   belonging to nested crates are ignored. External dependency version changes
   (e.g. bumping `tokio`) also count.

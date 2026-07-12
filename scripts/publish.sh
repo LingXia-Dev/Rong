@@ -129,10 +129,10 @@ SELECTION:
                              groups: core, engines, modules, bundles,
                                      non-modules, rust, all
   --changed                  Add crates changed since their own latest package
-                             tag (<crate>-vX.Y.Z), falling back to the latest
-                             repo tag (vX.Y.Z). Explicit crate version bumps
-                             count; rong* dependency lower-bound syncs are
-                             ignored. External dependency changes still count.
+                             or product tag (<crate>-vX.Y.Z or vX.Y.Z).
+                             Explicit crate version bumps count; rong*
+                             dependency lower-bound syncs are ignored.
+                             External dependency changes still count.
   --changed-since REF        Add crates with files changed since REF, with the
                              same internal dependency-sync filtering.
   -s, --start-from NAME      Slice the selected plan from NAME, inclusive
@@ -519,22 +519,9 @@ file_belongs_to_nested_crate() {
 # package releases use <crate>-vX.Y.Z.
 latest_tag_for_crate() {
   local crate=$1
-  local best_tag=""
-  local best_distance=""
-  local distance
-  local tag
 
-  while IFS= read -r tag; do
-    [ -n "$tag" ] || continue
-    git merge-base --is-ancestor "$tag" HEAD 2>/dev/null || continue
-    distance="$(git rev-list --count "${tag}..HEAD")"
-    if [ -z "$best_distance" ] || [ "$distance" -lt "$best_distance" ]; then
-      best_tag="$tag"
-      best_distance="$distance"
-    fi
-  done < <(git tag --list "${crate}-v*" "v[0-9]*")
-
-  printf '%s' "$best_tag"
+  git describe --tags --abbrev=0 \
+    --match "${crate}-v*" --match "v[0-9]*" HEAD 2>/dev/null || true
 }
 
 # True when REF..HEAD manifest changes only synchronize internal dependency

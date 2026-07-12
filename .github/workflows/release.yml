@@ -27,7 +27,6 @@ on:
         options:
           - auto
           - always
-          - never
       product_release:
         description: "Optional repo-level product tag (e.g. v0.4.1). After publishing, creates the tag and a GitHub Release from its CHANGELOG.md entry. Leave empty to skip."
         required: false
@@ -97,9 +96,6 @@ jobs:
             always)
               CREATE_PACKAGE_TAGS=true
               ;;
-            never)
-              CREATE_PACKAGE_TAGS=false
-              ;;
             *)
               echo "Unsupported package_tags policy: $PACKAGE_TAGS"
               exit 1
@@ -108,6 +104,19 @@ jobs:
           echo "create_package_tags=$CREATE_PACKAGE_TAGS" >> "$GITHUB_OUTPUT"
 
           if [ -n "$PRODUCT_RELEASE" ]; then
+            if [ "$PACKAGE_SCOPE" != "all" ]; then
+              echo "product_release requires package_scope=all."
+              exit 1
+            fi
+            case "$RUST_SELECTION" in
+              --changed|"--group rust"|"--group all")
+                ;;
+              *)
+                echo "product_release requires rust_selection to be --changed, --group rust, or --group all."
+                exit 1
+                ;;
+            esac
+
             version="${PRODUCT_RELEASE#v}"
             if ! ./scripts/extract_changelog_entry.sh "$version" > /tmp/product-release-notes.md \
               || [ ! -s /tmp/product-release-notes.md ]; then
