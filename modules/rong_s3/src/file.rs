@@ -1,4 +1,5 @@
 use crate::config::S3Config;
+use crate::namespace::S3Namespace;
 use crate::types::{S3PresignOptions, S3StatResult, S3WriteOptions};
 use rong::function::*;
 use rong::*;
@@ -18,7 +19,8 @@ fn type_error(msg: impl Into<String>) -> RongJSError {
 #[js_class]
 pub struct S3File {
     config: Rc<S3Config>,
-    key: String,
+    namespace: S3Namespace,
+    path: String,
     display_name: String,
     range_start: Option<u64>,
     range_end: Option<u64>,
@@ -34,14 +36,20 @@ impl S3File {
         )
     }
 
-    pub(crate) fn create(config: Rc<S3Config>, key: String, display_name: String) -> Self {
+    pub(crate) fn create(config: Rc<S3Config>, namespace: S3Namespace, path: String) -> Self {
         Self {
             config,
-            key,
-            display_name,
+            namespace,
+            display_name: path.clone(),
+            path,
             range_start: None,
             range_end: None,
         }
+    }
+
+    fn resolved_key(&self, ctx: &JSContext) -> JSResult<String> {
+        let namespace = self.namespace.resolve(ctx)?;
+        Ok(S3Namespace::apply(namespace.as_deref(), &self.path))
     }
 
     /// Object key as exposed by this reference.
@@ -58,12 +66,13 @@ impl S3File {
 
     /// Download the object as UTF-8 text.
     #[js_method]
-    async fn text(&self) -> JSResult<String> {
+    async fn text(&self, ctx: JSContext) -> JSResult<String> {
+        let key = self.resolved_key(&ctx)?;
         let bucket = self.config.create_bucket()?;
         let response = bucket
-            .get_object(&self.key)
+            .get_object(&key)
             .await
-            .map_err(|e| s3_error(format!("GET {}: {}", self.key, e)))?;
+            .map_err(|e| s3_error(format!("GET {}: {}", key, e)))?;
 
         let bytes = self.apply_range(response.bytes());
         String::from_utf8(bytes.to_vec()).map_err(|e| s3_error(format!("invalid UTF-8: {}", e)))
@@ -72,7 +81,7 @@ impl S3File {
     /// Download and parse the object as JSON.
     #[js_method]
     async fn json(&self, ctx: JSContext) -> JSResult<JSValue> {
-        let text = Self::text(self).await?;
+        let text = Self::text(self, ctx.clone()).await?;
         let obj = JSObject::from_json_string(&ctx, &text)?;
         Ok(JSValue::from_rust(&ctx, obj))
     }
@@ -80,11 +89,12 @@ impl S3File {
     /// Download the object as an ArrayBuffer.
     #[js_method(ts_return = "ArrayBuffer")]
     async fn bytes(&self, ctx: JSContext) -> JSResult<JSValue> {
+        let key = self.resolved_key(&ctx)?;
         let bucket = self.config.create_bucket()?;
         let response = bucket
-            .get_object(&self.key)
+            .get_object(&key)
             .await
-            .map_err(|e| s3_error(format!("GET {}: {}", self.key, e)))?;
+            .map_err(|e| s3_error(format!("GET {}: {}", key, e)))?;
 
         let data = self.apply_range(response.bytes());
         let ab = JSArrayBuffer::from_bytes(&ctx, data)
@@ -100,7 +110,13 @@ impl S3File {
 
     /// Write data to this S3 object.
     #[js_method(ts_params = "data: string | ArrayBuffer | Uint8Array, options?: S3WriteOptions")]
-    async fn write(&self, data: JSValue, options: Optional<S3WriteOptions>) -> JSResult<f64> {
+    async fn write(
+        &self,
+        ctx: JSContext,
+        data: JSValue,
+        options: Optional<S3WriteOptions>,
+    ) -> JSResult<f64> {
+        let key = self.resolved_key(&ctx)?;
         let bucket = self.config.create_bucket()?;
         let (content_bytes, content_type) = resolve_body(&data)?;
         let ct = if let Some(opts) = options.0 {
@@ -111,35 +127,37 @@ impl S3File {
         let ct_str = ct.as_deref().unwrap_or("application/octet-stream");
 
         bucket
-            .put_object_with_content_type(&self.key, &content_bytes, ct_str)
+            .put_object_with_content_type(&key, &content_bytes, ct_str)
             .await
-            .map_err(|e| s3_error(format!("PUT {}: {}", self.key, e)))?;
+            .map_err(|e| s3_error(format!("PUT {}: {}", key, e)))?;
 
         Ok(content_bytes.len() as f64)
     }
 
     /// Delete this object.
     #[js_method]
-    async fn delete(&self) -> JSResult<()> {
+    async fn delete(&self, ctx: JSContext) -> JSResult<()> {
+        let key = self.resolved_key(&ctx)?;
         let bucket = self.config.create_bucket()?;
         bucket
-            .delete_object(&self.key)
+            .delete_object(&key)
             .await
-            .map_err(|e| s3_error(format!("DELETE {}: {}", self.key, e)))?;
+            .map_err(|e| s3_error(format!("DELETE {}: {}", key, e)))?;
         Ok(())
     }
 
     /// Delete this object (alias of `delete`).
     #[js_method]
-    async fn unlink(&self) -> JSResult<()> {
-        Self::delete(self).await
+    async fn unlink(&self, ctx: JSContext) -> JSResult<()> {
+        Self::delete(self, ctx).await
     }
 
     /// Test whether this object exists.
     #[js_method]
-    async fn exists(&self) -> JSResult<bool> {
+    async fn exists(&self, ctx: JSContext) -> JSResult<bool> {
+        let key = self.resolved_key(&ctx)?;
         let bucket = self.config.create_bucket()?;
-        match bucket.head_object(&self.key).await {
+        match bucket.head_object(&key).await {
             Ok(_) => Ok(true),
             Err(_) => Ok(false),
         }
@@ -147,12 +165,13 @@ impl S3File {
 
     /// Read object metadata without downloading its body.
     #[js_method]
-    async fn stat(&self) -> JSResult<S3StatResult> {
+    async fn stat(&self, ctx: JSContext) -> JSResult<S3StatResult> {
+        let key = self.resolved_key(&ctx)?;
         let bucket = self.config.create_bucket()?;
         let (head, _status) = bucket
-            .head_object(&self.key)
+            .head_object(&key)
             .await
-            .map_err(|e| s3_error(format!("HEAD {}: {}", self.key, e)))?;
+            .map_err(|e| s3_error(format!("HEAD {}: {}", key, e)))?;
 
         Ok(S3StatResult {
             etag: head.e_tag,
@@ -164,7 +183,12 @@ impl S3File {
 
     /// Generate a presigned URL (async in rust-s3).
     #[js_method]
-    async fn presign(&self, options: Optional<S3PresignOptions>) -> JSResult<String> {
+    async fn presign(
+        &self,
+        ctx: JSContext,
+        options: Optional<S3PresignOptions>,
+    ) -> JSResult<String> {
+        let key = self.resolved_key(&ctx)?;
         let bucket = self.config.create_bucket()?;
         let expires_in = options
             .0
@@ -181,15 +205,15 @@ impl S3File {
 
         match method.to_uppercase().as_str() {
             "GET" => bucket
-                .presign_get(&self.key, expires_in, None)
+                .presign_get(&key, expires_in, None)
                 .await
                 .map_err(|e| s3_error(format!("presign GET: {}", e))),
             "PUT" => bucket
-                .presign_put(&self.key, expires_in, None, None)
+                .presign_put(&key, expires_in, None, None)
                 .await
                 .map_err(|e| s3_error(format!("presign PUT: {}", e))),
             "DELETE" => bucket
-                .presign_delete(&self.key, expires_in)
+                .presign_delete(&key, expires_in)
                 .await
                 .map_err(|e| s3_error(format!("presign DELETE: {}", e))),
             other => Err(HostError::new(
@@ -205,7 +229,8 @@ impl S3File {
     fn slice(&self, ctx: JSContext, start: f64, end: Optional<f64>) -> JSResult<JSObject> {
         let file = S3File {
             config: self.config.clone(),
-            key: self.key.clone(),
+            namespace: self.namespace.clone(),
+            path: self.path.clone(),
             display_name: self.display_name.clone(),
             range_start: Some(start as u64),
             range_end: end.0.map(|v| v as u64),
