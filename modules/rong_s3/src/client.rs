@@ -1,11 +1,13 @@
 use crate::config::S3Config;
 use crate::file::{S3File, resolve_body};
+use crate::namespace::S3Namespace;
 use crate::types::{
     S3ClientListOptions, S3ClientOptions, S3ClientPresignOptions, S3ClientWriteOptions,
     S3ListEntry, S3ListResult, S3StatResult,
 };
 use rong::function::*;
 use rong::*;
+use std::borrow::Cow;
 use std::rc::Rc;
 
 fn s3_error(msg: impl Into<String>) -> RongJSError {
@@ -16,7 +18,7 @@ fn s3_error(msg: impl Into<String>) -> RongJSError {
 #[js_class]
 pub struct S3Client {
     pub(crate) config: Rc<S3Config>,
-    namespace_prefix: Option<String>,
+    namespace: S3Namespace,
     config_locked: bool,
 }
 
@@ -25,23 +27,25 @@ impl S3Client {
     pub fn new(config: S3Config) -> Self {
         Self {
             config: config.into_rc(),
-            namespace_prefix: None,
+            namespace: S3Namespace::None,
             config_locked: true,
         }
     }
 
     /// Apply a fixed object-key namespace to this host-configured client.
     pub fn with_namespace(mut self, prefix: impl Into<String>) -> JSResult<Self> {
-        let prefix = prefix.into();
-        if prefix.is_empty() {
-            return Err(
-                HostError::new("E_INVALID_ARG", "S3 namespace must not be empty")
-                    .with_name("TypeError")
-                    .into(),
-            );
-        }
-        self.namespace_prefix = Some(prefix);
+        self.namespace = S3Namespace::fixed(prefix)?;
         Ok(self)
+    }
+
+    /// Resolve this client's object-key namespace for each network-capable operation.
+    /// Lazy `S3File` references retain the resolver and resolve it when used.
+    pub fn with_namespace_resolver<F>(mut self, resolver: F) -> Self
+    where
+        F: Fn(&JSContext) -> JSResult<String> + 'static,
+    {
+        self.namespace = S3Namespace::dynamic(resolver);
+        self
     }
 
     /// Convert this host-configured client into an injectable JavaScript object.
@@ -51,11 +55,8 @@ impl S3Client {
         Ok(Class::lookup::<Self>(ctx)?.instance(self))
     }
 
-    fn prefixed_path(&self, path: &str) -> String {
-        match self.namespace_prefix.as_deref() {
-            Some(prefix) if !prefix.is_empty() => format!("{prefix}{path}"),
-            _ => path.to_string(),
-        }
+    fn resolved_namespace<'a>(&'a self, ctx: &JSContext) -> JSResult<Option<Cow<'a, str>>> {
+        self.namespace.resolve(ctx)
     }
 
     fn reject_config_override(
@@ -129,7 +130,7 @@ impl S3Client {
         let config = S3Config::from_options(options.0);
         Ok(Self {
             config: config.into_rc(),
-            namespace_prefix: None,
+            namespace: S3Namespace::None,
             config_locked: false,
         })
     }
@@ -152,7 +153,7 @@ impl S3Client {
         } else {
             self.config.clone()
         };
-        let file = S3File::create(config, self.prefixed_path(&path), path);
+        let file = S3File::create(config, self.namespace.clone(), path);
         Ok(Class::lookup::<S3File>(&ctx)?.instance(file))
     }
 
@@ -162,13 +163,15 @@ impl S3Client {
     )]
     async fn write(
         &self,
+        ctx: JSContext,
         path: String,
         data: JSValue,
         options: Optional<JSObject>,
     ) -> JSResult<f64> {
         self.reject_config_override(&options, &["type"])?;
         let options = typed_options::<S3ClientWriteOptions>(&options)?;
-        let path = self.prefixed_path(&path);
+        let namespace = self.resolved_namespace(&ctx)?;
+        let path = S3Namespace::apply(namespace.as_deref(), &path);
         let config = if let Some(ref options) = options {
             self.config.merge_options(Some(options))
         } else {
@@ -193,8 +196,9 @@ impl S3Client {
 
     /// Delete an object.
     #[js_method]
-    async fn delete(&self, path: String) -> JSResult<()> {
-        let path = self.prefixed_path(&path);
+    async fn delete(&self, ctx: JSContext, path: String) -> JSResult<()> {
+        let namespace = self.resolved_namespace(&ctx)?;
+        let path = S3Namespace::apply(namespace.as_deref(), &path);
         let bucket = self.config.create_bucket()?;
         bucket
             .delete_object(&path)
@@ -205,14 +209,15 @@ impl S3Client {
 
     /// Delete an object (alias of `delete`).
     #[js_method]
-    async fn unlink(&self, path: String) -> JSResult<()> {
-        Self::delete(self, path).await
+    async fn unlink(&self, ctx: JSContext, path: String) -> JSResult<()> {
+        Self::delete(self, ctx, path).await
     }
 
     /// Test whether an object exists.
     #[js_method]
-    async fn exists(&self, path: String) -> JSResult<bool> {
-        let path = self.prefixed_path(&path);
+    async fn exists(&self, ctx: JSContext, path: String) -> JSResult<bool> {
+        let namespace = self.resolved_namespace(&ctx)?;
+        let path = S3Namespace::apply(namespace.as_deref(), &path);
         let bucket = self.config.create_bucket()?;
         match bucket.head_object(&path).await {
             Ok(_) => Ok(true),
@@ -222,8 +227,9 @@ impl S3Client {
 
     /// Return an object's size in bytes.
     #[js_method]
-    async fn size(&self, path: String) -> JSResult<f64> {
-        let path = self.prefixed_path(&path);
+    async fn size(&self, ctx: JSContext, path: String) -> JSResult<f64> {
+        let namespace = self.resolved_namespace(&ctx)?;
+        let path = S3Namespace::apply(namespace.as_deref(), &path);
         let bucket = self.config.create_bucket()?;
         let (head, _status) = bucket
             .head_object(&path)
@@ -234,8 +240,9 @@ impl S3Client {
 
     /// Read object metadata without downloading its body.
     #[js_method]
-    async fn stat(&self, path: String) -> JSResult<S3StatResult> {
-        let path = self.prefixed_path(&path);
+    async fn stat(&self, ctx: JSContext, path: String) -> JSResult<S3StatResult> {
+        let namespace = self.resolved_namespace(&ctx)?;
+        let path = S3Namespace::apply(namespace.as_deref(), &path);
         let bucket = self.config.create_bucket()?;
         let (head, _status) = bucket
             .head_object(&path)
@@ -252,10 +259,16 @@ impl S3Client {
 
     /// Generate a presigned object URL.
     #[js_method(ts_params = "path: string, options?: S3PresignOptions & S3ClientOptions")]
-    async fn presign(&self, path: String, options: Optional<JSObject>) -> JSResult<String> {
+    async fn presign(
+        &self,
+        ctx: JSContext,
+        path: String,
+        options: Optional<JSObject>,
+    ) -> JSResult<String> {
         self.reject_config_override(&options, &["expiresIn", "method"])?;
         let options = typed_options::<S3ClientPresignOptions>(&options)?;
-        let path = self.prefixed_path(&path);
+        let namespace = self.resolved_namespace(&ctx)?;
+        let path = S3Namespace::apply(namespace.as_deref(), &path);
         let config = if let Some(ref options) = options {
             self.config.merge_options(Some(options))
         } else {
@@ -297,9 +310,10 @@ impl S3Client {
 
     /// List objects in the configured bucket.
     #[js_method(ts_params = "options?: S3ListOptions & S3ClientOptions")]
-    async fn list(&self, options: Optional<JSObject>) -> JSResult<S3ListResult> {
+    async fn list(&self, ctx: JSContext, options: Optional<JSObject>) -> JSResult<S3ListResult> {
         self.reject_config_override(&options, &["prefix", "maxKeys", "startAfter"])?;
         let options = typed_options::<S3ClientListOptions>(&options)?;
+        let namespace = self.resolved_namespace(&ctx)?;
         let config = if let Some(ref options) = options {
             self.config.merge_options(Some(options))
         } else {
@@ -312,8 +326,7 @@ impl S3Client {
             .and_then(|o| o.prefix.clone())
             .unwrap_or_default();
 
-        // Combine namespace prefix with user-provided prefix
-        let prefix = self.prefixed_path(&user_prefix);
+        let prefix = S3Namespace::apply(namespace.as_deref(), &user_prefix);
 
         let max_keys = options
             .as_ref()
@@ -323,7 +336,7 @@ impl S3Client {
         let start_after = options
             .as_ref()
             .and_then(|o| o.start_after.clone())
-            .map(|s| self.prefixed_path(&s));
+            .map(|s| S3Namespace::apply(namespace.as_deref(), &s));
 
         let results = bucket
             .list(prefix, None)
@@ -333,8 +346,6 @@ impl S3Client {
         let mut contents = Vec::new();
         let mut total_count = 0usize;
         let mut is_truncated = false;
-
-        let ns_prefix = self.namespace_prefix.as_deref().unwrap_or("");
 
         'outer: for page in &results {
             for obj in &page.contents {
@@ -350,11 +361,12 @@ impl S3Client {
                     break 'outer;
                 }
 
-                // Strip namespace prefix from returned keys
-                let key = obj.key.strip_prefix(ns_prefix).unwrap_or(&obj.key);
+                // Treat an out-of-namespace response as a server isolation
+                // violation instead of exposing the raw key to JavaScript.
+                let key = S3Namespace::strip(namespace.as_deref(), &obj.key)?;
 
                 contents.push(S3ListEntry {
-                    key: key.to_string(),
+                    key,
                     size: obj.size as f64,
                     last_modified: obj.last_modified.to_string(),
                     etag: obj.e_tag.clone(),

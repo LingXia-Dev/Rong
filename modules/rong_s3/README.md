@@ -45,11 +45,13 @@ Allowed option fields per method:
 
 - `S3Client::new(config)` — create an unnamespaced host-configured client with locked configuration.
 - `.with_namespace(prefix)` — apply a prefix that is transparently prepended to object keys and stripped from list results.
+- `.with_namespace_resolver(resolver)` — resolve a trusted prefix before each network-capable operation; lazy `S3File` references re-resolve it when used.
 - `client.into_js_object(ctx)` — register the required hidden classes and convert the client into an injectable JavaScript object.
 - `S3Config` — configuration struct with public fields (`access_key_id`, `secret_access_key`, `bucket`, `region`, `endpoint`, etc.)
 
 Use `ctx.host_namespace().set("s3", client.into_js_object(ctx)?)` to expose the
 managed instance as `Rong.s3` without creating a separate top-level global.
-`S3Client` stores configuration rather than a live connection, so creating a
-cheap wrapper per fixed namespace is preferred over a dynamic resolver on every
-S3 operation.
+Prefer a fixed namespace when one client has one stable scope. Use a resolver
+when one injected client serves changing host-managed scopes. Dynamic
+namespace state should stay in Rust-owned `JSContext::set_state`/`get_state`;
+empty resolver results and resolver errors fail before network I/O.

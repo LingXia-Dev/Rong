@@ -6,6 +6,13 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 
 ## [Unreleased]
 
+### S3
+
+- Added dynamically resolved namespaces to host-injected S3 clients. Resolvers
+  run before every network-capable operation, including operations on lazy
+  `S3File` references, and fail closed on empty prefixes, resolver errors, or
+  out-of-namespace list responses.
+
 ### Release automation
 
 - Rust publishing now paces uploads and retries transient crates.io rate-limit,

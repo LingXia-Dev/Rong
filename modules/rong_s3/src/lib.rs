@@ -5,6 +5,7 @@
 mod client;
 mod config;
 mod file;
+mod namespace;
 mod types;
 
 pub use client::S3Client;
@@ -40,7 +41,12 @@ pub fn init(ctx: &JSContext) -> JSResult<()> {
 mod tests {
     use super::*;
     use rong_test::*;
+    use std::cell::RefCell;
+    use std::rc::Rc;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[derive(Clone)]
+    struct TestNamespaceState(Rc<RefCell<String>>);
 
     struct TestS3Server {
         endpoint: String,
@@ -177,6 +183,57 @@ mod tests {
                 .set("s3", client.into_js_object(&ctx)?)?;
 
             let passed = UnitJSRunner::load_script(&ctx, "s3_namespace.js")
+                .await?
+                .run()
+                .await?;
+            assert!(passed);
+
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn test_s3_dynamic_namespace() {
+        async_run!(|ctx: JSContext| async move {
+            unsafe {
+                std::env::set_var("NO_PROXY", "127.0.0.1,localhost");
+            }
+
+            let server = spawn_s3_server().await;
+            setup_s3_env(&ctx, &server)?;
+
+            let namespace_state = TestNamespaceState(Rc::new(RefCell::new("scope-a".to_owned())));
+            ctx.set_state(namespace_state.clone());
+
+            let client = S3Client::new(test_s3_config(&server)).with_namespace_resolver(|ctx| {
+                let state = ctx.get_state::<TestNamespaceState>().ok_or_else(|| {
+                    HostError::new("E_INVALID_STATE", "missing host namespace context")
+                })?;
+                Ok(format!("{}/", state.0.borrow().as_str()))
+            });
+            ctx.host_namespace()
+                .set("dynamicS3", client.into_js_object(&ctx)?)?;
+
+            let set_test_namespace = JSFunc::new(&ctx, move |namespace: String| {
+                *namespace_state.0.borrow_mut() = namespace;
+            })?;
+            ctx.host_namespace()
+                .set("__setTestS3Namespace", set_test_namespace)?;
+
+            let empty_namespace = S3Client::new(test_s3_config(&server))
+                .with_namespace_resolver(|_| Ok(String::new()));
+            ctx.host_namespace()
+                .set("emptyNamespaceS3", empty_namespace.into_js_object(&ctx)?)?;
+
+            let resolver_error = S3Client::new(S3Config::default()).with_namespace_resolver(|_| {
+                Err(HostError::new("E_TEST_NAMESPACE", "namespace unavailable")
+                    .with_name("TypeError")
+                    .into())
+            });
+            ctx.host_namespace()
+                .set("resolverErrorS3", resolver_error.into_js_object(&ctx)?)?;
+
+            let passed = UnitJSRunner::load_script(&ctx, "s3_dynamic_namespace.js")
                 .await?
                 .run()
                 .await?;
