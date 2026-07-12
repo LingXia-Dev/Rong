@@ -60,9 +60,10 @@
   - `auto`: create them for standalone package publishes, but use only the
     product tag when `product_release` is set
   - `always`: always create package tags
-  - `never`: never create package tags
 - **Input:** `product_release` optionally creates the repo-level `vX.Y.Z` tag
-  and GitHub Release after all selected package jobs succeed
+  and GitHub Release after all selected package jobs succeed. Product releases
+  require `package_scope=all` and a complete Rust selection (`--changed`,
+  `--group rust`, or `--group all`) so the product tag is a safe shared baseline
 - **Runs:** publishes the selected package set and optionally creates the
   coordinated product release
 - **Requirements:** run from `master`; package versions and `CHANGELOG.md` must
