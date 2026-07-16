@@ -139,12 +139,9 @@ impl<R: JSRuntimeImpl + 'static> JSRuntime<R> {
 impl<R: JSRuntimeImpl> Drop for JSRuntime<R> {
     fn drop(&mut self) {
         if Rc::strong_count(&self.inner) == 1 {
-            let services_map = self.services.services.borrow();
-
-            for service in services_map.values() {
-                // Call on_shutdown for each service before the inner runtime is dropped
-                service.on_shutdown();
-            }
+            // Drain services while the engine is still alive. ServiceContainer's
+            // subsequent drop then observes an empty map and cannot run hooks twice.
+            self.services.shutdown();
         }
     }
 }
@@ -238,8 +235,13 @@ impl ServiceContainer {
     }
 
     fn shutdown(&self) {
-        let mut services = self.services.borrow_mut();
-        for (_, ext) in services.drain() {
+        let services = self
+            .services
+            .borrow_mut()
+            .drain()
+            .map(|(_, service)| service)
+            .collect::<Vec<_>>();
+        for ext in services {
             ext.on_shutdown();
         }
     }

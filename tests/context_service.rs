@@ -2,8 +2,10 @@ use rong_test::*;
 
 use std::sync::{
     Arc,
-    atomic::{AtomicBool, Ordering},
+    atomic::{AtomicBool, AtomicUsize, Ordering},
 };
+
+static RUNTIME_SERVICE_SHUTDOWNS: AtomicUsize = AtomicUsize::new(0);
 
 #[derive(Clone)]
 struct TestContextService {
@@ -27,6 +29,19 @@ impl Drop for ReplaceableContextService {
 }
 
 impl JSContextService for ReplaceableContextService {}
+
+#[derive(Default)]
+struct CountingRuntimeService;
+
+impl JSRuntimeService for CountingRuntimeService {
+    fn on_shutdown(&self) {
+        RUNTIME_SERVICE_SHUTDOWNS.fetch_add(1, Ordering::SeqCst);
+    }
+}
+
+struct ServiceStateCollision;
+
+impl JSContextService for ServiceStateCollision {}
 
 #[test]
 fn context_service_shutdown_is_called_on_drop() {
@@ -66,6 +81,28 @@ fn replacing_context_service_must_not_invalidate_live_reference() {
             "set_service dropped a service while get_service still exposed a live reference"
         );
         let _keep_reference_live = first;
+        Ok(())
+    });
+}
+
+#[test]
+fn runtime_service_shutdown_is_called_once() {
+    RUNTIME_SERVICE_SHUTDOWNS.store(0, Ordering::SeqCst);
+    {
+        let runtime = RongJS::runtime();
+        let _ = runtime.get_or_init_service::<CountingRuntimeService>();
+    }
+    assert_eq!(RUNTIME_SERVICE_SHUTDOWNS.load(Ordering::SeqCst), 1);
+}
+
+#[test]
+fn context_services_and_plain_state_have_distinct_type_namespaces() {
+    run(|ctx| {
+        ctx.set_state(ServiceStateCollision);
+        assert!(ctx.get_service::<ServiceStateCollision>().is_none());
+
+        ctx.set_service(ServiceStateCollision);
+        assert!(ctx.get_state::<ServiceStateCollision>().is_some());
         Ok(())
     });
 }

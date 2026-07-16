@@ -74,6 +74,17 @@ fn test_array_creation() {
 }
 
 #[test]
+fn push_rejects_maximum_array_length() {
+    run(|ctx| {
+        let array: JSArray = ctx.eval(Source::from_bytes(
+            "const array = []; array.length = 4294967295; array",
+        ))?;
+        assert!(array.push(1).is_err());
+        Ok(())
+    });
+}
+
+#[test]
 fn test_array_pop() {
     run(|ctx| {
         // Create array

@@ -1,6 +1,13 @@
 use crate::*;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+fn epoch_milliseconds(time: SystemTime) -> f64 {
+    match time.duration_since(UNIX_EPOCH) {
+        Ok(duration) => duration.as_secs_f64() * 1_000.0,
+        Err(error) => -(error.duration().as_secs_f64() * 1_000.0),
+    }
+}
+
 pub struct JSDate<V: JSValueImpl> {
     inner: JSValue<V>,
 }
@@ -16,19 +23,13 @@ impl<V: JSValueImpl> JSDate<V> {
 
     /// Create a JSDate for the current time
     pub fn now(ctx: &JSContext<V::Context>) -> Self {
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_millis() as f64;
+        let now = epoch_milliseconds(SystemTime::now());
         Self::new(ctx, now)
     }
 
     /// Create a JSDate from SystemTime
     pub fn from_system_time(ctx: &JSContext<V::Context>, time: SystemTime) -> Self {
-        let epoch_ms = time
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_millis() as f64;
+        let epoch_ms = epoch_milliseconds(time);
         Self::new(ctx, epoch_ms)
     }
 
@@ -55,8 +56,33 @@ impl<V: JSValueImpl> JSDate<V> {
         V: JSValueImpl + JSTypeOf + JSValueConversion + JSObjectOps,
     {
         let epoch_ms = self.get_time()?;
-        let duration = std::time::Duration::from_millis(epoch_ms as u64);
-        Ok(UNIX_EPOCH + duration)
+        if !epoch_ms.is_finite() {
+            return Err(HostError::range_error(
+                crate::error::E_OUT_OF_RANGE,
+                "JavaScript Date does not contain a finite timestamp",
+            )
+            .into());
+        }
+
+        let duration =
+            std::time::Duration::try_from_secs_f64(epoch_ms.abs() / 1_000.0).map_err(|_| {
+                HostError::range_error(
+                    crate::error::E_OUT_OF_RANGE,
+                    "JavaScript Date is outside the SystemTime range",
+                )
+            })?;
+        let time = if epoch_ms.is_sign_negative() {
+            UNIX_EPOCH.checked_sub(duration)
+        } else {
+            UNIX_EPOCH.checked_add(duration)
+        };
+        time.ok_or_else(|| {
+            HostError::range_error(
+                crate::error::E_OUT_OF_RANGE,
+                "JavaScript Date is outside the SystemTime range",
+            )
+            .into()
+        })
     }
 
     /// Get the underlying JSValue
@@ -119,10 +145,7 @@ where
 
 impl<V: JSValueImpl> IntoJSValue<V> for SystemTime {
     fn into_js_value(self, ctx: &JSContext<V::Context>) -> JSValue<V> {
-        let epoch_ms = self
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_millis() as f64;
+        let epoch_ms = epoch_milliseconds(self);
         JSValue::from_raw(ctx, V::create_date(ctx.as_ref(), epoch_ms))
     }
 }

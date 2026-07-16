@@ -1,5 +1,5 @@
 use super::{JSValue, JSValueImpl};
-use crate::{JSContext, JSResult, RongJSError};
+use crate::{HostError, JSContext, JSResult, RongJSError};
 
 /// The conversion between Rust primitive types, which implement the `JSCompatible`
 /// marker trait, and `JSValue` is facilitated using the standard `TryInto` and
@@ -197,7 +197,17 @@ macro_rules! impl_js_converter_for_int {
             {
                 fn from_js_value(_ctx: &JSContext<V::Context>, value: JSValue<V>) -> JSResult<Self> {
                     let intermediate = TryInto::<$intermediate>::try_into(value.into_value())?;
-                    Ok(intermediate as $type)
+                    <$type>::try_from(intermediate).map_err(|_| {
+                        HostError::range_error(
+                            crate::error::E_OUT_OF_RANGE,
+                            format!(
+                                "Value {} is out of range for {}",
+                                intermediate,
+                                stringify!($type)
+                            ),
+                        )
+                        .into()
+                    })
                 }
             }
 
