@@ -218,7 +218,8 @@ impl URL {
     fn set_search(&mut self, value: String) {
         {
             let mut url = self.inner_mut();
-            url.set_query(Some(value.trim_start_matches('?')));
+            let query = value.strip_prefix('?').unwrap_or(&value);
+            url.set_query(if query.is_empty() { None } else { Some(query) });
         }
 
         // Reset search_params because the query string has changed
