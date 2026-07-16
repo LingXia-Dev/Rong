@@ -176,6 +176,7 @@ pub trait JSContextService: 'static {
 /// A container for context services with proper lifecycle management.
 struct ContextServiceContainer {
     services: RefCell<HashMap<TypeId, Box<dyn JSContextService>>>,
+    retired_services: RefCell<Vec<Box<dyn JSContextService>>>,
     closed: Cell<bool>,
 }
 
@@ -237,6 +238,7 @@ impl ContextServiceContainer {
     fn new() -> Self {
         Self {
             services: RefCell::new(HashMap::new()),
+            retired_services: RefCell::new(Vec::new()),
             closed: Cell::new(false),
         }
     }
@@ -247,14 +249,23 @@ impl ContextServiceContainer {
             return;
         }
         let mut services = self.services.borrow_mut();
-        services.insert(TypeId::of::<T>(), Box::new(service));
+        let replaced = services.insert(TypeId::of::<T>(), Box::new(service));
+        drop(services);
+        if let Some(replaced) = replaced {
+            // `get` returns references after releasing the RefCell borrow. Keep
+            // replaced allocations alive so those references remain valid.
+            self.retired_services.borrow_mut().push(replaced);
+        }
     }
 
     fn get<T: JSContextService>(&self) -> Option<&T> {
+        if self.closed.get() {
+            return None;
+        }
         // SAFETY: This is safe because:
         // 1. We only insert services through register<T>
         // 2. TypeId is unique for each type
-        // 3. The service is never removed until container is shut down
+        // 3. Replaced services remain allocated until the container is dropped
         // 4. The RefCell ensures we don't have multiple mutable borrows
         unsafe {
             let services = self.services.borrow();
@@ -269,10 +280,17 @@ impl ContextServiceContainer {
             return;
         }
         let mut services = self.services.borrow_mut();
-        services.insert(TypeId::of::<T>(), Box::new(ContextState(value)));
+        let replaced = services.insert(TypeId::of::<T>(), Box::new(ContextState(value)));
+        drop(services);
+        if let Some(replaced) = replaced {
+            self.retired_services.borrow_mut().push(replaced);
+        }
     }
 
     fn get_state<T: 'static>(&self) -> Option<&T> {
+        if self.closed.get() {
+            return None;
+        }
         // SAFETY: We store `ContextState<T>` under `TypeId::of::<T>()` in `register_state`.
         unsafe {
             let services = self.services.borrow();
@@ -289,8 +307,12 @@ impl ContextServiceContainer {
         if self.closed.replace(true) {
             return;
         }
-        let mut services = self.services.borrow_mut();
-        for (_, svc) in services.drain() {
+        let services = self.services.borrow();
+        for svc in services.values() {
+            svc.on_shutdown();
+        }
+        let retired_services = self.retired_services.borrow();
+        for svc in retired_services.iter() {
             svc.on_shutdown();
         }
     }

@@ -16,6 +16,18 @@ impl JSContextService for TestContextService {
     }
 }
 
+struct ReplaceableContextService {
+    dropped: Arc<AtomicBool>,
+}
+
+impl Drop for ReplaceableContextService {
+    fn drop(&mut self) {
+        self.dropped.store(true, Ordering::SeqCst);
+    }
+}
+
+impl JSContextService for ReplaceableContextService {}
+
 #[test]
 fn context_service_shutdown_is_called_on_drop() {
     let shutdown_flag = Arc::new(AtomicBool::new(false));
@@ -32,6 +44,30 @@ fn context_service_shutdown_is_called_on_drop() {
         shutdown_flag.load(Ordering::SeqCst),
         "JSContextService::on_shutdown was not called on context drop"
     );
+}
+
+#[test]
+fn replacing_context_service_must_not_invalidate_live_reference() {
+    let first_dropped = Arc::new(AtomicBool::new(false));
+    run(|ctx| {
+        ctx.set_service(ReplaceableContextService {
+            dropped: first_dropped.clone(),
+        });
+        let first = ctx
+            .get_service::<ReplaceableContextService>()
+            .expect("first service should be registered");
+
+        ctx.set_service(ReplaceableContextService {
+            dropped: Arc::new(AtomicBool::new(false)),
+        });
+
+        assert!(
+            !first_dropped.load(Ordering::SeqCst),
+            "set_service dropped a service while get_service still exposed a live reference"
+        );
+        let _keep_reference_live = first;
+        Ok(())
+    });
 }
 
 #[test]
