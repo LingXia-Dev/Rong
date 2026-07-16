@@ -243,16 +243,16 @@ impl AbortSignal {
 
         let instance = Class::lookup::<AbortSignal>(&ctx)?.instance(signal);
         let instance_clone = instance.clone();
-        let ctx_for_closure = ctx.clone();
 
-        spawn_local(async move {
+        ctx.spawn_task(async move {
             tokio::time::sleep(tokio::time::Duration::from_millis(time)).await;
             // Route through broadcast_abort so Rust subscribers on the
             // internal watch channel (via `signal.subscribe()`) are woken
             // alongside JS event listeners. Setting `inner.aborted = true`
             // without `notify_abort` leaves Rust receivers permanently
             // pending.
-            let _ = Self::broadcast_abort(&ctx_for_closure, This(instance_clone));
+            let task_ctx = instance_clone.context();
+            let _ = Self::broadcast_abort(&task_ctx, This(instance_clone));
         });
 
         Ok(instance)

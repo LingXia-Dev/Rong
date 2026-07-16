@@ -1,5 +1,16 @@
 use futures::stream;
 use rong_test::*;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+
+#[derive(Clone)]
+struct ShutdownFlag(Arc<AtomicBool>);
+
+impl JSContextService for ShutdownFlag {
+    fn on_shutdown(&self) {
+        self.0.store(true, Ordering::SeqCst);
+    }
+}
 
 #[test]
 fn iterator_sync() {
@@ -97,6 +108,36 @@ fn iterator_async_rejects_with_error_object() {
             ))
             .await?;
         assert!(result);
+        Ok(())
+    });
+}
+
+#[test]
+fn pending_async_iterator_does_not_keep_context_alive() {
+    let shutdown = Arc::new(AtomicBool::new(false));
+    async_run!(|ctx: JSContext| async move {
+        ctx.set_service(ShutdownFlag(shutdown.clone()));
+
+        let iterator = JSFunc::new(&ctx, move |ctx: JSContext| {
+            stream::pending::<i32>().to_js_async_iter(&ctx)
+        })?;
+        ctx.global().set("pendingIterator", iterator)?;
+        ctx.eval::<()>(Source::from_bytes(
+            r#"
+            const pending = pendingIterator();
+            pending.next();
+            pending.return();
+            "#,
+        ))?;
+        tokio::task::yield_now().await;
+
+        drop(ctx);
+        tokio::task::yield_now().await;
+
+        assert!(
+            shutdown.load(Ordering::SeqCst),
+            "pending async iterator tasks must not keep their JS context alive"
+        );
         Ok(())
     });
 }

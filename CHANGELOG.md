@@ -6,6 +6,17 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 
 ## [Unreleased]
 
+### Runtime lifecycle
+
+- Added context-owned async task tracking with explicit cancellation and drain,
+  and bound Rust-backed promises and cron callbacks to their owning JavaScript
+  contexts.
+- Scoped callback timers and `Rong.sleep()` registrations to their JavaScript
+  contexts, with sticky cancellation and cleanup for pending host timer tasks.
+- Scoped async iterator jobs, prioritized invoke queues, pending invoke
+  promises, and `AbortSignal.timeout()` tasks to their JavaScript contexts so
+  pending background work cannot block context teardown.
+
 ### Release automation
 
 - Rust publishing now paces uploads and retries transient crates.io rate-limit,

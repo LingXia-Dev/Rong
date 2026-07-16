@@ -19,7 +19,18 @@ pub fn init(ctx: &JSContext) -> JSResult<()> {
 mod tests {
     use super::*;
     use rong_test::*;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
     use tokio::sync::mpsc;
+
+    #[derive(Clone)]
+    struct ShutdownFlag(Arc<AtomicBool>);
+
+    impl JSContextService for ShutdownFlag {
+        fn on_shutdown(&self) {
+            self.0.store(true, Ordering::SeqCst);
+        }
+    }
 
     #[test]
     fn test_abort_receiver() {
@@ -125,6 +136,28 @@ mod tests {
                 .expect("rust subscriber should receive timeout abort within 2s")
                 .expect("forwarder should not drop sender before notifying");
 
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn pending_timeout_does_not_keep_context_alive() {
+        let shutdown = Arc::new(AtomicBool::new(false));
+        async_run!(|ctx: JSContext| async move {
+            init(&ctx)?;
+            rong_exception::init(&ctx)?;
+            ctx.set_service(ShutdownFlag(shutdown.clone()));
+
+            ctx.eval::<JSObject>(Source::from_bytes("AbortSignal.timeout(60_000)"))?;
+            tokio::task::yield_now().await;
+
+            drop(ctx);
+            tokio::task::yield_now().await;
+
+            assert!(
+                shutdown.load(Ordering::SeqCst),
+                "AbortSignal.timeout must not keep its JS context alive"
+            );
             Ok(())
         });
     }

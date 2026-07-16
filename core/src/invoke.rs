@@ -1,12 +1,13 @@
 use crate::{
-    FromJSValue, HostError, JSContext, JSContextImpl, JSFunc, JSObject, JSObjectOps, JSResult,
-    JSRuntimeService, JSTypeOf, JSValue, JSValueImpl, JSValueMapper, Promise,
+    FromJSValue, HostError, JSContext, JSContextImpl, JSContextService, JSFunc, JSObject,
+    JSObjectOps, JSResult, JSRuntimeService, JSTypeOf, JSValue, JSValueImpl, JSValueMapper,
+    Promise,
 };
 use futures::Future;
 use std::{
     collections::{HashMap, VecDeque},
     pin::Pin,
-    sync::{Arc, Mutex as StdMutex},
+    sync::Arc,
 };
 use tokio::sync::{Mutex, mpsc, oneshot};
 use tracing::error;
@@ -16,72 +17,45 @@ use tracing::error;
 pub struct JsInvokeGate(pub Arc<Mutex<()>>);
 impl JSRuntimeService for JsInvokeGate {}
 
-/// Soft invoke queue with priority and event coalescing, per JSRuntime.
+/// Soft invoke queue with priority and event coalescing, per JSContext.
 #[derive(Clone)]
 pub struct JsInvokeQueue {
     tx: mpsc::Sender<QueueItem>,
-    background_tasks: Arc<StdMutex<Vec<futures::future::AbortHandle>>>,
 }
 
-impl Default for JsInvokeQueue {
-    fn default() -> Self {
-        Self::new()
-    }
-}
+impl JSContextService for JsInvokeQueue {}
 
 impl JsInvokeQueue {
-    pub fn new() -> Self {
-        let (tx, mut rx) = mpsc::channel::<QueueItem>(1024);
-        let background_tasks = Arc::new(StdMutex::new(Vec::new()));
+    fn get_or_init<C>(ctx: &JSContext<C>) -> Self
+    where
+        C: JSContextImpl,
+    {
+        if let Some(queue) = ctx.get_service::<Self>() {
+            return queue.clone();
+        }
 
-        crate::rong::spawn_local(async move {
-            let mut q_high: VecDeque<QueueItem> = VecDeque::new();
-            let mut q_norm: VecDeque<QueueItem> = VecDeque::new();
-            let mut q_event: VecDeque<QueueItem> = VecDeque::new();
-            let mut event_gen: HashMap<String, u64> = HashMap::new();
-            let mut next_gen: u64 = 1;
+        let (tx, rx) = mpsc::channel::<QueueItem>(1024);
+        let queue = Self { tx };
+        ctx.set_service(queue.clone());
+        ctx.spawn_task(Self::run(rx));
+        queue
+    }
 
-            const DRAIN_BATCH_LIMIT: usize = 64;
+    async fn run(mut rx: mpsc::Receiver<QueueItem>) {
+        let mut q_high: VecDeque<QueueItem> = VecDeque::new();
+        let mut q_norm: VecDeque<QueueItem> = VecDeque::new();
+        let mut q_event: VecDeque<QueueItem> = VecDeque::new();
+        let mut event_gen: HashMap<String, u64> = HashMap::new();
+        let mut next_gen: u64 = 1;
 
-            loop {
-                // Phase 1: Drain available incoming items (non-blocking, capped).
-                // Cap prevents starvation of Phase 2 under sustained high throughput.
-                for _ in 0..DRAIN_BATCH_LIMIT {
-                    match rx.try_recv() {
-                        Ok(item) => Self::enqueue_item(
-                            item,
-                            &mut q_high,
-                            &mut q_norm,
-                            &mut q_event,
-                            &mut event_gen,
-                            &mut next_gen,
-                        ),
-                        Err(mpsc::error::TryRecvError::Empty) => break,
-                        Err(mpsc::error::TryRecvError::Disconnected) => return,
-                    }
-                }
+        const DRAIN_BATCH_LIMIT: usize = 64;
 
-                // Phase 2: Process one item from priority queues.
-                if let Some(item) =
-                    Self::dequeue_item(&mut q_high, &mut q_norm, &mut q_event, &event_gen)
-                {
-                    // Clean up the generation entry now that the event is consumed.
-                    if let Some(key) = &item.dedup_key
-                        && let Some(&latest) = event_gen.get(key)
-                        && latest == item.generation
-                    {
-                        event_gen.remove(key);
-                    }
-
-                    let fut = (item.cb)();
-                    fut.await;
-                    // After processing, loop back to drain more incoming + process more.
-                    continue;
-                }
-
-                // Phase 3: Nothing queued — wait for the next incoming item.
-                match rx.recv().await {
-                    Some(item) => Self::enqueue_item(
+        loop {
+            // Phase 1: Drain available incoming items (non-blocking, capped).
+            // Cap prevents starvation of Phase 2 under sustained high throughput.
+            for _ in 0..DRAIN_BATCH_LIMIT {
+                match rx.try_recv() {
+                    Ok(item) => Self::enqueue_item(
                         item,
                         &mut q_high,
                         &mut q_norm,
@@ -89,14 +63,40 @@ impl JsInvokeQueue {
                         &mut event_gen,
                         &mut next_gen,
                     ),
-                    None => break, // Channel closed.
+                    Err(mpsc::error::TryRecvError::Empty) => break,
+                    Err(mpsc::error::TryRecvError::Disconnected) => return,
                 }
             }
-        });
 
-        Self {
-            tx,
-            background_tasks,
+            // Phase 2: Process one item from priority queues.
+            if let Some(item) =
+                Self::dequeue_item(&mut q_high, &mut q_norm, &mut q_event, &event_gen)
+            {
+                // Clean up the generation entry now that the event is consumed.
+                if let Some(key) = &item.dedup_key
+                    && let Some(&latest) = event_gen.get(key)
+                    && latest == item.generation
+                {
+                    event_gen.remove(key);
+                }
+
+                (item.cb)().await;
+                // After processing, loop back to drain more incoming + process more.
+                continue;
+            }
+
+            // Phase 3: Nothing queued — wait for the next incoming item.
+            match rx.recv().await {
+                Some(item) => Self::enqueue_item(
+                    item,
+                    &mut q_high,
+                    &mut q_norm,
+                    &mut q_event,
+                    &mut event_gen,
+                    &mut next_gen,
+                ),
+                None => break, // Channel closed.
+            }
         }
     }
 
@@ -150,18 +150,6 @@ impl JsInvokeQueue {
         None
     }
 }
-impl JSRuntimeService for JsInvokeQueue {
-    fn on_shutdown(&self) {
-        let abort_handles = {
-            let mut guard = self.background_tasks.lock().unwrap();
-            std::mem::take(&mut *guard)
-        };
-
-        for handle in abort_handles {
-            handle.abort();
-        }
-    }
-}
 
 /// Invocation priority
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -196,7 +184,7 @@ where
     C::Value: JSValueImpl + JSObjectOps + JSTypeOf + 'static,
     C::Runtime: 'static,
 {
-    let queue = ctx.runtime().get_or_init_service::<JsInvokeQueue>().clone();
+    let queue = JsInvokeQueue::get_or_init(ctx);
 
     let (reply_tx, reply_rx) = if must_reply {
         let (tx, rx) = oneshot::channel();
@@ -205,12 +193,10 @@ where
         (None, None)
     };
 
-    let ctx_clone = ctx.clone();
-    let background_tasks = queue.background_tasks.clone();
     let cb: InvokeFn = Box::new(move || {
         Box::pin(async move {
             if priority == JsInvokePriority::Event {
-                let result = js_invoke_async::<C, ()>(&ctx_clone, func, this_obj, args_obj).await;
+                let result = js_invoke_async::<C, ()>(func, this_obj, args_obj).await;
                 if let Some(tx) = reply_tx {
                     let _ = tx.send(result);
                 } else if let Err(err) = result {
@@ -219,21 +205,18 @@ where
                 return;
             }
 
-            match js_invoke_start::<C>(&ctx_clone, func, this_obj, args_obj).await {
+            match js_invoke_start::<C>(func, this_obj, args_obj).await {
                 Ok(Some(promise)) => {
+                    let task_ctx = promise.context();
                     if let Some(tx) = reply_tx {
-                        crate::rong::spawn_local(async move {
+                        task_ctx.spawn_task(async move {
                             let _ = tx.send(promise.into_future::<()>().await);
                         });
                     } else {
-                        let (future, abort_handle) = futures::future::abortable(async move {
+                        task_ctx.spawn_task(async move {
                             if let Err(err) = promise.into_future::<()>().await {
                                 error!(target: "rong", error = ?err, "background js invoke failed");
                             }
-                        });
-                        background_tasks.lock().unwrap().push(abort_handle);
-                        crate::rong::spawn_local(async move {
-                            let _ = future.await;
                         });
                     }
                 }
@@ -275,7 +258,6 @@ where
 }
 
 async fn js_invoke_start<C>(
-    ctx: &JSContext<C>,
     func: JSFunc<C::Value>,
     this_obj: Option<JSObject<C::Value>>,
     args_obj: Option<JSObject<C::Value>>,
@@ -285,7 +267,10 @@ where
     C::Value: JSValueImpl + JSObjectOps + JSTypeOf + 'static,
     C::Runtime: 'static,
 {
-    let gate = ctx.runtime().get_or_init_service::<JsInvokeGate>().clone();
+    let gate = {
+        let ctx = func.context();
+        ctx.runtime().get_or_init_service::<JsInvokeGate>().clone()
+    };
     let result = {
         let _guard = gate.0.lock().await;
         match args_obj {
@@ -298,7 +283,8 @@ where
     };
 
     if result.is_promise() {
-        Promise::from_js_value(ctx, JSValue::from_raw(ctx, result)).map(Some)
+        let ctx = func.context();
+        Promise::from_js_value(&ctx, JSValue::from_raw(&ctx, result)).map(Some)
     } else {
         result.try_convert::<()>()?;
         Ok(None)
@@ -308,7 +294,6 @@ where
 /// Dispatch a JS invocation immediately with hard gate (async form).
 #[allow(dead_code)]
 pub async fn js_invoke_async<C, R>(
-    ctx: &JSContext<C>,
     func: JSFunc<C::Value>,
     this_obj: Option<JSObject<C::Value>>,
     args_obj: Option<JSObject<C::Value>>,
@@ -319,7 +304,10 @@ where
     C::Runtime: 'static,
     R: crate::FromJSValue<C::Value> + 'static,
 {
-    let gate = ctx.runtime().get_or_init_service::<JsInvokeGate>().clone();
+    let gate = {
+        let ctx = func.context();
+        ctx.runtime().get_or_init_service::<JsInvokeGate>().clone()
+    };
     let result = {
         let _guard = gate.0.lock().await;
         match args_obj {
@@ -332,7 +320,10 @@ where
     };
 
     if result.is_promise() {
-        let promise = Promise::from_js_value(ctx, JSValue::from_raw(ctx, result))?;
+        let promise = {
+            let ctx = func.context();
+            Promise::from_js_value(&ctx, JSValue::from_raw(&ctx, result))?
+        };
         promise.into_future::<R>().await
     } else {
         result.try_convert::<R>()
