@@ -1,6 +1,34 @@
 use crate::config::{S3Config, S3ConfigOverlay};
 use rong::*;
 
+pub(crate) fn presign_expiration(value: Option<f64>) -> JSResult<u32> {
+    let value = value.unwrap_or(86400.0);
+    if !value.is_finite() || !(1.0..=604800.0).contains(&value) {
+        return Err(HostError::new(
+            rong::error::E_OUT_OF_RANGE,
+            "expiresIn must be between 1 and 604800 seconds",
+        )
+        .with_name("RangeError")
+        .into());
+    }
+    Ok(value as u32)
+}
+
+pub(crate) fn list_max_keys(value: Option<f64>) -> JSResult<Option<usize>> {
+    let Some(value) = value else {
+        return Ok(None);
+    };
+    if !value.is_finite() || value < 0.0 || value > usize::MAX as f64 {
+        return Err(HostError::new(
+            rong::error::E_OUT_OF_RANGE,
+            "maxKeys must be a non-negative finite number",
+        )
+        .with_name("RangeError")
+        .into());
+    }
+    Ok(Some(value as usize))
+}
+
 /// Options for constructing or overriding an S3 client.
 #[derive(Clone, Debug, Default, FromJSObject)]
 pub struct S3ClientOptions {

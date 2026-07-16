@@ -182,6 +182,50 @@ describe("S3Client", () => {
     }
   });
 
+  it("presign() rejects a negative expiration", async () => {
+    const client = makeClient();
+    let error;
+    try {
+      await client.presign("key", { expiresIn: -1 });
+    } catch (caught) {
+      error = caught;
+    }
+    assert(error instanceof RangeError, "negative expiresIn should throw RangeError");
+  });
+
+  it("S3File.presign() rejects a negative expiration", async () => {
+    const file = makeClient().file("key");
+    let error;
+    try {
+      await file.presign({ expiresIn: -1 });
+    } catch (caught) {
+      error = caught;
+    }
+    assert(error instanceof RangeError, "negative expiresIn should throw RangeError");
+  });
+
+  it("exists() propagates transport errors", async () => {
+    const client = makeClient({ endpoint: "http://127.0.0.1:1" });
+    let error;
+    try {
+      await client.exists("key");
+    } catch (caught) {
+      error = caught;
+    }
+    assert(error && error.name === "S3Error", "transport error should be preserved");
+  });
+
+  it("S3File.exists() propagates transport errors", async () => {
+    const file = makeClient({ endpoint: "http://127.0.0.1:1" }).file("key");
+    let error;
+    try {
+      await file.exists();
+    } catch (caught) {
+      error = caught;
+    }
+    assert(error && error.name === "S3Error", "transport error should be preserved");
+  });
+
   it("S3 errors have name 'S3Error'", async () => {
     const client = makeClient();
     try {
@@ -334,6 +378,12 @@ describe("S3 operations", () => {
     assert.equal(text, TEST_CONTENT.slice(6));
   });
 
+  it("slice() with end before start returns empty content", async () => {
+    const file = client.file(TEST_KEY);
+    const partial = file.slice(5, 2);
+    assert.equal(await partial.text(), "");
+  });
+
   // ─── list ──────────────────────────────────────────────────────
 
   it("list() returns objects", async () => {
@@ -350,6 +400,16 @@ describe("S3 operations", () => {
     const result = await client.list({ prefix: "rong-test-", maxKeys: 1 });
     assert.equal(result.contents.length, 1);
     assert.equal(result.isTruncated, true);
+  });
+
+  it("list() rejects a negative maxKeys", async () => {
+    let error;
+    try {
+      await client.list({ prefix: "rong-test-", maxKeys: -1 });
+    } catch (caught) {
+      error = caught;
+    }
+    assert(error instanceof RangeError, "negative maxKeys should throw RangeError");
   });
 
   it("list() with startAfter paginates", async () => {
