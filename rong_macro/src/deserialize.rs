@@ -67,11 +67,11 @@ pub(crate) fn impl_deserialize(input: syn::DeriveInput) -> syn::Result<TokenStre
             let field_name_str = field_name.to_string();
 
             // Check if field type is Option<T>
-            if let Some(_inner_type) = extract_option_inner_type(field_type) {
+            if let Some(inner_type) = extract_option_inner_type(field_type) {
                 // Optional field
                 Ok(quote! {
-                    #field_name: match obj.get(#js_name_lit) {
-                        Ok(val) => Some(val),
+                    #field_name: match obj.get::<_, Option<#inner_type>>(#js_name_lit) {
+                        Ok(val) => val,
                         Err(e) if e.is_property_not_found() => None,
                         Err(e) => return Err(rong::HostError::new(
                             rong::error::E_INVALID_ARG,

@@ -177,6 +177,32 @@ mod tests {
     }
 
     #[test]
+    fn optional_derived_field_accepts_null_and_undefined() {
+        run(|ctx| {
+            let null_nickname: Person = ctx.eval(Source::from_bytes(
+                r#"({
+                    firstName: "Null",
+                    lastName: "Value",
+                    age: 30,
+                    nickname: null
+                })"#,
+            ))?;
+            assert_eq!(null_nickname.nickname, None);
+
+            let undefined_nickname: Person = ctx.eval(Source::from_bytes(
+                r#"({
+                    firstName: "Undefined",
+                    lastName: "Value",
+                    age: 31,
+                    nickname: undefined
+                })"#,
+            ))?;
+            assert_eq!(undefined_nickname.nickname, None);
+            Ok(())
+        });
+    }
+
+    #[test]
     fn test_from_js_obj_error_handling() {
         run(|ctx| {
             // Test missing required field
