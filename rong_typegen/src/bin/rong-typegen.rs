@@ -1155,7 +1155,7 @@ mod tests {
         run_downstream_config(&config, false).unwrap();
         let logic = std::fs::read_to_string(types.join("src/generated/logic.ts")).unwrap();
         assert!(logic.contains("export interface DeviceInfo"));
-        assert!(logic.contains("export interface Lx"));
+        assert!(logic.contains("declare global {\n  interface Lx"));
         assert!(logic.contains("getDeviceInfo(): DeviceInfo"));
         assert!(logic.contains("const lx: Lx"));
 
