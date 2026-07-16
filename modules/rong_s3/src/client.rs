@@ -3,7 +3,7 @@ use crate::file::{S3File, resolve_body};
 use crate::namespace::S3Namespace;
 use crate::types::{
     S3ClientListOptions, S3ClientOptions, S3ClientPresignOptions, S3ClientWriteOptions,
-    S3ListEntry, S3ListResult, S3StatResult,
+    S3ListEntry, S3ListResult, S3StatResult, list_max_keys, presign_expiration,
 };
 use rong::function::*;
 use rong::*;
@@ -221,7 +221,8 @@ impl S3Client {
         let bucket = self.config.create_bucket()?;
         match bucket.head_object(&path).await {
             Ok(_) => Ok(true),
-            Err(_) => Ok(false),
+            Err(s3::error::S3Error::HttpFailWithBody(404, _)) => Ok(false),
+            Err(error) => Err(s3_error(format!("HEAD {}: {}", path, error))),
         }
     }
 
@@ -276,11 +277,7 @@ impl S3Client {
         };
         let bucket = config.create_bucket()?;
 
-        let expires_in = options
-            .as_ref()
-            .and_then(|o| o.expires_in)
-            .map(|v| v as u32)
-            .unwrap_or(86400);
+        let expires_in = presign_expiration(options.as_ref().and_then(|o| o.expires_in))?;
 
         let method = options
             .as_ref()
@@ -328,10 +325,7 @@ impl S3Client {
 
         let prefix = S3Namespace::apply(namespace.as_deref(), &user_prefix);
 
-        let max_keys = options
-            .as_ref()
-            .and_then(|o| o.max_keys)
-            .map(|v| v as usize);
+        let max_keys = list_max_keys(options.as_ref().and_then(|o| o.max_keys))?;
 
         let start_after = options
             .as_ref()

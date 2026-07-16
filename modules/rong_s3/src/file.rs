@@ -1,6 +1,6 @@
 use crate::config::S3Config;
 use crate::namespace::S3Namespace;
-use crate::types::{S3PresignOptions, S3StatResult, S3WriteOptions};
+use crate::types::{S3PresignOptions, S3StatResult, S3WriteOptions, presign_expiration};
 use rong::function::*;
 use rong::*;
 use std::rc::Rc;
@@ -159,7 +159,8 @@ impl S3File {
         let bucket = self.config.create_bucket()?;
         match bucket.head_object(&key).await {
             Ok(_) => Ok(true),
-            Err(_) => Ok(false),
+            Err(s3::error::S3Error::HttpFailWithBody(404, _)) => Ok(false),
+            Err(error) => Err(s3_error(format!("HEAD {}: {}", key, error))),
         }
     }
 
@@ -190,12 +191,7 @@ impl S3File {
     ) -> JSResult<String> {
         let key = self.resolved_key(&ctx)?;
         let bucket = self.config.create_bucket()?;
-        let expires_in = options
-            .0
-            .as_ref()
-            .and_then(|o| o.expires_in)
-            .map(|v| v as u32)
-            .unwrap_or(86400);
+        let expires_in = presign_expiration(options.0.as_ref().and_then(|o| o.expires_in))?;
 
         let method = options
             .0
@@ -245,7 +241,7 @@ impl S3File {
             .range_end
             .map(|e| (e as usize).min(data.len()))
             .unwrap_or(data.len());
-        if start >= data.len() {
+        if start >= data.len() || start >= end {
             return &[];
         }
         &data[start..end]
@@ -284,4 +280,23 @@ pub(crate) fn resolve_body(data: &JSValue) -> JSResult<(Vec<u8>, Option<String>)
     Err(type_error(
         "data must be a string, ArrayBuffer, or Uint8Array",
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reversed_range_is_empty() {
+        let file = S3File {
+            config: Rc::new(S3Config::default()),
+            namespace: S3Namespace::None,
+            path: "object".to_string(),
+            display_name: "object".to_string(),
+            range_start: Some(5),
+            range_end: Some(2),
+        };
+
+        assert_eq!(file.apply_range(b"abcdef"), b"");
+    }
 }
