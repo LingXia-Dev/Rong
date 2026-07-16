@@ -1,6 +1,6 @@
 use crate::JSCValue;
 use crate::jsc;
-use rong_core::{JSArrayOps, JSTypeOf, JSValueImpl};
+use rong_core::{JSArrayOps, JSValueImpl};
 
 impl JSArrayOps for JSCValue {
     fn new_array(ctx: &Self::Context) -> Self {
@@ -93,49 +93,10 @@ impl JSArrayOps for JSCValue {
 
     fn set_index(&self, index: u32, value: Self) -> Self {
         unsafe {
-            let mut exception: jsc::JSValueRef = std::ptr::null_mut();
-            jsc::JSObjectSetPropertyAtIndex(
-                self.ctx,
-                self.as_obj(),
-                index,
+            self.reflect_set(
+                jsc::JSValueMakeNumber(self.ctx, index as f64),
                 value.as_value(),
-                &mut exception,
-            );
-            if !exception.is_null() {
-                JSCValue::from_owned_raw(self.ctx, exception).with_exception()
-            } else {
-                let len = self.array_len();
-                if len.is_exception() {
-                    // Reading `length` failed (e.g. OOM or a corrupted object);
-                    // surface that instead of silently returning undefined with
-                    // a stale length.
-                    return len;
-                }
-                if index != u32::MAX && jsc::JSValueIsNumber(self.ctx, len.as_value()) {
-                    let current_len =
-                        jsc::JSValueToNumber(self.ctx, len.as_value(), &mut exception);
-                    // JavaScript array indices stop at 2^32 - 2; u32::MAX is
-                    // an ordinary property key and must not update length.
-                    let next_len = index as f64 + 1.0;
-                    if exception.is_null() && current_len < next_len {
-                        let key = jsc::JSStringCreateWithUTF8CString(c"length".as_ptr());
-                        jsc::JSObjectSetProperty(
-                            self.ctx,
-                            self.as_obj(),
-                            key,
-                            jsc::JSValueMakeNumber(self.ctx, next_len),
-                            jsc::attr(jsc::kJSPropertyAttributeDontEnum),
-                            &mut exception,
-                        );
-                        jsc::JSStringRelease(key);
-                        if !exception.is_null() {
-                            return JSCValue::from_owned_raw(self.ctx, exception).with_exception();
-                        }
-                    }
-                }
-                let raw = jsc::JSValueMakeUndefined(self.ctx);
-                JSCValue::from_owned_raw(self.ctx, raw)
-            }
+            )
         }
     }
 }

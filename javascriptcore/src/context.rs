@@ -56,12 +56,14 @@ impl JSContextImpl for JSCContext {
         // prepending a "use strict" directive prologue.
         let mut code_bytes = b"\"use strict\";\n".to_vec();
         code_bytes.extend_from_slice(source.code());
-        let code = CString::new(code_bytes).unwrap();
-        let c_filename = CString::new(filename).unwrap();
+        let code: Vec<u16> = String::from_utf8_lossy(&code_bytes)
+            .encode_utf16()
+            .collect();
+        let filename: Vec<u16> = filename.encode_utf16().collect();
 
         unsafe {
-            let js_str = jsc::JSStringCreateWithUTF8CString(code.as_ptr());
-            let js_filename = jsc::JSStringCreateWithUTF8CString(c_filename.as_ptr());
+            let js_str = jsc::JSStringCreateWithCharacters(code.as_ptr(), code.len());
+            let js_filename = jsc::JSStringCreateWithCharacters(filename.as_ptr(), filename.len());
 
             let mut exception: jsc::JSValueRef = ptr::null_mut();
             let result = jsc::JSEvaluateScript(

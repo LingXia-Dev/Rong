@@ -241,6 +241,10 @@ fn test_display() {
 #[test]
 fn test_string_with_null() {
     run(|ctx| {
+        let input = "before\0after";
+        let jsvalue = JSValue::from_rust(ctx, input);
+        assert_eq!(jsvalue.to_rust::<String>()?, input);
+
         // Test string containing null character
         let result: String = ctx
             .eval(Source::from_bytes(

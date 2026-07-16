@@ -188,6 +188,15 @@ fn test_object_property_attributes() {
 }
 
 #[test]
+fn object_set_surfaces_engine_write_failures() {
+    run(|ctx| {
+        let obj: JSObject = ctx.eval(Source::from_bytes("Object.freeze({})"))?;
+        assert!(obj.set("value", 1).is_err());
+        Ok(())
+    });
+}
+
+#[test]
 fn test_object_prototype() {
     run(|ctx| {
         // Test prototype chain

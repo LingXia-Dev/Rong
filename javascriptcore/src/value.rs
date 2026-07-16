@@ -362,6 +362,60 @@ impl JSCValue {
         self.value
     }
 
+    pub(crate) fn reflect_set(&self, key: jsc::JSValueRef, value: jsc::JSValueRef) -> Self {
+        unsafe {
+            let mut exception: jsc::JSValueRef = std::ptr::null_mut();
+            let global = jsc::JSContextGetGlobalObject(self.ctx);
+
+            let reflect_key = jsc::JSStringCreateWithUTF8CString(c"Reflect".as_ptr());
+            let reflect_value =
+                jsc::JSObjectGetProperty(self.ctx, global, reflect_key, &mut exception);
+            jsc::JSStringRelease(reflect_key);
+            if !exception.is_null() {
+                return Self::from_owned_raw(self.ctx, exception).with_exception();
+            }
+            let reflect = jsc::JSValueToObject(self.ctx, reflect_value, &mut exception);
+            if !exception.is_null() {
+                return Self::from_owned_raw(self.ctx, exception).with_exception();
+            }
+
+            let set_key = jsc::JSStringCreateWithUTF8CString(c"set".as_ptr());
+            let set_value = jsc::JSObjectGetProperty(self.ctx, reflect, set_key, &mut exception);
+            jsc::JSStringRelease(set_key);
+            if !exception.is_null() {
+                return Self::from_owned_raw(self.ctx, exception).with_exception();
+            }
+            let set = jsc::JSValueToObject(self.ctx, set_value, &mut exception);
+            if !exception.is_null() {
+                return Self::from_owned_raw(self.ctx, exception).with_exception();
+            }
+
+            let args = [self.as_value(), key, value];
+            let result = jsc::JSObjectCallAsFunction(
+                self.ctx,
+                set,
+                reflect,
+                args.len(),
+                args.as_ptr(),
+                &mut exception,
+            );
+            if !exception.is_null() {
+                Self::from_owned_raw(self.ctx, exception).with_exception()
+            } else if jsc::JSValueToBoolean(self.ctx, result) {
+                Self::from_owned_raw(self.ctx, jsc::JSValueMakeUndefined(self.ctx))
+            } else {
+                let context = <JSCContext as JSContextImpl>::from_borrowed_raw(self.ctx);
+                context
+                    .new_error_with_name_internal(
+                        "TypeError",
+                        "Failed to set JavaScript property",
+                        None,
+                    )
+                    .with_exception()
+            }
+        }
+    }
+
     /// Protects the current value from garbage collection.
     pub(crate) fn protect(mut self) -> Self {
         if self.protected || self.ctx.is_null() || self.value.is_null() {
@@ -482,9 +536,9 @@ impl JSValueImpl for JSCValue {
 
     fn from_json_str(ctx: &Self::Context, str: &str) -> Self {
         let ctx = ctx.to_raw();
-        let c_str = CString::new(str).unwrap();
+        let chars: Vec<u16> = str.encode_utf16().collect();
         let raw = unsafe {
-            let input = jsc::JSStringCreateWithUTF8CString(c_str.as_ptr());
+            let input = jsc::JSStringCreateWithCharacters(chars.as_ptr(), chars.len());
             let raw = jsc::JSValueMakeFromJSONString(ctx, input);
             jsc::JSStringRelease(input);
             raw
@@ -501,9 +555,9 @@ impl JSValueImpl for JSCValue {
 
     fn create_symbol(ctx: &Self::Context, description: &str) -> Self {
         let ctx = ctx.to_raw();
-        let c_str = CString::new(description).unwrap();
+        let chars: Vec<u16> = description.encode_utf16().collect();
         let raw = unsafe {
-            let js_string = jsc::JSStringCreateWithUTF8CString(c_str.as_ptr());
+            let js_string = jsc::JSStringCreateWithCharacters(chars.as_ptr(), chars.len());
             let symbol = jsc::JSValueMakeSymbol(ctx, js_string);
             jsc::JSStringRelease(js_string);
             symbol
@@ -596,8 +650,8 @@ impl_js_converter!(
     &str,
     String,
     |ctx, value: &str| unsafe {
-        let cstr = CString::new(value).unwrap();
-        let js_str = jsc::JSStringCreateWithUTF8CString(cstr.as_ptr());
+        let chars: Vec<u16> = value.encode_utf16().collect();
+        let js_str = jsc::JSStringCreateWithCharacters(chars.as_ptr(), chars.len());
         let result = jsc::JSValueMakeString(ctx, js_str);
         jsc::JSStringRelease(js_str);
         result
