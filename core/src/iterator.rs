@@ -4,6 +4,7 @@ use crate::{
 };
 use futures::{Stream, StreamExt};
 use std::cell::RefCell;
+use std::marker::PhantomData;
 use std::pin::Pin;
 use std::rc::Rc;
 use tokio::sync::Mutex;
@@ -28,7 +29,7 @@ where
     T: IntoJSValue<V> + 'static,
 {
     inner: Rc<RefCell<Box<dyn Iterator<Item = T> + 'static>>>,
-    ctx: JSContext<V::Context>,
+    value: PhantomData<fn() -> V>,
 }
 
 impl<V, T> JSIterator<V, T>
@@ -36,30 +37,30 @@ where
     V: JSObjectOps + 'static,
     T: IntoJSValue<V> + 'static,
 {
-    pub fn new<I>(iterable: I, ctx: &JSContext<V::Context>) -> Self
+    pub fn new<I>(iterable: I, _ctx: &JSContext<V::Context>) -> Self
     where
         I: IntoIterator<Item = T> + 'static,
         I::IntoIter: 'static,
     {
         Self {
             inner: Rc::new(RefCell::new(Box::new(iterable.into_iter()))),
-            ctx: ctx.clone(),
+            value: PhantomData,
         }
     }
 
-    pub fn next(&self) -> JSResult<JSObject<V>> {
-        let result = JSObject::new(&self.ctx);
+    pub fn next(&self, ctx: &JSContext<V::Context>) -> JSResult<JSObject<V>> {
+        let result = JSObject::new(ctx);
         let mut iter = self.inner.borrow_mut();
 
         match iter.next() {
             Some(item) => {
                 result.set("done", false)?;
-                let value = <T as IntoJSValue<V>>::into_js_value(item, &self.ctx);
+                let value = <T as IntoJSValue<V>>::into_js_value(item, ctx);
                 result.set("value", value)?;
             }
             None => {
                 result.set("done", true)?;
-                result.set("value", JSValue::undefined(&self.ctx))?;
+                result.set("value", JSValue::undefined(ctx))?;
             }
         }
 
@@ -73,13 +74,11 @@ where
     pub fn install_on(&self, ctx: &JSContext<V::Context>, obj: &JSObject<V>) -> JSResult<()> {
         // next()
         let iterator_instance = self.clone();
-        let next_fn = JSFunc::new(ctx, move |_ctx: JSContext<V::Context>| -> JSObject<V> {
-            iterator_instance.next().unwrap_or_else(|_| {
-                let result = JSObject::new(&iterator_instance.ctx);
+        let next_fn = JSFunc::new(ctx, move |ctx: JSContext<V::Context>| -> JSObject<V> {
+            iterator_instance.next(&ctx).unwrap_or_else(|_| {
+                let result = JSObject::new(&ctx);
                 result.set("done", true).ok();
-                result
-                    .set("value", JSValue::undefined(&iterator_instance.ctx))
-                    .ok();
+                result.set("value", JSValue::undefined(&ctx)).ok();
                 result
             })
         })?;
@@ -125,7 +124,7 @@ where
     fn clone(&self) -> Self {
         Self {
             inner: self.inner.clone(),
-            ctx: self.ctx.clone(),
+            value: PhantomData,
         }
     }
 }

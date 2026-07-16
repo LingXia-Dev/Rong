@@ -161,4 +161,25 @@ mod tests {
             Ok(())
         });
     }
+
+    #[test]
+    fn abort_signal_any_does_not_keep_context_alive() {
+        let shutdown = Arc::new(AtomicBool::new(false));
+        async_run!(|ctx: JSContext| async move {
+            init(&ctx)?;
+            ctx.set_service(ShutdownFlag(shutdown.clone()));
+            ctx.eval::<JSObject>(Source::from_bytes(
+                "globalThis.combined = AbortSignal.any([new AbortController().signal])",
+            ))?;
+
+            drop(ctx);
+            tokio::task::yield_now().await;
+
+            assert!(
+                shutdown.load(Ordering::SeqCst),
+                "AbortSignal.any listeners must not own their JS context"
+            );
+            Ok(())
+        });
+    }
 }

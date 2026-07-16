@@ -6,7 +6,7 @@ use crate::{
 };
 use crate::{JSRuntime, JSValueMapper};
 use std::any::TypeId;
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::future::Future;
 use std::rc::{Rc, Weak};
@@ -152,6 +152,7 @@ pub trait JSRawContext {
 
 pub struct JSContext<C: JSContextImpl> {
     rc: Rc<JSContextInner<C>>,
+    owns_lifecycle: bool,
 }
 
 struct JSContextInner<C: JSContextImpl> {
@@ -159,6 +160,7 @@ struct JSContextInner<C: JSContextImpl> {
     runtime: JSRuntime<C::Runtime>,
     rong: C::Value,
     services: ContextServiceContainer,
+    lifecycle_owners: Cell<usize>,
 }
 
 /// A trait for context-scoped services that can be attached to JSContext.
@@ -172,9 +174,9 @@ pub trait JSContextService: 'static {
 }
 
 /// A container for context services with proper lifecycle management.
-#[derive(Clone)]
 struct ContextServiceContainer {
-    services: Rc<RefCell<HashMap<TypeId, Box<dyn JSContextService>>>>,
+    services: RefCell<HashMap<TypeId, Box<dyn JSContextService>>>,
+    closed: Cell<bool>,
 }
 
 struct ContextState<T: 'static>(T);
@@ -191,18 +193,20 @@ struct ContextTaskRegistryInner {
 }
 
 impl ContextTaskRegistry {
-    fn spawn<F>(&self, future: F)
+    fn spawn<F>(&self, future: F) -> Option<tokio::task::AbortHandle>
     where
         F: Future<Output = ()> + 'static,
     {
         if self.inner.closed.get() {
-            return;
+            return None;
         }
 
         let task = tokio::task::spawn_local(future);
+        let abort_handle = task.abort_handle();
         let mut tasks = self.inner.tasks.borrow_mut();
         tasks.retain(|task| !task.is_finished());
         tasks.push(task);
+        Some(abort_handle)
     }
 
     fn abort_all(&self) -> Vec<tokio::task::JoinHandle<()>> {
@@ -232,11 +236,16 @@ impl<T: 'static> JSContextService for ContextState<T> {}
 impl ContextServiceContainer {
     fn new() -> Self {
         Self {
-            services: Rc::new(RefCell::new(HashMap::new())),
+            services: RefCell::new(HashMap::new()),
+            closed: Cell::new(false),
         }
     }
 
     fn register<T: JSContextService>(&self, service: T) {
+        if self.closed.get() {
+            service.on_shutdown();
+            return;
+        }
         let mut services = self.services.borrow_mut();
         services.insert(TypeId::of::<T>(), Box::new(service));
     }
@@ -256,6 +265,9 @@ impl ContextServiceContainer {
     }
 
     fn register_state<T: 'static>(&self, value: T) {
+        if self.closed.get() {
+            return;
+        }
         let mut services = self.services.borrow_mut();
         services.insert(TypeId::of::<T>(), Box::new(ContextState(value)));
     }
@@ -274,6 +286,9 @@ impl ContextServiceContainer {
     }
 
     fn shutdown(&self) {
+        if self.closed.replace(true) {
+            return;
+        }
         let mut services = self.services.borrow_mut();
         for (_, svc) in services.drain() {
             svc.on_shutdown();
@@ -322,9 +337,13 @@ impl<C: JSContextImpl> JSContext<C> {
             runtime: runtime.clone(),
             rong,
             services: ContextServiceContainer::new(),
+            lifecycle_owners: Cell::new(1),
         };
 
-        let ctx = JSContext { rc: Rc::new(inner) };
+        let ctx = JSContext {
+            rc: Rc::new(inner),
+            owns_lifecycle: true,
+        };
         let weak = Rc::downgrade(&ctx.rc);
 
         // save stale address to opaque
@@ -350,6 +369,8 @@ impl<C: JSContextImpl> JSContext<C> {
     /// This is used in callback scenarios where the JS engine provides a context pointer.
     /// From the JS engine's perspective, contexts created from the mainline and from
     /// callbacks are equivalent since they operate within the same execution context.
+    /// The returned handle does not own the context lifecycle: keeping it across an
+    /// async boundary cannot delay shutdown after all runtime-created owners are dropped.
     ///
     /// # Safety
     /// - The provided FFI context must be valid and properly aligned
@@ -373,7 +394,10 @@ impl<C: JSContextImpl> JSContext<C> {
         } else {
             let ctx_inner = unsafe { &(*data).ctx_inner };
             if let Some(ctx) = ctx_inner.upgrade() {
-                Self { rc: ctx }
+                Self {
+                    rc: ctx,
+                    owns_lifecycle: false,
+                }
             } else {
                 panic!("[JSContext] context has been dropped");
             }
@@ -601,7 +625,16 @@ impl<C: JSContextImpl> JSContext<C> {
     where
         F: Future<Output = ()> + 'static,
     {
-        self.task_registry().spawn(future);
+        let _ = self.task_registry().spawn(future);
+    }
+
+    /// Spawn context-owned work and return a handle for earlier cancellation.
+    /// Returns `None` after context shutdown has started.
+    pub fn spawn_task_with_handle<F>(&self, future: F) -> Option<tokio::task::AbortHandle>
+    where
+        F: Future<Output = ()> + 'static,
+    {
+        self.task_registry().spawn(future)
     }
 
     /// Cancel and drain all context-owned async work before releasing the context.
@@ -720,8 +753,18 @@ static CTX_OPAQUE: LazyLock<RwLock<HashMap<usize, usize>>> =
 
 impl<C: JSContextImpl> Drop for JSContext<C> {
     fn drop(&mut self) {
-        if Rc::strong_count(&self.rc) == 1 {
-            // First, shutdown all context-scoped services.
+        if !self.owns_lifecycle {
+            return;
+        }
+
+        let owners = self.rc.lifecycle_owners.get();
+        debug_assert!(owners > 0, "JSContext lifecycle owner count underflow");
+        let remaining = owners.saturating_sub(1);
+        self.rc.lifecycle_owners.set(remaining);
+        if remaining == 0 {
+            // Borrowed handles may still exist in context-owned futures. Shutdown
+            // must start when the last lifecycle owner is released so those
+            // futures can be canceled instead of retaining the context forever.
             self.rc.services.shutdown();
 
             let raw_ctx = self.rc.inner.as_raw();
@@ -749,8 +792,14 @@ impl<C: JSContextImpl> Drop for JSContext<C> {
 
 impl<C: JSContextImpl> Clone for JSContext<C> {
     fn clone(&self) -> Self {
+        if self.owns_lifecycle {
+            self.rc
+                .lifecycle_owners
+                .set(self.rc.lifecycle_owners.get() + 1);
+        }
         Self {
             rc: Rc::clone(&self.rc),
+            owns_lifecycle: self.owns_lifecycle,
         }
     }
 }
@@ -759,9 +808,11 @@ impl<C: JSContextImpl> std::fmt::Debug for JSContext<C> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "JSContext {{ address: {:p}, ref_count: {} }}",
+            "JSContext {{ address: {:p}, ref_count: {}, lifecycle_owners: {}, owns_lifecycle: {} }}",
             self as *const _,
-            Rc::strong_count(&self.rc)
+            Rc::strong_count(&self.rc),
+            self.rc.lifecycle_owners.get(),
+            self.owns_lifecycle
         )
     }
 }

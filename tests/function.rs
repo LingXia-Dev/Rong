@@ -1,7 +1,20 @@
 use rong_macro::FromJSObject;
 use rong_test::function::JSParameterType;
 use rong_test::*;
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+};
 use tokio::time::{Duration, sleep};
+
+#[derive(Clone)]
+struct ShutdownFlag(Arc<AtomicBool>);
+
+impl JSContextService for ShutdownFlag {
+    fn on_shutdown(&self) {
+        self.0.store(true, Ordering::SeqCst);
+    }
+}
 
 #[derive(FromJSObject)]
 struct NestedQueryOptions {
@@ -131,6 +144,72 @@ fn test_jsfunc_call() {
         // Test 3: error. Rust clousre set the lenght of function.
         let result: Result<i32, _> = rust_func.call(None, ());
         assert!(result.is_err());
+        Ok(())
+    });
+}
+
+#[test]
+fn pending_call_async_does_not_keep_context_alive() {
+    let shutdown = Arc::new(AtomicBool::new(false));
+    let started = Arc::new(AtomicBool::new(false));
+    async_run!(|ctx: JSContext| async move {
+        ctx.set_service(ShutdownFlag(shutdown.clone()));
+        let started_for_callback = started.clone();
+        ctx.global().set(
+            "markCallStarted",
+            JSFunc::new(&ctx, move || {
+                started_for_callback.store(true, Ordering::SeqCst);
+            })?,
+        )?;
+        let pending: JSFunc = ctx.eval(Source::from_bytes(
+            "(async () => { markCallStarted(); await new Promise(() => {}); })",
+        ))?;
+        ctx.spawn_task(async move {
+            let _ = pending.call_async::<_, ()>(None, ()).await;
+        });
+
+        while !started.load(Ordering::SeqCst) {
+            tokio::task::yield_now().await;
+        }
+        drop(ctx);
+        tokio::task::yield_now().await;
+
+        assert!(
+            shutdown.load(Ordering::SeqCst),
+            "a pending JSFunc::call_async must not delay context shutdown"
+        );
+        Ok(())
+    });
+}
+
+#[test]
+fn pending_async_host_function_does_not_keep_context_alive() {
+    let shutdown = Arc::new(AtomicBool::new(false));
+    let started = Arc::new(AtomicBool::new(false));
+    async_run!(|ctx: JSContext| async move {
+        ctx.set_service(ShutdownFlag(shutdown.clone()));
+        let started_for_callback = started.clone();
+        let pending = JSFunc::new(&ctx, move |ctx: JSContext| {
+            let started = started_for_callback.clone();
+            async move {
+                started.store(true, Ordering::SeqCst);
+                std::future::pending::<()>().await;
+                JSValue::undefined(&ctx)
+            }
+        })?;
+        ctx.global().set("pendingHostFunction", pending)?;
+        ctx.eval::<JSValue>(Source::from_bytes("pendingHostFunction()"))?;
+
+        while !started.load(Ordering::SeqCst) {
+            tokio::task::yield_now().await;
+        }
+        drop(ctx);
+        tokio::task::yield_now().await;
+
+        assert!(
+            shutdown.load(Ordering::SeqCst),
+            "a pending async host function must not delay context shutdown"
+        );
         Ok(())
     });
 }

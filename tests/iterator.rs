@@ -41,6 +41,25 @@ fn iterator_sync() {
 }
 
 #[test]
+fn sync_iterator_does_not_keep_context_alive() {
+    let shutdown = Arc::new(AtomicBool::new(false));
+    async_run!(|ctx: JSContext| async move {
+        ctx.set_service(ShutdownFlag(shutdown.clone()));
+        let iterator = vec![1, 2, 3].to_js_iter(&ctx)?;
+        ctx.global().set("heldIterator", iterator)?;
+
+        drop(ctx);
+        tokio::task::yield_now().await;
+
+        assert!(
+            shutdown.load(Ordering::SeqCst),
+            "a synchronous iterator must not own its JS context"
+        );
+        Ok(())
+    });
+}
+
+#[test]
 fn iterator_async() {
     async_run!(async |ctx: JSContext| {
         ctx.global().set(

@@ -191,7 +191,6 @@ impl AbortSignal {
 
         for signal in unaborted_signals {
             let to_abort = new_signal.clone();
-            let ctx_for_closure = ctx.clone();
 
             let notifier = JSFunc::new_once(&ctx, move |signal: This<JSObject>| -> JSResult<()> {
                 let signal_obj = signal.borrow::<AbortSignal>()?;
@@ -206,7 +205,8 @@ impl AbortSignal {
                 }
                 drop(to_abort_obj);
 
-                Self::broadcast_abort(&ctx_for_closure, This(to_abort))
+                let callback_ctx = to_abort.context();
+                Self::broadcast_abort(&callback_ctx, This(to_abort))
             })?;
             Self::add_event_listener(This(signal), EventKey::from("abort"), notifier, false, true)?;
         }

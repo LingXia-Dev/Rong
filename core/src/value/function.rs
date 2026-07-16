@@ -176,11 +176,13 @@ impl<V: JSObjectOps> JSFunc<V> {
         R: FromJSValue<V> + 'static,
         V: JSObjectOps + JSTypeOf + 'static,
     {
-        let ctx = &self.context();
         let result = self.call_raw(this, args);
 
         if result.is_promise() {
-            let promise = Promise::from_js_value(ctx, JSValue::from_raw(ctx, result))?;
+            let promise = {
+                let ctx = self.context();
+                Promise::from_js_value(&ctx, JSValue::from_raw(&ctx, result))?
+            };
             promise.into_future::<R>().await
         } else {
             result.try_convert::<R>()
