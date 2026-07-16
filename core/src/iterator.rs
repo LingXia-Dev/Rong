@@ -1,4 +1,3 @@
-use crate::rong::spawn_local;
 use crate::{
     IntoJSValue, JSArrayOps, JSContext, JSErrorFactory, JSFunc, JSObject, JSObjectOps, JSResult,
     JSSymbol, JSTypeOf, JSValue, RongJSError, function::This,
@@ -169,14 +168,18 @@ where
         }
     }
 
-    pub async fn next(&self) -> JSResult<JSObject<V>> {
-        let result = JSObject::new(&self.ctx);
-        let mut stream = self.stream.lock().await;
+    async fn next_item(stream: Rc<Mutex<Pin<Box<dyn Stream<Item = T> + 'static>>>>) -> Option<T> {
+        let mut stream = stream.lock().await;
+        stream.next().await
+    }
 
-        match stream.next().await {
+    fn result_from_item(ctx: &JSContext<V::Context>, item: Option<T>) -> JSResult<JSObject<V>> {
+        let result = JSObject::new(ctx);
+
+        match item {
             Some(item) => {
                 result.set("done", false)?;
-                let value = <T as IntoJSValue<V>>::into_js_value(item, &self.ctx);
+                let value = <T as IntoJSValue<V>>::into_js_value(item, ctx);
                 if value.is_exception() {
                     return Err(RongJSError::from_thrown_value(value));
                 }
@@ -184,11 +187,15 @@ where
             }
             None => {
                 result.set("done", true)?;
-                result.set("value", JSValue::undefined(&self.ctx))?;
+                result.set("value", JSValue::undefined(ctx))?;
             }
         }
 
         Ok(result)
+    }
+
+    pub async fn next(&self) -> JSResult<JSObject<V>> {
+        Self::result_from_item(&self.ctx, Self::next_item(self.stream.clone()).await)
     }
 
     /// Install `next()`, `return()`, and `[Symbol.asyncIterator]` on an existing JS object.
@@ -197,18 +204,20 @@ where
     /// by dropping the underlying stream.
     pub fn install_on(&self, ctx: &JSContext<V::Context>, obj: &JSObject<V>) -> JSResult<()> {
         // next()
-        let iterator_instance = self.clone();
+        let stream_handle = self.stream.clone();
         let next_fn = JSFunc::new(ctx, move |ctx: JSContext<V::Context>| -> JSObject<V> {
             match ctx.promise() {
                 Ok((promise, resolve, reject)) => {
-                    let iter = iterator_instance.clone();
-                    spawn_local(async move {
-                        match iter.next().await {
+                    let stream = stream_handle.clone();
+                    ctx.spawn_task(async move {
+                        let item = Self::next_item(stream).await;
+                        let task_ctx = resolve.context();
+                        match Self::result_from_item(&task_ctx, item) {
                             Ok(result) => {
                                 let _ = resolve.call::<_, ()>(None, (result,));
                             }
                             Err(e) => {
-                                let err = e.into_catch_value(&ctx);
+                                let err = e.into_catch_value(&task_ctx);
                                 let _ = reject.call::<_, ()>(None, (err,));
                             }
                         }
@@ -231,13 +240,14 @@ where
             let stream = stream_handle.clone();
             match ctx.promise() {
                 Ok((promise, resolve, _reject)) => {
-                    spawn_local(async move {
+                    ctx.spawn_task(async move {
                         // Lock and replace with an empty stream to release resources
                         let mut guard = stream.lock().await;
                         *guard = Box::pin(futures::stream::empty());
-                        let result = JSObject::new(&ctx);
+                        let task_ctx = resolve.context();
+                        let result = JSObject::new(&task_ctx);
                         result.set("done", true).ok();
-                        result.set("value", JSValue::undefined(&ctx)).ok();
+                        result.set("value", JSValue::undefined(&task_ctx)).ok();
                         let _ = resolve.call::<_, ()>(None, (result,));
                     });
                     promise.into_object()
