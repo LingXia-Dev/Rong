@@ -458,6 +458,18 @@ mod tests {
             )
         }
 
+        async fn delayed_stream_body() -> impl axum::response::IntoResponse {
+            let (tx, rx) = tokio::sync::mpsc::channel(1);
+            tokio::spawn(async move {
+                tokio::time::sleep(Duration::from_millis(500)).await;
+                let _ = tx.send(Ok::<_, Infallible>("late".to_string())).await;
+            });
+            (
+                [(header::CONTENT_TYPE, "text/plain")],
+                Body::from_stream(tokio_stream::wrappers::ReceiverStream::new(rx)),
+            )
+        }
+
         async fn echo_json(
             method: AxumMethod,
             headers: AxumHeaderMap,
@@ -492,6 +504,7 @@ mod tests {
             .route("/bytes", get(bytes))
             .route("/json", get(json))
             .route("/stream", get(stream_body))
+            .route("/delayed-stream", get(delayed_stream_body))
             .route("/echo-json", post(echo_json));
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
@@ -577,6 +590,24 @@ mod tests {
             let body = collect_body(response.body).await.expect("stream body");
             assert_eq!(response.status, StatusCode::OK);
             assert_eq!(body.as_ref(), b"hello");
+        });
+    }
+
+    #[test]
+    fn request_timeout_includes_response_body() {
+        let _guard = crate::client::test_guard();
+        let handle = crate::RongExecutor::global().handle();
+        handle.block_on(async {
+            let addr = spawn_server().await;
+            let url = format!("http://{}/delayed-stream", addr);
+            let err = send_bytes(
+                empty_request(&url),
+                RequestOptions::new().with_request_timeout(Duration::from_millis(100)),
+            )
+            .await
+            .expect_err("the whole response must observe request_timeout");
+            assert_eq!(err.kind(), HttpErrorKind::Transport);
+            assert!(err.message().contains("request timeout"));
         });
     }
 

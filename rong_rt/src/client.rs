@@ -17,13 +17,30 @@ use std::io::Error;
 use std::sync::Mutex;
 use std::sync::{OnceLock, RwLock};
 use tokio::sync::{mpsc, oneshot};
-use tokio::time::{Duration, timeout};
+use tokio::time::{Duration, Instant, timeout};
 
 pub const DEFAULT_BLOCKING_BODY_LIMIT: usize = 512 * 1024;
 pub const DEFAULT_STREAM_COALESCE_TARGET: usize = 512 * 1024;
 pub const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
 const MIN_STREAM_COALESCE_TARGET: usize = 4 * 1024;
 const STREAM_CHAN_CAP: usize = 256;
+
+fn body_frame_timeout(
+    request_deadline: Option<Instant>,
+    read_frame_timeout: Duration,
+) -> Result<(Duration, bool), String> {
+    let Some(deadline) = request_deadline else {
+        return Ok((read_frame_timeout, false));
+    };
+    let remaining = deadline.saturating_duration_since(Instant::now());
+    if remaining.is_zero() {
+        return Err("request timeout".to_string());
+    }
+    Ok((
+        remaining.min(read_frame_timeout),
+        remaining <= read_frame_timeout,
+    ))
+}
 
 type HttpClient =
     Client<hyper_rustls::HttpsConnector<ProxyConnector<HttpConnector>>, BoxBody<Bytes, Error>>;
@@ -336,6 +353,7 @@ async fn process_request(
     request_timeout: Duration,
 ) -> Result<HttpResponse, String> {
     const READ_FRAME_TIMEOUT: Duration = Duration::from_secs(120);
+    let request_deadline = Instant::now().checked_add(request_timeout);
 
     let resp = if let Some(signal) = abort_signal.as_ref() {
         tokio::select! {
@@ -365,9 +383,11 @@ async fn process_request(
     if cl > 0 && cl <= small {
         let mut buf = Vec::with_capacity(cl);
         loop {
+            let (frame_timeout, request_limited) =
+                body_frame_timeout(request_deadline, READ_FRAME_TIMEOUT)?;
             if let Some(signal) = abort_signal.as_ref() {
                 tokio::select! {
-                    maybe = timeout(READ_FRAME_TIMEOUT, body.frame()) => {
+                    maybe = timeout(frame_timeout, body.frame()) => {
                         match maybe {
                             Ok(Some(Ok(frame))) => {
                                 if let Some(data) = frame.data_ref() { buf.extend_from_slice(data); }
@@ -375,13 +395,14 @@ async fn process_request(
                             }
                             Ok(Some(Err(e))) => return Err(format!("read frame: {}", e)),
                             Ok(None) => break,
+                            Err(_) if request_limited => return Err("request timeout".to_string()),
                             Err(_) => return Err("read timeout".to_string()),
                         }
                     }
                     _ = signal.cancelled() => return Err("aborted".to_string()),
                 }
             } else {
-                match timeout(READ_FRAME_TIMEOUT, body.frame()).await {
+                match timeout(frame_timeout, body.frame()).await {
                     Ok(Some(Ok(frame))) => {
                         if let Some(data) = frame.data_ref() {
                             buf.extend_from_slice(data);
@@ -392,6 +413,7 @@ async fn process_request(
                     }
                     Ok(Some(Err(e))) => return Err(format!("read frame: {}", e)),
                     Ok(None) => break,
+                    Err(_) if request_limited => return Err("request timeout".to_string()),
                     Err(_) => return Err("read timeout".to_string()),
                 }
             }
@@ -421,9 +443,17 @@ async fn process_request(
         };
         let mut aborted = false;
         loop {
+            let (frame_timeout, request_limited) =
+                match body_frame_timeout(request_deadline, READ_FRAME_TIMEOUT) {
+                    Ok(timeout) => timeout,
+                    Err(err) => {
+                        let _ = tx.send(Err(err)).await;
+                        break;
+                    }
+                };
             if let Some(signal) = abort_signal.as_ref() {
                 tokio::select! {
-                    maybe = timeout(READ_FRAME_TIMEOUT, body.frame()) => {
+                    maybe = timeout(frame_timeout, body.frame()) => {
                         match maybe {
                             Ok(Some(Ok(frame))) => {
                                 if let Ok(data) = frame.into_data()
@@ -434,13 +464,14 @@ async fn process_request(
                             }
                             Ok(Some(Err(e))) => { let _ = tx.send(Err(format!("read frame: {}", e))).await; break; }
                             Ok(None) => break,
+                            Err(_) if request_limited => { let _ = tx.send(Err("request timeout".to_string())).await; break; }
                             Err(_) => { let _ = tx.send(Err("read timeout".to_string())).await; break; }
                         }
                     }
                     _ = signal.cancelled() => { let _ = tx.send(Err("aborted".to_string())).await; aborted = true; break; }
                 }
             } else {
-                match timeout(READ_FRAME_TIMEOUT, body.frame()).await {
+                match timeout(frame_timeout, body.frame()).await {
                     Ok(Some(Ok(frame))) => {
                         if let Ok(data) = frame.into_data()
                             && !forward_or_buffer_chunk(&tx, &mut buf, data, coalesce_target).await
@@ -453,6 +484,10 @@ async fn process_request(
                         break;
                     }
                     Ok(None) => break,
+                    Err(_) if request_limited => {
+                        let _ = tx.send(Err("request timeout".to_string())).await;
+                        break;
+                    }
                     Err(_) => {
                         let _ = tx.send(Err("read timeout".to_string())).await;
                         break;

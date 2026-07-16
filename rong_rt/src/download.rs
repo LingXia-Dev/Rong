@@ -240,6 +240,12 @@ async fn download_resource(
     };
 
     let mut expected_partial_body_len = None;
+    if resume_offset == 0 && resp.status == http::StatusCode::PARTIAL_CONTENT {
+        return finalize_sink(
+            sink_opt,
+            Err("unexpected partial response without a resume range".to_string()),
+        );
+    }
     if resume_offset > 0 {
         if resp.status == http::StatusCode::OK {
             drop(file);
@@ -249,8 +255,39 @@ async fn download_resource(
             };
         } else if resp.status == http::StatusCode::PARTIAL_CONTENT {
             match content_range(&resp.headers) {
-                Ok(ContentRange::Bytes { start, end, .. }) if start == resume_offset => {
-                    expected_partial_body_len = Some(end - start + 1);
+                Ok(ContentRange::Bytes {
+                    start,
+                    end,
+                    complete_length,
+                }) if start == resume_offset => {
+                    let range_end = end.checked_add(1).ok_or_else(|| {
+                        "resume Content-Range end exceeds supported length".to_string()
+                    });
+                    let range_end = match range_end {
+                        Ok(range_end) => range_end,
+                        Err(e) => return finalize_sink(sink_opt, Err(e)),
+                    };
+                    match complete_length {
+                        Some(length) if range_end == length => {
+                            expected_partial_body_len = Some(end - start + 1);
+                        }
+                        Some(length) => {
+                            return finalize_sink(
+                                sink_opt,
+                                Err(format!(
+                                    "resume Content-Range ends before complete length: end {}, length {}",
+                                    end, length
+                                )),
+                            );
+                        }
+                        None => {
+                            return finalize_sink(
+                                sink_opt,
+                                Err("resume Content-Range must include a complete length"
+                                    .to_string()),
+                            );
+                        }
+                    }
                 }
                 Ok(ContentRange::Bytes { start, .. }) => {
                     return finalize_sink(
@@ -920,6 +957,77 @@ mod tests {
                 part.exists(),
                 "partial data should remain available for retry"
             );
+        });
+    }
+
+    #[test]
+    fn fresh_download_rejects_unsolicited_partial_response() {
+        let _guard = crate::client::test_guard();
+        let handle = crate::RongExecutor::global().handle();
+        handle.block_on(async {
+            let complete: &'static [u8] = b"abcdefghijklmnopqrstuvwxyz0123456789";
+            let addr = spawn_bad_206_server(&complete[..5]).await;
+            let temp = tempfile::tempdir().expect("temporary download directory");
+            let dest = temp.path().join("download.bin");
+
+            let err = download(
+                DownloadOptions::new(format!("http://{addr}/file"), &dest),
+                None,
+            )
+            .await
+            .expect_err("an unsolicited partial response must not be finalized");
+            assert!(err.contains("without a resume range"));
+
+            assert!(!dest.exists());
+        });
+    }
+
+    #[test]
+    fn resumed_download_rejects_range_that_ends_before_complete_length() {
+        let _guard = crate::client::test_guard();
+        let handle = crate::RongExecutor::global().handle();
+        handle.block_on(async {
+            use axum::Router;
+            use axum::body::Body;
+            use axum::http::StatusCode;
+            use axum::response::Response;
+            use axum::routing::get;
+
+            let complete: &'static [u8] = b"abcdefghijklmnopqrstuvwxyz0123456789";
+            let app = Router::new().route(
+                "/file",
+                get(move || async move {
+                    Response::builder()
+                        .status(StatusCode::PARTIAL_CONTENT)
+                        .header(
+                            http::header::CONTENT_RANGE,
+                            format!("bytes 10-14/{}", complete.len()),
+                        )
+                        .body(Body::from(complete[10..15].to_vec()))
+                        .unwrap()
+                }),
+            );
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let addr = listener.local_addr().unwrap();
+            tokio::spawn(async move {
+                axum::serve(listener, app).await.unwrap();
+            });
+
+            let temp = tempfile::tempdir().expect("temporary download directory");
+            let dest = temp.path().join("download.bin");
+            let part = dest.with_extension("part");
+            tokio::fs::write(&part, &complete[..10]).await.unwrap();
+
+            let err = download(
+                DownloadOptions::new(format!("http://{addr}/file"), &dest).with_resume(),
+                None,
+            )
+            .await
+            .expect_err("an incomplete open-ended range must not be finalized");
+            assert!(err.contains("ends before complete length"));
+
+            assert!(!dest.exists());
+            assert!(part.exists());
         });
     }
 
