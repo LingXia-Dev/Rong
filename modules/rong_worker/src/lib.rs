@@ -16,15 +16,16 @@
 //! });
 //! ```
 
-use rong::{Source, spawn_local, *};
+use rong::{Source, *};
 use std::cell::RefCell;
+use std::ops::Deref;
 use std::path::PathBuf;
-use std::rc::Rc;
+use std::rc::{Rc, Weak};
 use std::sync::{
     Arc, OnceLock,
     atomic::{AtomicBool, Ordering},
 };
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, watch};
 use tracing::{error, warn};
 
 type WorkerInitializer = Box<dyn Fn(&JSContext) -> JSResult<()> + Send + Sync>;
@@ -62,7 +63,6 @@ fn js_value_to_json(ctx: &JSContext, data: &JSValue) -> JSResult<String> {
 /// Messages from main thread → worker thread.
 enum ToWorker {
     Message(String),
-    Terminate,
 }
 
 /// Messages from worker thread → main thread.
@@ -71,34 +71,113 @@ enum FromWorker {
     Error(String),
 }
 
+#[derive(Clone)]
+struct WorkerLifecycle(Rc<WorkerLifecycleInner>);
+
+struct WorkerLifecycleInner {
+    to_worker: mpsc::Sender<ToWorker>,
+    terminate_tx: watch::Sender<bool>,
+    terminated: Arc<AtomicBool>,
+    polling_handle: Rc<RefCell<Option<tokio::task::AbortHandle>>>,
+    thread_handle: Arc<std::sync::Mutex<Option<std::thread::JoinHandle<()>>>>,
+    thread_stopped: Arc<AtomicBool>,
+}
+
+struct WorkerThreadExit(Arc<AtomicBool>);
+
+impl Drop for WorkerThreadExit {
+    fn drop(&mut self) {
+        self.0.store(true, Ordering::Release);
+    }
+}
+
+impl Deref for WorkerLifecycle {
+    type Target = WorkerLifecycleInner;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl WorkerLifecycle {
+    fn terminate(&self) {
+        self.terminated.store(true, Ordering::Release);
+        if !self.thread_stopped.load(Ordering::Acquire) {
+            self.terminate_tx.send_replace(true);
+        }
+
+        if let Some(handle) = self.polling_handle.borrow_mut().take() {
+            handle.abort();
+        }
+
+        let thread_handle = self
+            .thread_handle
+            .lock()
+            .ok()
+            .and_then(|mut guard| guard.take());
+        if let Some(handle) = thread_handle {
+            RongExecutor::global().spawn_blocking(move || {
+                let _ = handle.join();
+            });
+        }
+    }
+}
+
+#[derive(Clone, Default)]
+struct WorkerContextRegistry {
+    workers: Rc<RefCell<Vec<Weak<WorkerLifecycleInner>>>>,
+}
+
+impl WorkerContextRegistry {
+    fn get_or_init(ctx: &JSContext) -> Self {
+        if let Some(registry) = ctx.get_service::<Self>() {
+            return registry.clone();
+        }
+
+        let registry = Self::default();
+        ctx.set_service(registry.clone());
+        registry
+    }
+
+    fn register(&self, lifecycle: &WorkerLifecycle) {
+        let mut workers = self.workers.borrow_mut();
+        workers.retain(|worker| worker.strong_count() > 0);
+        workers.push(Rc::downgrade(&lifecycle.0));
+    }
+}
+
+impl JSContextService for WorkerContextRegistry {
+    fn on_shutdown(&self) {
+        for worker in self.workers.borrow_mut().drain(..) {
+            if let Some(worker) = worker.upgrade() {
+                WorkerLifecycle(worker).terminate();
+            }
+        }
+    }
+}
+
 #[js_class]
 pub struct Worker {
-    /// Send commands to the worker thread.
-    to_worker: mpsc::Sender<ToWorker>,
+    lifecycle: WorkerLifecycle,
     /// Receive messages from the worker thread.
     from_worker: Arc<tokio::sync::Mutex<mpsc::Receiver<FromWorker>>>,
     /// JS callback for incoming messages.
     message_handler: Rc<RefCell<Option<JSFunc>>>,
     /// JS callback for errors.
     error_handler: Rc<RefCell<Option<JSFunc>>>,
-    /// Whether terminate() has been called.
-    terminated: Arc<AtomicBool>,
     /// Ensure the main-side polling loop starts only once.
     polling_started: Arc<AtomicBool>,
-    /// Handle for the main-side polling loop so terminate/shutdown can abort it.
-    polling_handle: Rc<RefCell<Option<tokio::task::JoinHandle<()>>>>,
-    /// Thread join handle for forceful shutdown.
-    thread_handle: Arc<std::sync::Mutex<Option<std::thread::JoinHandle<()>>>>,
 }
 
 #[js_class]
 impl Worker {
     #[js_method(constructor)]
-    fn new(_ctx: JSContext, path: String) -> JSResult<Self> {
+    fn new(ctx: JSContext, path: String) -> JSResult<Self> {
         // main → worker
         let (to_worker_tx, to_worker_rx) = mpsc::channel::<ToWorker>(256);
         // worker → main
         let (from_worker_tx, from_worker_rx) = mpsc::channel::<FromWorker>(256);
+        let (terminate_tx, terminate_rx) = watch::channel(false);
 
         let script_path = if PathBuf::from(&path).is_absolute() {
             PathBuf::from(&path)
@@ -110,9 +189,13 @@ impl Worker {
 
         let terminated = Arc::new(AtomicBool::new(false));
         let terminated_thread = terminated.clone();
+        let terminate_thread_tx = terminate_tx.clone();
+        let thread_stopped = Arc::new(AtomicBool::new(false));
+        let thread_stopped_worker = thread_stopped.clone();
 
         // Spawn a dedicated OS thread with its own tokio runtime + JS runtime.
         let thread_handle = std::thread::spawn(move || {
+            let _exit = WorkerThreadExit(thread_stopped_worker);
             let rt = tokio::runtime::Builder::new_current_thread()
                 .enable_all()
                 .build()
@@ -126,33 +209,42 @@ impl Worker {
                         to_worker_rx,
                         from_worker_tx,
                         terminated_thread,
+                        terminate_thread_tx,
+                        terminate_rx,
                     ))
                     .await;
             });
         });
 
-        Ok(Worker {
+        let lifecycle = WorkerLifecycle(Rc::new(WorkerLifecycleInner {
             to_worker: to_worker_tx,
+            terminate_tx,
+            terminated,
+            polling_handle: Rc::new(RefCell::new(None)),
+            thread_handle: Arc::new(std::sync::Mutex::new(Some(thread_handle))),
+            thread_stopped,
+        }));
+        WorkerContextRegistry::get_or_init(&ctx).register(&lifecycle);
+
+        Ok(Worker {
+            lifecycle,
             from_worker: Arc::new(tokio::sync::Mutex::new(from_worker_rx)),
             message_handler: Rc::new(RefCell::new(None)),
             error_handler: Rc::new(RefCell::new(None)),
-            terminated,
             polling_started: Arc::new(AtomicBool::new(false)),
-            polling_handle: Rc::new(RefCell::new(None)),
-            thread_handle: Arc::new(std::sync::Mutex::new(Some(thread_handle))),
         })
     }
 
     /// Send a message to the worker.
     #[js_method(rename = "postMessage")]
     fn post_message(&self, ctx: JSContext, data: JSValue) -> JSResult<()> {
-        if self.terminated.load(Ordering::Acquire) {
+        if self.lifecycle.terminated.load(Ordering::Acquire) {
             return Ok(());
         }
 
         let json = js_value_to_json(&ctx, &data)?;
-        let tx = self.to_worker.clone();
-        spawn_local(async move {
+        let tx = self.lifecycle.to_worker.clone();
+        ctx.spawn_task(async move {
             let _ = tx.send(ToWorker::Message(json)).await;
         });
         Ok(())
@@ -161,30 +253,7 @@ impl Worker {
     /// Terminate the worker.
     #[js_method]
     fn terminate(&self) -> JSResult<()> {
-        if self.terminated.swap(true, Ordering::AcqRel) {
-            return Ok(());
-        }
-
-        if let Some(handle) = self.polling_handle.borrow_mut().take() {
-            handle.abort();
-        }
-
-        let tx = self.to_worker.clone();
-        spawn_local(async move {
-            let _ = tx.send(ToWorker::Terminate).await;
-        });
-
-        let thread_handle = self
-            .thread_handle
-            .lock()
-            .ok()
-            .and_then(|mut guard| guard.take());
-        if let Some(handle) = thread_handle {
-            RongExecutor::global().spawn_blocking(move || {
-                let _ = handle.join();
-            });
-        }
-
+        self.lifecycle.terminate();
         Ok(())
     }
 
@@ -214,11 +283,11 @@ impl Worker {
         let from_worker = self.from_worker.clone();
         let message_handler = self.message_handler.clone();
         let error_handler = self.error_handler.clone();
-        let terminated = self.terminated.clone();
-        let polling_handle_slot = self.polling_handle.clone();
+        let terminated = self.lifecycle.terminated.clone();
+        let polling_handle_slot = self.lifecycle.polling_handle.clone();
+        let polling_ctx = ctx.clone();
 
-        // This runs on the main thread's LocalSet via spawn_local.
-        let polling_handle = spawn_local(async move {
+        let polling_handle = ctx.spawn_task_with_handle(async move {
             loop {
                 if terminated.load(Ordering::Acquire) {
                     break;
@@ -235,18 +304,18 @@ impl Worker {
                             break;
                         }
 
-                        match JSObject::from_json_string(&ctx, &json_str) {
+                        match JSObject::from_json_string(&polling_ctx, &json_str) {
                             Ok(value) => {
                                 let handler = message_handler.borrow().clone();
                                 if let Some(func) = handler {
-                                    let event = JSObject::new(&ctx);
+                                    let event = JSObject::new(&polling_ctx);
                                     event.set("data", value).ok();
                                     if let Err(e) = func.call_async::<_, ()>(None, (event,)).await {
                                         let err_handler = error_handler.borrow().clone();
                                         if let Some(err_fn) = err_handler {
-                                            let err_message = worker_error_message(&ctx, e);
+                                            let err_message = worker_error_message(&polling_ctx, e);
                                             let err_event =
-                                                worker_error_event(&ctx, err_message.as_str());
+                                                worker_error_event(&polling_ctx, err_message.as_str());
                                             let _ = err_fn
                                                 .call_async::<_, ()>(None, (err_event,))
                                                 .await;
@@ -264,7 +333,7 @@ impl Worker {
                     Some(FromWorker::Error(message)) => {
                         let err_handler = error_handler.borrow().clone();
                         if let Some(err_fn) = err_handler {
-                            let err_event = worker_error_event(&ctx, &message);
+                            let err_event = worker_error_event(&polling_ctx, &message);
                             let _ = err_fn.call_async::<_, ()>(None, (err_event,)).await;
                         } else {
                             error!(target: "rong", message = %message, "worker emitted error event without handler");
@@ -274,7 +343,7 @@ impl Worker {
                 }
             }
         });
-        *polling_handle_slot.borrow_mut() = Some(polling_handle);
+        *polling_handle_slot.borrow_mut() = polling_handle;
     }
 
     #[js_method(gc_mark)]
@@ -290,6 +359,12 @@ impl Worker {
     }
 }
 
+impl Drop for Worker {
+    fn drop(&mut self) {
+        self.lifecycle.terminate();
+    }
+}
+
 // ── Worker thread logic (runs on a separate OS thread) ─────────────
 
 impl Worker {
@@ -298,9 +373,15 @@ impl Worker {
         mut to_worker_rx: mpsc::Receiver<ToWorker>,
         from_worker_tx: mpsc::Sender<FromWorker>,
         terminated: Arc<AtomicBool>,
+        terminate_tx: watch::Sender<bool>,
+        mut terminate_rx: watch::Receiver<bool>,
     ) {
         let runtime = RongJS::runtime();
         let ctx = runtime.context();
+
+        if *terminate_rx.borrow() {
+            return;
+        }
 
         // Initialize worker context.
         if let Some(initializer) = WORKER_INITIALIZER.get() {
@@ -319,41 +400,44 @@ impl Worker {
 
         // postMessage: worker → main  (sends JSON over the channel)
         let tx = from_worker_tx.clone();
-        let post_ctx = ctx.clone();
-        let post_message_fn = JSFunc::new(&ctx, move |data: JSValue| {
-            let c = post_ctx.clone();
+        let post_message_fn = JSFunc::new(&ctx, move |ctx: JSContext, data: JSValue| {
             let t = tx.clone();
-            spawn_local(async move {
-                match js_value_to_json(&c, &data) {
-                    Ok(json) => {
-                        let _ = t.send(FromWorker::Message(json)).await;
-                    }
-                    Err(e) => {
-                        let _ = t
-                            .send(FromWorker::Error(format!(
-                                "postMessage serialization failed: {}",
-                                worker_error_message(&c, e)
-                            )))
-                            .await;
-                    }
-                }
+            let message = match js_value_to_json(&ctx, &data) {
+                Ok(json) => FromWorker::Message(json),
+                Err(e) => FromWorker::Error(format!(
+                    "postMessage serialization failed: {}",
+                    worker_error_message(&ctx, e)
+                )),
+            };
+            ctx.spawn_task(async move {
+                let _ = t.send(message).await;
             });
         });
         ctx.global().set("postMessage", post_message_fn).ok();
 
         // close() and self
         let terminated_close = terminated.clone();
+        let terminate_close = terminate_tx.clone();
         let close_fn = JSFunc::new(&ctx, move || {
             terminated_close.store(true, Ordering::Release);
+            terminate_close.send_replace(true);
         });
         let global = ctx.global();
         global.set("close", close_fn).ok();
         global.set("self", global.clone()).ok();
 
         // Load and execute the worker script.
-        match Source::from_path(&ctx, &script_path).await {
+        let source = tokio::select! {
+            _ = terminate_rx.changed() => return,
+            source = Source::from_path(&ctx, &script_path) => source,
+        };
+        match source {
             Ok(source) => {
-                if let Err(e) = ctx.eval_async::<()>(source).await {
+                let result = tokio::select! {
+                    _ = terminate_rx.changed() => return,
+                    result = ctx.eval_async::<()>(source) => result,
+                };
+                if let Err(e) = result {
                     let _ = from_worker_tx
                         .send(FromWorker::Error(format!(
                             "script error in {:?}: {}",
@@ -376,12 +460,22 @@ impl Worker {
         }
 
         // Message loop: receive from main, dispatch to onmessage.
-        loop {
+        'message_loop: loop {
             if terminated.load(Ordering::Acquire) {
                 break;
             }
 
-            match to_worker_rx.recv().await {
+            let message = tokio::select! {
+                changed = terminate_rx.changed() => {
+                    if changed.is_err() || *terminate_rx.borrow() {
+                        break;
+                    }
+                    continue;
+                }
+                message = to_worker_rx.recv() => message,
+            };
+
+            match message {
                 Some(ToWorker::Message(json_str)) => {
                     match JSObject::from_json_string(&ctx, &json_str) {
                         Ok(data) => {
@@ -390,7 +484,11 @@ impl Worker {
                             {
                                 let event = JSObject::new(&ctx);
                                 event.set("data", data).ok();
-                                if let Err(e) = func.call_async::<_, ()>(None, (event,)).await {
+                                let result = tokio::select! {
+                                    _ = terminate_rx.changed() => break 'message_loop,
+                                    result = func.call_async::<_, ()>(None, (event,)) => result,
+                                };
+                                if let Err(e) = result {
                                     let _ = from_worker_tx
                                         .send(FromWorker::Error(format!(
                                             "worker onmessage handler error: {}",
@@ -410,7 +508,7 @@ impl Worker {
                         }
                     }
                 }
-                Some(ToWorker::Terminate) | None => break,
+                None => break,
             }
         }
     }
@@ -434,6 +532,17 @@ fn worker_error_event(ctx: &JSContext, message: &str) -> JSObject {
 mod tests {
     use super::*;
     use rong_test::*;
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+    use std::time::Duration;
+
+    #[derive(Clone)]
+    struct ShutdownFlag(Arc<AtomicBool>);
+
+    impl JSContextService for ShutdownFlag {
+        fn on_shutdown(&self) {
+            self.0.store(true, Ordering::SeqCst);
+        }
+    }
 
     #[test]
     fn test_worker() {
@@ -465,5 +574,56 @@ mod tests {
 
             Ok(())
         })
+    }
+
+    #[test]
+    fn worker_polling_stops_with_context() {
+        let shutdown = Arc::new(AtomicBool::new(false));
+        async_run!(|ctx: JSContext| async move {
+            init(&ctx)?;
+            ctx.set_service(ShutdownFlag(shutdown.clone()));
+
+            let script = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("../../tests/unit/worker-pending.js")
+                .canonicalize()
+                .expect("worker fixture");
+            let callback_ctx = ctx.global().context();
+            let worker = Worker::new(callback_ctx, script.to_string_lossy().into_owned())?;
+            let lifecycle = worker.lifecycle.clone();
+            let messages = Arc::new(AtomicUsize::new(0));
+            let messages_for_callback = messages.clone();
+            worker.set_onmessage(
+                ctx.global().context(),
+                JSFunc::new(&ctx, move |_event: JSObject| {
+                    messages_for_callback.fetch_add(1, Ordering::SeqCst);
+                })?,
+            )?;
+            worker.post_message(ctx.global().context(), JSValue::from_rust(&ctx, "start"))?;
+            let worker = Class::lookup::<Worker>(&ctx)?.instance(worker);
+            ctx.global().set("heldWorker", worker)?;
+            tokio::time::timeout(Duration::from_secs(2), async {
+                while messages.load(Ordering::SeqCst) < 2 {
+                    tokio::task::yield_now().await;
+                }
+            })
+            .await
+            .expect("worker should enter its pending onmessage handler");
+
+            drop(ctx);
+            tokio::time::timeout(Duration::from_secs(2), async {
+                while !lifecycle.thread_stopped.load(Ordering::Acquire) {
+                    tokio::task::yield_now().await;
+                }
+            })
+            .await
+            .expect("context shutdown should stop a pending worker thread");
+
+            assert!(shutdown.load(Ordering::SeqCst));
+            assert!(
+                lifecycle.terminated.load(Ordering::Acquire),
+                "context shutdown must terminate registered workers"
+            );
+            Ok(())
+        });
     }
 }
