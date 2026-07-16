@@ -132,7 +132,10 @@ where
         self.inner
     }
 
-    /// Returns the context associated with this value.
+    /// Returns a non-owning context handle associated with this value.
+    ///
+    /// The handle can be used while a runtime-created context owner is alive, but does
+    /// not delay context shutdown when retained by callbacks or async work.
     pub fn context(&self) -> JSContext<V::Context> {
         JSContext::from_borrowed_raw_ptr(self.as_value().as_raw_context())
     }
