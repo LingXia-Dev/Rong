@@ -239,6 +239,7 @@ async fn download_resource(
         redirect_count += 1;
     };
 
+    let mut expected_partial_body_len = None;
     if resume_offset > 0 {
         if resp.status == http::StatusCode::OK {
             drop(file);
@@ -248,7 +249,9 @@ async fn download_resource(
             };
         } else if resp.status == http::StatusCode::PARTIAL_CONTENT {
             match content_range(&resp.headers) {
-                Ok(ContentRange::Bytes { start, .. }) if start == resume_offset => {}
+                Ok(ContentRange::Bytes { start, end, .. }) if start == resume_offset => {
+                    expected_partial_body_len = Some(end - start + 1);
+                }
                 Ok(ContentRange::Bytes { start, .. }) => {
                     return finalize_sink(
                         sink_opt,
@@ -312,9 +315,23 @@ async fn download_resource(
         }
     };
 
+    let mut received_body_len = 0u64;
+    let check_partial_body_len = |chunk_len: usize, received: &mut u64| {
+        *received = received
+            .checked_add(chunk_len as u64)
+            .ok_or_else(|| "response body length overflow".to_string())?;
+        if expected_partial_body_len.is_some_and(|expected| *received > expected) {
+            return Err("response body exceeds Content-Range length".to_string());
+        }
+        Ok(())
+    };
+
     match resp.body {
         HttpBody::Empty => {}
         HttpBody::Small(buf) => {
+            if let Err(e) = check_partial_body_len(buf.len(), &mut received_body_len) {
+                return finalize_sink(sink_opt, Err(e));
+            }
             forward(buf.as_ref(), &mut sink_opt, &mut sink_active);
             if let Err(e) = file.write_all(buf.as_ref()).await {
                 return finalize_sink(sink_opt, Err(format!("write chunk: {}", e)));
@@ -327,6 +344,9 @@ async fn download_resource(
                     Err(e) => return finalize_sink(sink_opt, Err(e)),
                 };
 
+                if let Err(e) = check_partial_body_len(bytes.len(), &mut received_body_len) {
+                    return finalize_sink(sink_opt, Err(e));
+                }
                 forward(bytes.as_ref(), &mut sink_opt, &mut sink_active);
 
                 if let Err(e) = file.write_all(bytes.as_ref()).await {
@@ -334,6 +354,18 @@ async fn download_resource(
                 }
             }
         }
+    }
+
+    if let Some(expected) = expected_partial_body_len
+        && received_body_len != expected
+    {
+        return finalize_sink(
+            sink_opt,
+            Err(format!(
+                "response body length {} does not match Content-Range length {}",
+                received_body_len, expected
+            )),
+        );
     }
 
     if let Err(e) = file.flush().await {
@@ -833,6 +865,61 @@ mod tests {
             assert_eq!(written, b"partial");
             assert!(!dest.exists(), "destination should not be finalized");
             let _ = tokio::fs::remove_file(&part).await;
+        });
+    }
+
+    #[test]
+    fn download_resume_rejects_truncated_206_body() {
+        let _guard = crate::client::test_guard();
+        let handle = crate::RongExecutor::global().handle();
+        handle.block_on(async {
+            use axum::Router;
+            use axum::body::Body;
+            use axum::http::StatusCode;
+            use axum::response::Response;
+            use axum::routing::get;
+
+            let complete: &'static [u8] = b"abcdefghijklmnopqrstuvwxyz0123456789";
+            let app = Router::new().route(
+                "/file",
+                get(move || async move {
+                    Response::builder()
+                        .status(StatusCode::PARTIAL_CONTENT)
+                        .header(
+                            http::header::CONTENT_RANGE,
+                            format!("bytes 10-{}/{}", complete.len() - 1, complete.len()),
+                        )
+                        .body(Body::from(complete[10..15].to_vec()))
+                        .unwrap()
+                }),
+            );
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let addr = listener.local_addr().unwrap();
+            tokio::spawn(async move {
+                axum::serve(listener, app).await.unwrap();
+            });
+
+            let temp = tempfile::tempdir().expect("temporary download directory");
+            let dest = temp.path().join("download.bin");
+            let part = dest.with_extension("part");
+            tokio::fs::write(&part, &complete[..10]).await.unwrap();
+
+            let err = download(
+                DownloadOptions::new(format!("http://{addr}/file"), &dest).with_resume(),
+                None,
+            )
+            .await
+            .expect_err("a truncated partial response must not be finalized as a valid download");
+            assert!(
+                err.contains("does not match Content-Range length"),
+                "unexpected download error: {err}"
+            );
+
+            assert!(!dest.exists(), "corrupt download must not be finalized");
+            assert!(
+                part.exists(),
+                "partial data should remain available for retry"
+            );
         });
     }
 
