@@ -3,7 +3,6 @@ use crate::{QJSContext, qjs};
 use rong_core::{
     JSContextImpl, JSRawContext, JSTypeOf, JSValueImpl, RongJSError, impl_js_converter,
 };
-use std::ffi::CString;
 use std::hash::Hash;
 use std::rc::Rc;
 use std::slice;
@@ -204,17 +203,40 @@ impl JSValueImpl for QJSValue {
     }
 
     fn from_json_str(ctx: &Self::Context, str: &str) -> Self {
-        // Create a C string from Rust string slice
-        let c_str = std::ffi::CString::new(str).unwrap();
         // Parse JSON string into JS value
-        let raw =
-            unsafe { qjs::JS_ParseJSON(ctx.to_raw(), c_str.as_ptr(), str.len(), c"JSON".as_ptr()) };
+        let mut json = str.as_bytes().to_vec();
+        json.push(0);
+        let raw = unsafe {
+            qjs::JS_ParseJSON(
+                ctx.to_raw(),
+                json.as_ptr().cast(),
+                str.len(),
+                c"JSON".as_ptr(),
+            )
+        };
         ctx.to_owned_value(raw)
     }
 
     fn create_symbol(ctx: &Self::Context, description: &str) -> Self {
-        let description = CString::new(description).unwrap();
-        let raw = unsafe { qjs::JS_NewSymbol(ctx.to_raw(), description.as_ptr(), false) };
+        let ctx_ptr = ctx.to_raw();
+        let raw = unsafe {
+            let global = qjs::JS_GetGlobalObject(ctx_ptr);
+            let symbol = qjs::JS_GetPropertyStr(ctx_ptr, global, c"Symbol".as_ptr());
+            let description =
+                qjs::JS_NewStringLen(ctx_ptr, description.as_ptr().cast(), description.len());
+            let mut args = [description];
+            let value = qjs::JS_Call(
+                ctx_ptr,
+                symbol,
+                qjs::QJS_NewUndefined(ctx_ptr),
+                1,
+                args.as_mut_ptr(),
+            );
+            qjs::JS_FreeValue(ctx_ptr, description);
+            qjs::JS_FreeValue(ctx_ptr, symbol);
+            qjs::JS_FreeValue(ctx_ptr, global);
+            value
+        };
         ctx.to_owned_value(raw)
     }
 

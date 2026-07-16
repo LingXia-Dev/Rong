@@ -46,13 +46,12 @@ impl JSArrayOps for QJSValue {
         let ctx = self.ctx;
         unsafe {
             let status = qjs::JS_SetPropertyUint32(ctx, self.value, index, value.into_raw_value());
-            if status != 0 {
+            if status >= 0 {
                 let raw = qjs::QJS_NewUndefined(ctx);
                 QJSValue::from_owned_raw(ctx, raw)
             } else {
-                let err =
-                    qjs::JS_ThrowPlainError(ctx, c"QJS: set array index %u failed".as_ptr(), index);
-                QJSValue::from_owned_raw(ctx, err).with_exception()
+                let exception = qjs::JS_GetException(ctx);
+                QJSValue::from_owned_raw(ctx, exception).with_exception()
             }
         }
     }

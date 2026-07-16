@@ -26,6 +26,15 @@ fn test_array_basic_operations() {
 }
 
 #[test]
+fn array_set_surfaces_engine_write_failures() {
+    run(|ctx| {
+        let array: JSArray = ctx.eval(Source::from_bytes("Object.freeze([])"))?;
+        assert!(array.set(0, 1).is_err());
+        Ok(())
+    });
+}
+
+#[test]
 fn test_array_iteration() {
     run(|ctx| {
         // Create array from JavaScript

@@ -83,7 +83,15 @@ impl JSObjectOps for QJSValue {
 
         // JS_SetPrototype clone input prototype
         let v = unsafe { qjs::JS_SetPrototype(self.ctx, self.value, p) };
-        v != 0
+        if v < 0 {
+            unsafe {
+                let exception = qjs::JS_GetException(self.ctx);
+                qjs::JS_FreeValue(self.ctx, exception);
+            }
+            false
+        } else {
+            v != 0
+        }
     }
 
     fn define_property(
