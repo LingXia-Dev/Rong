@@ -78,23 +78,49 @@ impl TextEncoder {
             // Then, check if the typed array is Uint8Array
             if typed_array.kind() == JSTypedArrayKind::Uint8 {
                 // Get the underlying buffer and its length
+                let byte_offset = typed_array.byte_offset();
                 let buffer_len = typed_array.byte_length();
                 let mut buffer = typed_array.buffer()?;
-                let buffer_data = buffer.as_mut_slice();
+                let buffer_end = byte_offset.checked_add(buffer_len).ok_or_else(|| {
+                    HostError::new(
+                        rong::error::E_OUT_OF_RANGE,
+                        "Uint8Array view range overflow",
+                    )
+                    .with_name("RangeError")
+                })?;
+                let buffer_data = buffer
+                    .as_mut_slice()
+                    .get_mut(byte_offset..buffer_end)
+                    .ok_or_else(|| {
+                        HostError::new(
+                            rong::error::E_OUT_OF_RANGE,
+                            "Uint8Array view exceeds its backing buffer",
+                        )
+                        .with_name("RangeError")
+                    })?;
 
-                // Convert input string to UTF-8 bytes
-                let input_bytes = input.as_bytes();
+                let mut read = 0usize;
+                let mut written = 0usize;
+                for ch in input.chars() {
+                    let encoded_len = ch.len_utf8();
+                    let Some(end) = written.checked_add(encoded_len) else {
+                        break;
+                    };
+                    if end > buffer_data.len() {
+                        break;
+                    }
 
-                // Calculate how many bytes we can write
-                let bytes_to_write = std::cmp::min(buffer_len, input_bytes.len());
-
-                // Copy bytes into destination buffer
-                buffer_data[..bytes_to_write].copy_from_slice(&input_bytes[..bytes_to_write]);
+                    let mut encoded = [0u8; 4];
+                    let bytes = ch.encode_utf8(&mut encoded).as_bytes();
+                    buffer_data[written..end].copy_from_slice(bytes);
+                    written = end;
+                    read += ch.len_utf16();
+                }
 
                 // Create result object with read/written counts
                 let result = JSObject::new(&ctx);
-                result.set("read", bytes_to_write as f64)?;
-                result.set("written", bytes_to_write as f64)?;
+                result.set("read", read as f64)?;
+                result.set("written", written as f64)?;
 
                 return Ok(result);
             }
