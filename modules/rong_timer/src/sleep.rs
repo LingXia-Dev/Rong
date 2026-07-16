@@ -1,8 +1,8 @@
 use rong::{HostError, JSContext, JSDate, JSFunc, JSResult, JSValue, function::Optional};
-use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use tokio::sync::Notify;
 use tokio::time::sleep;
+
+use super::{TimerCancellation, TimerRegistration};
 
 fn type_error(message: &str) -> HostError {
     HostError::new(rong::error::E_TYPE, message).with_name("TypeError")
@@ -65,23 +65,19 @@ fn parse_sleep_sync_delay(value: Optional<JSValue>) -> JSResult<u64> {
 async fn sleep_async(ctx: JSContext, delay: Optional<JSValue>) -> JSResult<()> {
     let delay = parse_sleep_delay(delay)?;
 
-    let notifier = Arc::new(Notify::new());
-    let notifier_clone = notifier.clone();
-
-    let registry = ctx
-        .runtime()
-        .get_or_init_service::<super::TimerRegistry>()
-        .clone();
+    let registry = super::TimerRegistry::ensure(&ctx);
     let timer_id = registry.next_id();
-    registry.register_timer(timer_id, notifier);
-
-    let result = tokio::select! {
-        _ = sleep(Duration::from_millis(delay)) => Ok(()),
-        _ = notifier_clone.notified() => Ok(()),
+    let (cancel, mut cancel_rx) = TimerCancellation::new();
+    registry.register_timer(timer_id, cancel);
+    let _registration = TimerRegistration {
+        registry,
+        id: timer_id,
     };
 
-    registry.cancel_timer(timer_id);
-    result
+    tokio::select! {
+        _ = sleep(Duration::from_millis(delay)) => Ok(()),
+        _ = TimerCancellation::cancelled(&mut cancel_rx) => Ok(()),
+    }
 }
 
 fn sleep_sync(delay: Optional<JSValue>) -> JSResult<()> {
