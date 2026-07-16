@@ -8,6 +8,7 @@ use rong_abort::AbortSignal;
 use rong_stream::{JSReadableStream, ReadableStream, readable_stream_is_locked};
 use rong_url::URL;
 use std::cell::Cell;
+use std::rc::Rc;
 
 #[derive(Debug)]
 pub struct RequestParts {
@@ -25,10 +26,22 @@ pub struct Request {
     pub(crate) body: Option<HttpBody>,
     redirect: RequestRedirect,
     signal: Option<AbortSignal>, // AbortSignal
-    consumed: Cell<bool>,
+    consumed: Rc<Cell<bool>>,
 }
 
 impl Request {
+    fn parse_url(url: &str) -> JSResult<Uri> {
+        url::Url::parse(url).map_err(|_| {
+            HostError::new(rong::error::E_INVALID_ARG, format!("Invalid URL: {}", url))
+                .with_name("TypeError")
+        })?;
+        Uri::try_from(url).map_err(|_| {
+            HostError::new(rong::error::E_INVALID_ARG, format!("Invalid URL: {}", url))
+                .with_name("TypeError")
+                .into()
+        })
+    }
+
     pub(crate) fn abort_signal(&self) -> Option<&AbortSignal> {
         self.signal.as_ref()
     }
@@ -41,6 +54,14 @@ impl Request {
     }
 
     fn try_clone(&self) -> JSResult<Self> {
+        if self.body_used() {
+            return Err(HostError::new(
+                rong::error::E_INVALID_STATE,
+                "Cannot clone a Request whose body is already used",
+            )
+            .with_name("TypeError")
+            .into());
+        }
         if self.has_streaming_body() {
             return Err(HostError::new(
                 rong::error::E_INVALID_STATE,
@@ -57,7 +78,7 @@ impl Request {
             body: self.body.clone(),
             redirect: self.redirect.clone(),
             signal: self.signal.clone(),
-            consumed: Cell::new(self.consumed.get()),
+            consumed: Rc::new(Cell::new(false)),
         })
     }
 
@@ -117,7 +138,24 @@ impl TryFromJSValue for RequestInit {
 
         // Method
         if let Ok(method_str) = obj.get::<_, String>("method") {
-            request.method = Some(Method::from_bytes(method_str.as_bytes()).map_err(|_| {
+            let upper = method_str.to_ascii_uppercase();
+            if matches!(upper.as_str(), "CONNECT" | "TRACE" | "TRACK") {
+                return Err(HostError::new(
+                    rong::error::E_INVALID_ARG,
+                    format!("Forbidden method: {}", method_str),
+                )
+                .with_name("TypeError")
+                .into());
+            }
+            let normalized = if matches!(
+                upper.as_str(),
+                "DELETE" | "GET" | "HEAD" | "OPTIONS" | "POST" | "PUT"
+            ) {
+                upper.as_str()
+            } else {
+                method_str.as_str()
+            };
+            request.method = Some(Method::from_bytes(normalized.as_bytes()).map_err(|_| {
                 HostError::new(
                     rong::error::E_INVALID_ARG,
                     format!("Invalid method: {}", method_str),
@@ -155,10 +193,25 @@ impl TryFromJSValue for RequestInit {
         }
 
         // Signal
-        if let Ok(signal_obj) = obj.get::<_, JSObject>("signal")
-            && let Ok(signal) = signal_obj.borrow::<AbortSignal>()
-        {
-            request.signal = Some(signal.clone());
+        if obj.has_property("signal")? {
+            let signal_value = obj.get::<_, JSValue>("signal")?;
+            if !signal_value.is_null() && !signal_value.is_undefined() {
+                let signal_obj = signal_value.into_object().ok_or_else(|| {
+                    HostError::new(
+                        rong::error::E_INVALID_ARG,
+                        "RequestInit.signal must be an AbortSignal",
+                    )
+                    .with_name("TypeError")
+                })?;
+                let signal = signal_obj.borrow::<AbortSignal>().map_err(|_| {
+                    HostError::new(
+                        rong::error::E_INVALID_ARG,
+                        "RequestInit.signal must be an AbortSignal",
+                    )
+                    .with_name("TypeError")
+                })?;
+                request.signal = Some(signal.clone());
+            }
         }
         Ok(request)
     }
@@ -169,41 +222,30 @@ impl Request {
     #[js_method(constructor)]
     pub(crate) fn new(input: JSValue, request_init: Optional<RequestInit>) -> JSResult<Self> {
         // Parse input - can be a URL string or another Request object
-        let mut request = if let Ok(url_str) = input.clone().to_rust::<String>() {
-            let url = Uri::try_from(url_str.as_str()).map_err(|_| {
-                HostError::new(
-                    rong::error::E_INVALID_ARG,
-                    format!("Invalid URL: {}", url_str),
-                )
-                .with_name("TypeError")
-            })?;
-
-            Self {
-                url,
-                ..Default::default()
-            }
-        } else if let Some(obj) = input.into_object() {
+        let mut request = if let Some(obj) = input.clone().into_object() {
             if let Ok(req) = obj.borrow::<Request>() {
                 req.try_clone()?
             } else if let Ok(url) = obj.borrow::<URL>() {
                 // Convert URL to string first, then parse as Uri
                 let url_str = url.to_string();
-                let uri = Uri::try_from(url_str.as_str()).map_err(|_| {
-                    HostError::new(
-                        rong::error::E_INVALID_ARG,
-                        format!("Invalid URL: {}", url_str),
-                    )
-                    .with_name("TypeError")
-                })?;
+                let uri = Self::parse_url(&url_str)?;
                 Self {
                     url: uri,
                     ..Default::default()
                 }
             } else {
-                Self::default()
+                let url_str = input.to_rust::<String>()?;
+                Self {
+                    url: Self::parse_url(&url_str)?,
+                    ..Default::default()
+                }
             }
         } else {
-            Self::default()
+            let url_str = input.to_rust::<String>()?;
+            Self {
+                url: Self::parse_url(&url_str)?,
+                ..Default::default()
+            }
         };
 
         // Process init object if provided
@@ -211,8 +253,19 @@ impl Request {
             init.assign_request(&mut request);
         }
 
-        // make sure body is None for Get
-        if request.method == Method::GET {
+        let has_body = request
+            .body
+            .as_ref()
+            .is_some_and(|body| !body.0.is_null() && !body.0.is_undefined());
+        if matches!(request.method, Method::GET | Method::HEAD) && has_body {
+            return Err(HostError::new(
+                rong::error::E_INVALID_ARG,
+                "Request with GET/HEAD method cannot have body",
+            )
+            .with_name("TypeError")
+            .into());
+        }
+        if !has_body {
             request.body = None;
         }
 
@@ -379,7 +432,7 @@ impl Default for Request {
             body: None,
             redirect: RequestRedirect::default(),
             signal: None,
-            consumed: Cell::new(false),
+            consumed: Rc::new(Cell::new(false)),
         }
     }
 }
@@ -435,7 +488,7 @@ impl Request {
             body: http_body,
             redirect: RequestRedirect::default(),
             signal: None,
-            consumed: Cell::new(false),
+            consumed: Rc::new(Cell::new(false)),
         };
 
         let class = Class::lookup::<Request>(ctx)?;

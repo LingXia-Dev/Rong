@@ -32,7 +32,23 @@ describe("Request", () => {
     });
 
     it("should throw TypeError for invalid URL", () => {
-      expect(() => new Request("not-a-url")).toThrow(TypeError);
+      let error;
+      try {
+        new Request("not-a-url");
+      } catch (caught) {
+        error = caught;
+      }
+      expect(error instanceof TypeError).toBe(true);
+    });
+
+    it("should create a request from another Request", () => {
+      const original = new Request("https://example.com/path", {
+        method: "POST",
+        body: "payload",
+      });
+      const copy = new Request(original);
+      expect(copy.url).toBe(original.url);
+      expect(copy.method).toBe("POST");
     });
   });
 
@@ -53,30 +69,55 @@ describe("Request", () => {
       });
     });
 
+    it("should normalize standard HTTP methods", () => {
+      const request = new Request("https://example.com", { method: "post" });
+      expect(request.method).toBe("POST");
+    });
+
+    it("should reject forbidden HTTP methods", () => {
+      for (const method of ["CONNECT", "TRACE", "TRACK"]) {
+        let error;
+        try {
+          new Request("https://example.com", { method });
+        } catch (caught) {
+          error = caught;
+        }
+        expect(error instanceof TypeError).toBe(true);
+      }
+    });
+
     it("should throw TypeError for invalid HTTP methods", () => {
-      expect(
-        () => new Request("https://example.com", { method: "INVALID" }),
-      ).toThrow(TypeError);
+      let error;
+      try {
+        new Request("https://example.com", { method: "BAD METHOD" });
+      } catch (caught) {
+        error = caught;
+      }
+      expect(error instanceof TypeError).toBe(true);
+    });
+
+    it("should reject a signal that is not an AbortSignal", () => {
+      let error;
+      try {
+        new Request("https://example.com", { signal: {} });
+      } catch (caught) {
+        error = caught;
+      }
+      expect(error instanceof TypeError).toBe(true);
     });
   });
 
   describe("body handling", () => {
     it("should not allow body for GET/HEAD requests", () => {
-      expect(
-        () =>
-          new Request("https://example.com", {
-            method: "GET",
-            body: "test",
-          }),
-      ).toThrow();
-
-      expect(
-        () =>
-          new Request("https://example.com", {
-            method: "HEAD",
-            body: "test",
-          }),
-      ).toThrow();
+      for (const method of ["GET", "HEAD"]) {
+        let error;
+        try {
+          new Request("https://example.com", { method, body: "test" });
+        } catch (caught) {
+          error = caught;
+        }
+        expect(error instanceof TypeError).toBe(true);
+      }
     });
 
     it("should allow body for POST requests", () => {
@@ -128,6 +169,18 @@ describe("Request", () => {
         });
         const result = await request.text();
         expect(result).toBe(text);
+      });
+
+      it("should convert other body values to strings", async () => {
+        const request = new Request("https://example.com", {
+          method: "POST",
+          body: {
+            toString() {
+              return "custom body";
+            },
+          },
+        });
+        expect(await request.text()).toBe("custom body");
       });
 
       it("should return empty string for null body", async () => {
@@ -199,6 +252,22 @@ describe("Request", () => {
         original.headers.get("Content-Type"),
       );
       expect(clone).not.toBe(original);
+    });
+
+    it("should reject cloning after the body is consumed", async () => {
+      const request = new Request("https://example.com", {
+        method: "POST",
+        body: "payload",
+      });
+      await request.text();
+      expect(request.bodyUsed).toBe(true);
+      let error;
+      try {
+        request.clone();
+      } catch (caught) {
+        error = caught;
+      }
+      expect(error instanceof TypeError).toBe(true);
     });
   });
 });

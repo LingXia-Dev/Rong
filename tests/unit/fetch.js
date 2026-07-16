@@ -108,6 +108,25 @@ describe("fetch", () => {
     expect(data.received).toBe(total);
   });
 
+  it("should reject when request body conversion throws", async () => {
+    const url = new URL("/upload", TEST_SERVER_URL);
+    const reason = new Error("body conversion failed");
+    let caught;
+    try {
+      await fetch(url, {
+        method: "PUT",
+        body: {
+          toString() {
+            throw reason;
+          },
+        },
+      });
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught).toBe(reason);
+  });
+
   it("should read streaming response via Response.body", async () => {
     const url = new URL("/large", TEST_SERVER_URL);
     const response = await fetch(url);

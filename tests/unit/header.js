@@ -114,6 +114,28 @@ describe("Headers", () => {
     });
   });
 
+  describe("append", () => {
+    it("should throw TypeError for an invalid header name", () => {
+      let error;
+      try {
+        header.append("Invalid:Name", "value");
+      } catch (caught) {
+        error = caught;
+      }
+      expect(error instanceof TypeError).toBe(true);
+    });
+
+    it("should throw TypeError for an invalid header value", () => {
+      let error;
+      try {
+        header.append("X-Test", "bad\nvalue");
+      } catch (caught) {
+        error = caught;
+      }
+      expect(error instanceof TypeError).toBe(true);
+    });
+  });
+
   describe("get", () => {
     beforeEach(() => {
       header.set("Content-Type", "application/json");
@@ -201,6 +223,16 @@ describe("Headers", () => {
 
     it("should throw TypeError when called without arguments", () => {
       expect(() => header.delete()).toThrow(TypeError);
+    });
+
+    it("should throw TypeError for an invalid header name", () => {
+      let error;
+      try {
+        header.delete("Invalid:Name");
+      } catch (caught) {
+        error = caught;
+      }
+      expect(error instanceof TypeError).toBe(true);
     });
   });
 

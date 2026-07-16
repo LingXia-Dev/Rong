@@ -90,7 +90,7 @@ impl Response {
         if let Some(init) = init.0 {
             if let Some(status) = init.status {
                 // Validate status code
-                if !(100..=599).contains(&status) {
+                if !(200..=599).contains(&status) {
                     return Err(HostError::new(
                         rong::error::E_OUT_OF_RANGE,
                         format!("Invalid status code: {}", status),
@@ -102,12 +102,37 @@ impl Response {
             }
 
             if let Some(text) = init.status_text {
+                if text.contains(['\r', '\n']) {
+                    return Err(HostError::new(
+                        rong::error::E_INVALID_ARG,
+                        "statusText must not contain CR or LF characters",
+                    )
+                    .with_name("TypeError")
+                    .into());
+                }
                 response.status_text = text;
             }
 
             if let Some(headers) = init.headers {
                 response.headers = headers;
             }
+        }
+
+        let has_body = response.body.as_ref().is_some_and(|body| match body {
+            BodyKind::JS(body) => !body.0.is_null() && !body.0.is_undefined(),
+            BodyKind::Buffered(bytes) => !bytes.is_empty(),
+            BodyKind::Channel(_) => true,
+        });
+        if has_body && matches!(response.status, 204 | 205 | 304) {
+            return Err(HostError::new(
+                rong::error::E_INVALID_ARG,
+                format!("Response with status {} cannot have body", response.status),
+            )
+            .with_name("TypeError")
+            .into());
+        }
+        if !has_body {
+            response.body = None;
         }
 
         Ok(response)
@@ -190,6 +215,14 @@ impl Response {
 
     #[js_method]
     fn clone(&self) -> JSResult<Self> {
+        if self.body_used() {
+            return Err(HostError::new(
+                rong::error::E_INVALID_STATE,
+                "Cannot clone a Response whose body is already used",
+            )
+            .with_name("TypeError")
+            .into());
+        }
         if self.has_streaming_body() {
             return Err(HostError::new(
                 rong::error::E_INVALID_STATE,
@@ -480,6 +513,10 @@ impl Response {
             .into());
         }
 
+        url::Url::parse(&url).map_err(|_| {
+            HostError::new(rong::error::E_INVALID_ARG, format!("Invalid URL: {}", url))
+                .with_name("TypeError")
+        })?;
         let uri = Uri::try_from(url.as_str()).map_err(|_| {
             HostError::new(rong::error::E_INVALID_ARG, format!("Invalid URL: {}", url))
                 .with_name("TypeError")

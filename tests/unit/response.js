@@ -25,6 +25,16 @@ describe("Response", () => {
   });
 
   describe("status validation", () => {
+    it("should reject informational status codes", () => {
+      let error;
+      try {
+        new Response(null, { status: 199 });
+      } catch (caught) {
+        error = caught;
+      }
+      expect(error instanceof RangeError).toBe(true);
+    });
+
     it("should set ok to true for successful status codes", () => {
       const successCodes = [200, 201, 202, 203, 204, 206, 207, 299];
       successCodes.forEach((status) => {
@@ -48,6 +58,16 @@ describe("Response", () => {
   });
 
   describe("body handling", () => {
+    it("should reject a body for a null-body status", () => {
+      let error;
+      try {
+        new Response("body", { status: 204 });
+      } catch (caught) {
+        error = caught;
+      }
+      expect(error instanceof TypeError).toBe(true);
+    });
+
     it("should handle different body types", async () => {
       const testCases = [
         {
@@ -193,9 +213,31 @@ describe("Response", () => {
       const cloneText = await clone.text();
       expect(cloneText).toBe(originalText);
     });
+
+    it("should reject cloning after the body is consumed", async () => {
+      const response = new Response("payload");
+      await response.text();
+      let error;
+      try {
+        response.clone();
+      } catch (caught) {
+        error = caught;
+      }
+      expect(error instanceof TypeError).toBe(true);
+    });
   });
 
   describe("error handling", () => {
+    it("should reject line breaks in statusText", () => {
+      let error;
+      try {
+        new Response(null, { statusText: "bad\ntext" });
+      } catch (caught) {
+        error = caught;
+      }
+      expect(error instanceof TypeError).toBe(true);
+    });
+
     it("should create error responses", () => {
       const response = Response.error();
       expect(response.status).toBe(0);
@@ -214,6 +256,16 @@ describe("Response", () => {
       expect(() => Response.redirect("https://example.com", 200)).toThrow(
         TypeError,
       );
+    });
+
+    it("should reject a relative redirect URL", () => {
+      let error;
+      try {
+        Response.redirect("/relative", 302);
+      } catch (caught) {
+        error = caught;
+      }
+      expect(error instanceof TypeError).toBe(true);
     });
   });
 });

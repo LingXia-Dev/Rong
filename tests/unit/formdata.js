@@ -60,6 +60,21 @@ describe("FormData", () => {
     assert.equal(fileValue.name, "test.txt");
   });
 
+  it("set preserves the position of the first matching entry", () => {
+    const formData = new FormData();
+    formData.append("first", "old");
+    formData.append("second", "kept");
+    formData.append("first", "duplicate");
+
+    formData.set("first", "new");
+
+    const entries = [...formData.entries()];
+    assert.equal(entries.length, 2);
+    assert.equal(entries[0][0], "first");
+    assert.equal(entries[0][1], "new");
+    assert.equal(entries[1][0], "second");
+  });
+
   it("has and delete", () => {
     const formData = new FormData();
     formData.append("name", "John");
