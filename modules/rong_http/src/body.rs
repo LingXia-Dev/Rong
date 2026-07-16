@@ -252,16 +252,21 @@ impl HttpBody {
                 return Ok((Bytes::from(collected), None));
             }
 
-            // Handle other as empty string
+            // Invoke JavaScript's String conversion through the engine so a
+            // user-defined conversion and any value it throws are preserved.
+            let string_fn: JSFunc = ctx.global().get("String")?;
+            let string: String = string_fn.call(None, (self.0.clone(),))?;
+            return Ok((Bytes::from(string), None));
+        }
+
+        if self.0.is_null() || self.0.is_undefined() {
             return Ok((Bytes::new(), None));
         }
 
-        // Handle string
-        if let Ok(s) = self.0.clone().to_rust::<String>() {
-            return Ok((Bytes::from(s), None));
-        }
-
-        Ok((Bytes::new(), None))
+        // BodyInit falls back to JavaScript string conversion for values that
+        // are not one of its supported binary or structured body types.
+        let s = self.0.clone().to_rust::<String>()?;
+        Ok((Bytes::from(s), None))
     }
 
     // Convert body to text

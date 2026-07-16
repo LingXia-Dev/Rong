@@ -141,8 +141,25 @@ impl FormData {
     /// key/value if it does not already exist.
     #[js_method]
     fn set(&mut self, name: String, value: FormDataEntryValue, filename: Optional<String>) {
-        self.delete(name.clone());
-        self.append(name, value, filename);
+        let filename = match &value {
+            FormDataEntryValue::File(file) => filename.0.unwrap_or_else(|| file.name()),
+            FormDataEntryValue::Blob(_) => filename.0.unwrap_or_else(|| "blob".to_string()),
+            FormDataEntryValue::String(_) => String::new(),
+        };
+
+        if let Some(first) = self.entries.iter().position(|(key, _, _)| key == &name) {
+            self.entries[first] = (name.clone(), value, filename);
+            let mut index = first + 1;
+            while index < self.entries.len() {
+                if self.entries[index].0 == name {
+                    self.entries.remove(index);
+                } else {
+                    index += 1;
+                }
+            }
+        } else {
+            self.entries.push((name, value, filename));
+        }
     }
 
     /// returns an iterator which iterates through all values contained in the FormData

@@ -59,7 +59,7 @@ async fn to_hyper_request(request: &Request) -> JSResult<HttpRequest<BoxBody<Byt
                 }
             } else {
                 // Fallback to non-streaming conversion - convert once and reuse
-                let (bytes, boundary) = body.to_bytes().await.unwrap_or_default();
+                let (bytes, boundary) = body.to_bytes().await?;
                 if let Some(boundary) = boundary
                     && let Some(headers) = builder.headers_mut()
                 {
@@ -77,7 +77,7 @@ async fn to_hyper_request(request: &Request) -> JSResult<HttpRequest<BoxBody<Byt
             }
         } else {
             // Non-object body (e.g., string) - convert once
-            let (bytes, boundary) = body.to_bytes().await.unwrap_or_default();
+            let (bytes, boundary) = body.to_bytes().await?;
             if let Some(boundary) = boundary
                 && let Some(headers) = builder.headers_mut()
             {
@@ -266,10 +266,10 @@ pub async fn fetch(input: JSValue, init: Optional<RequestInit>) -> JSResult<Resp
                         let next_port = next_url.port_or_known_default();
                         let is_cross_host = current_host != next_host || current_port != next_port;
                         if is_cross_host {
-                            request.headers.delete("authorization".to_string());
-                            request.headers.delete("proxy-authorization".to_string());
-                            request.headers.delete("cookie".to_string());
-                            request.headers.delete("host".to_string());
+                            request.headers.delete("authorization".to_string())?;
+                            request.headers.delete("proxy-authorization".to_string())?;
+                            request.headers.delete("cookie".to_string())?;
+                            request.headers.delete("host".to_string())?;
                         }
 
                         // Check permission for new domain
@@ -322,9 +322,9 @@ pub async fn fetch(input: JSValue, init: Optional<RequestInit>) -> JSResult<Resp
                         if should_switch_to_get {
                             request.method = http::Method::GET;
                             request.body = None;
-                            request.headers.delete("content-length".to_string());
-                            request.headers.delete("content-type".to_string());
-                            request.headers.delete("transfer-encoding".to_string());
+                            request.headers.delete("content-length".to_string())?;
+                            request.headers.delete("content-type".to_string())?;
+                            request.headers.delete("transfer-encoding".to_string())?;
                         }
 
                         // Discard the redirect response and continue.

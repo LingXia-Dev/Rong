@@ -145,21 +145,41 @@ impl Headers {
     /// existing header inside a Headers object, or adds the header if it does not
     /// already exist.
     #[js_method]
-    pub(crate) fn append(&mut self, name: String, value: String) {
-        if let (Ok(name), Ok(value)) = (
+    pub(crate) fn append(&mut self, name: String, value: String) -> JSResult<()> {
+        match (
             HeaderName::try_from(name.as_str()),
             HeaderValue::try_from(value.as_str()),
         ) {
-            self.headers.append(name, value);
+            (Ok(name), Ok(value)) => {
+                self.headers.append(name, value);
+                Ok(())
+            }
+            (Err(_), _) => Err(HostError::new(
+                rong::error::E_INVALID_ARG,
+                format!("Invalid header name: {}", name),
+            )
+            .with_name("TypeError")
+            .into()),
+            (_, Err(_)) => Err(
+                HostError::new(rong::error::E_INVALID_ARG, "Invalid header value")
+                    .with_name("TypeError")
+                    .into(),
+            ),
         }
     }
 
     /// The delete() method of the Headers interface deletes a header from the current Headers object.
     #[js_method]
-    pub(crate) fn delete(&mut self, name: String) {
-        if let Ok(name) = HeaderName::try_from(name.as_str()) {
-            self.headers.remove(&name);
-        }
+    pub(crate) fn delete(&mut self, name: String) -> JSResult<()> {
+        let name = HeaderName::try_from(name.as_str()).map_err(|_| {
+            HostError::new(
+                rong::error::E_INVALID_ARG,
+                format!("Invalid header name: {}", name),
+            )
+            .with_name("TypeError")
+        })?;
+        self.headers.remove(&name);
+        Ok(())
     }
 
     /// The get() method of the Headers interface returns a byte string of all the
