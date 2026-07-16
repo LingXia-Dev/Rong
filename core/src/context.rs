@@ -280,7 +280,10 @@ impl ContextServiceContainer {
             return;
         }
         let mut services = self.services.borrow_mut();
-        let replaced = services.insert(TypeId::of::<T>(), Box::new(ContextState(value)));
+        let replaced = services.insert(
+            TypeId::of::<ContextState<T>>(),
+            Box::new(ContextState(value)),
+        );
         drop(services);
         if let Some(replaced) = replaced {
             self.retired_services.borrow_mut().push(replaced);
@@ -291,11 +294,11 @@ impl ContextServiceContainer {
         if self.closed.get() {
             return None;
         }
-        // SAFETY: We store `ContextState<T>` under `TypeId::of::<T>()` in `register_state`.
+        // SAFETY: We store `ContextState<T>` under its own TypeId in `register_state`.
         unsafe {
             let services = self.services.borrow();
             services
-                .get(&TypeId::of::<T>())
+                .get(&TypeId::of::<ContextState<T>>())
                 .map(|svc| {
                     &*(svc.as_ref() as *const dyn JSContextService as *const ContextState<T>)
                 })

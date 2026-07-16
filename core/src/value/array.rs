@@ -133,8 +133,14 @@ where
     /// Push a raw JS value using primitive index writes.
     pub fn push_value(&self, value: JSValue<V>) -> JSResult<u32> {
         let index = self.len()?;
+        let new_len = index.checked_add(1).ok_or_else(|| {
+            HostError::range_error(
+                crate::error::E_OUT_OF_RANGE,
+                "Maximum JavaScript array length exceeded",
+            )
+        })?;
         self.set_value(index, value)?;
-        Ok(index + 1)
+        Ok(new_len)
     }
 
     /// Push a Rust value and return the new array length.

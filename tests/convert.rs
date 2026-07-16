@@ -124,6 +124,17 @@ fn test_convert_from_js() {
 }
 
 #[test]
+fn narrow_integer_conversions_reject_out_of_range_values() {
+    run(|ctx| {
+        assert!(ctx.eval::<u8>(Source::from_bytes("256")).is_err());
+        assert!(ctx.eval::<i8>(Source::from_bytes("128")).is_err());
+        assert!(ctx.eval::<u16>(Source::from_bytes("65536")).is_err());
+        assert!(ctx.eval::<i16>(Source::from_bytes("32768")).is_err());
+        Ok(())
+    });
+}
+
+#[test]
 fn test_option_conversion_from_js() {
     run(|ctx| {
         let undefined: Option<String> = ctx.eval(Source::from_bytes("undefined"))?;

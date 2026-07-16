@@ -95,6 +95,26 @@ fn test_date_system_time_conversion() {
 }
 
 #[test]
+fn system_time_before_epoch_round_trips() {
+    run(|ctx| {
+        let expected = std::time::UNIX_EPOCH - std::time::Duration::from_millis(1_500);
+        let date: JSDate = JSDate::from_system_time(ctx, expected);
+        assert_eq!(date.get_time()?, -1_500.0);
+        assert_eq!(date.to_system_time()?, expected);
+        Ok(())
+    });
+}
+
+#[test]
+fn invalid_js_date_cannot_convert_to_system_time() {
+    run(|ctx| {
+        let invalid: JSDate = ctx.eval(Source::from_bytes("new Date(NaN)"))?;
+        assert!(invalid.to_system_time().is_err());
+        Ok(())
+    });
+}
+
+#[test]
 fn test_date_comprehensive_types() {
     run(|ctx| {
         // Test various date creation methods
