@@ -9,7 +9,7 @@ use croner::parser::{CronParser, Seconds, Year};
 use rong::function::{Optional, This};
 use rong::{
     HostError, JSContext, JSContextService, JSDate, JSFunc, JSObject, JSResult, JSRuntimeService,
-    JSValue, RongExecutor, spawn_local,
+    JSValue, RongExecutor,
 };
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -244,7 +244,7 @@ impl CronContextRegistry {
             }),
         };
         ctx.set_service(registry.clone());
-        registry.start();
+        registry.start(ctx);
         registry
     }
 
@@ -256,13 +256,13 @@ impl CronContextRegistry {
         self.inner.tx.clone()
     }
 
-    fn start(&self) {
+    fn start(&self, ctx: &JSContext) {
         let Some(mut rx) = self.inner.rx.borrow_mut().take() else {
             return;
         };
         let registry = self.clone();
 
-        spawn_local(async move {
+        ctx.spawn_task(async move {
             while let Some(invocation) = rx.recv().await {
                 let callback = registry.callback(invocation.id);
                 if let Some((callback, handle)) = callback {
@@ -620,6 +620,37 @@ mod tests {
             ))?;
             assert_eq!(cron, "* * * * *");
 
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn context_shutdown_cancels_pending_cron_callback() {
+        async_run!(|ctx: JSContext| async move {
+            init(&ctx)?;
+
+            let job: JSObject = ctx.eval(rong::Source::from_bytes(
+                r#"
+                Rong.cron("* * * * *", async function () {
+                    await new Promise(() => {});
+                });
+                "#,
+            ))?;
+            let id: u32 = job.get(CRON_TEST_ID_PROPERTY)?;
+            let registry = CronContextRegistry::ensure(&ctx);
+            let (done_tx, done_rx) = oneshot::channel();
+            registry
+                .tx()
+                .send(CronInvocation { id, done: done_tx })
+                .map_err(|_| HostError::new(rong::error::E_INTERNAL, "Cron test trigger failed"))?;
+
+            tokio::task::yield_now().await;
+            ctx.shutdown_tasks().await;
+
+            assert!(
+                done_rx.await.is_err(),
+                "context shutdown must cancel an in-flight cron callback"
+            );
             Ok(())
         });
     }

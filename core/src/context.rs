@@ -8,6 +8,7 @@ use crate::{JSRuntime, JSValueMapper};
 use std::any::TypeId;
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::future::Future;
 use std::rc::{Rc, Weak};
 use std::sync::{LazyLock, RwLock};
 
@@ -177,6 +178,54 @@ struct ContextServiceContainer {
 }
 
 struct ContextState<T: 'static>(T);
+
+#[derive(Clone, Default)]
+struct ContextTaskRegistry {
+    inner: Rc<ContextTaskRegistryInner>,
+}
+
+#[derive(Default)]
+struct ContextTaskRegistryInner {
+    closed: std::cell::Cell<bool>,
+    tasks: RefCell<Vec<tokio::task::JoinHandle<()>>>,
+}
+
+impl ContextTaskRegistry {
+    fn spawn<F>(&self, future: F)
+    where
+        F: Future<Output = ()> + 'static,
+    {
+        if self.inner.closed.get() {
+            return;
+        }
+
+        let task = tokio::task::spawn_local(future);
+        let mut tasks = self.inner.tasks.borrow_mut();
+        tasks.retain(|task| !task.is_finished());
+        tasks.push(task);
+    }
+
+    fn abort_all(&self) -> Vec<tokio::task::JoinHandle<()>> {
+        self.inner.closed.set(true);
+        let tasks = self.inner.tasks.take();
+        for task in &tasks {
+            task.abort();
+        }
+        tasks
+    }
+
+    async fn shutdown(&self) {
+        for task in self.abort_all() {
+            let _ = task.await;
+        }
+    }
+}
+
+impl JSContextService for ContextTaskRegistry {
+    fn on_shutdown(&self) {
+        self.abort_all();
+    }
+}
 
 impl<T: 'static> JSContextService for ContextState<T> {}
 
@@ -535,6 +584,29 @@ impl<C: JSContextImpl> JSContext<C> {
     /// Get context-scoped state previously stored via `set_state`.
     pub fn get_state<T: 'static>(&self) -> Option<&T> {
         self.rc.services.get_state::<T>()
+    }
+
+    fn task_registry(&self) -> ContextTaskRegistry {
+        if let Some(registry) = self.get_service::<ContextTaskRegistry>() {
+            return registry.clone();
+        }
+
+        let registry = ContextTaskRegistry::default();
+        self.set_service(registry.clone());
+        registry
+    }
+
+    /// Spawn work that must not outlive this JavaScript context.
+    pub fn spawn_task<F>(&self, future: F)
+    where
+        F: Future<Output = ()> + 'static,
+    {
+        self.task_registry().spawn(future);
+    }
+
+    /// Cancel and drain all context-owned async work before releasing the context.
+    pub async fn shutdown_tasks(&self) {
+        self.task_registry().shutdown().await;
     }
 
     /// Compile JavaScript source code to bytecode
