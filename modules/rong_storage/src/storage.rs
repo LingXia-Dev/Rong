@@ -1,8 +1,8 @@
 use super::*;
 use redb::{Database, ReadableDatabase, ReadableTable};
 use rong::{
-    FromJSObject, HostError, IntoJSIteratorExt, JSContext, JSDate, JSObject, JSResult, JSValue,
-    JsonToJSValue, function::Optional, js_class, js_method,
+    FromJSObject, HostError, IntoJSIteratorExt, JSContext, JSDate, JSFunc, JSObject, JSResult,
+    JSValue, JsonToJSValue, function::Optional, js_class, js_method,
 };
 use std::cell::RefCell;
 use std::fs;
@@ -244,8 +244,25 @@ impl Storage {
                     .with_name("TypeError")
             })?;
 
-            // Check if it's actually an integer (no fractional part)
-            if f.fract() == 0.0 {
+            if !f.is_finite() {
+                let encoded = if f.is_nan() {
+                    "NaN"
+                } else if f.is_sign_positive() {
+                    "Infinity"
+                } else {
+                    "-Infinity"
+                };
+                serde_json::to_string(&serde_json::json!({
+                    "__type": "Number",
+                    "value": encoded,
+                }))
+                .map_err(|e| {
+                    HostError::new(
+                        rong::error::E_INTERNAL,
+                        format!("Failed to serialize non-finite number: {}", e),
+                    )
+                })?
+            } else if f.fract() == 0.0 {
                 // It's an integer, try to fit in appropriate integer type
                 if f >= i32::MIN as f64 && f <= i32::MAX as f64 {
                     // Fits in i32
@@ -282,28 +299,20 @@ impl Storage {
                 })?
             }
         } else if value.is_bigint() {
-            // Handle BigInt values (i64/u64)
-            if let Ok(i) = value.clone().to_rust::<i64>() {
-                serde_json::to_string(&i).map_err(|e| {
-                    HostError::new(
-                        rong::error::E_INTERNAL,
-                        format!("Failed to serialize bigint i64: {}", e),
-                    )
-                })?
-            } else if let Ok(u) = value.clone().to_rust::<u64>() {
-                serde_json::to_string(&u).map_err(|e| {
-                    HostError::new(
-                        rong::error::E_INTERNAL,
-                        format!("Failed to serialize bigint u64: {}", e),
-                    )
-                })?
-            } else {
-                return Err(
-                    HostError::new(rong::error::E_INVALID_ARG, "Invalid bigint value")
-                        .with_name("TypeError")
-                        .into(),
-                );
-            }
+            let bigint = value.clone().to_rust::<String>().map_err(|_| {
+                HostError::new(rong::error::E_INVALID_ARG, "Invalid bigint value")
+                    .with_name("TypeError")
+            })?;
+            serde_json::to_string(&serde_json::json!({
+                "__type": "BigInt",
+                "value": bigint,
+            }))
+            .map_err(|e| {
+                HostError::new(
+                    rong::error::E_INTERNAL,
+                    format!("Failed to serialize bigint: {}", e),
+                )
+            })?
         } else if value.is_boolean() {
             let b: bool = value.clone().to_rust().map_err(|_| {
                 HostError::new(
@@ -519,24 +528,56 @@ impl Storage {
                                 serde_json::Value::Null => Ok(JSValue::null(&ctx)),
                                 serde_json::Value::Object(ref obj) => {
                                     // Check if this is a Date object
-                                    if obj.get("__type")
-                                        == Some(&serde_json::Value::String("Date".to_string()))
-                                    {
-                                        if let Some(timestamp) =
-                                            obj.get("timestamp").and_then(|v| v.as_f64())
-                                        {
-                                            let date = JSDate::new(&ctx, timestamp);
-                                            Ok(date.into_js_value())
-                                        } else {
-                                            Err(HostError::new(
-                                                rong::error::E_INVALID_DATA,
-                                                "Invalid Date object: missing timestamp",
-                                            )
-                                            .into())
+                                    match obj.get("__type").and_then(|value| value.as_str()) {
+                                        Some("Date") => {
+                                            if let Some(timestamp) =
+                                                obj.get("timestamp").and_then(|v| v.as_f64())
+                                            {
+                                                let date = JSDate::new(&ctx, timestamp);
+                                                Ok(date.into_js_value())
+                                            } else {
+                                                Err(HostError::new(
+                                                    rong::error::E_INVALID_DATA,
+                                                    "Invalid Date object: missing timestamp",
+                                                )
+                                                .into())
+                                            }
                                         }
-                                    } else {
-                                        // Regular object, parse using JavaScript's JSON.parse
-                                        value_str.as_str().json_to_js_value(&ctx)
+                                        Some("BigInt") => {
+                                            let bigint = obj
+                                                .get("value")
+                                                .and_then(|value| value.as_str())
+                                                .ok_or_else(|| {
+                                                    HostError::new(
+                                                        rong::error::E_INVALID_DATA,
+                                                        "Invalid BigInt object: missing value",
+                                                    )
+                                                })?;
+                                            let constructor: JSFunc = ctx.global().get("BigInt")?;
+                                            constructor.call(None, (bigint,))
+                                        }
+                                        Some("Number") => {
+                                            let number = match obj
+                                                .get("value")
+                                                .and_then(|value| value.as_str())
+                                            {
+                                                Some("NaN") => f64::NAN,
+                                                Some("Infinity") => f64::INFINITY,
+                                                Some("-Infinity") => f64::NEG_INFINITY,
+                                                _ => {
+                                                    return Err(HostError::new(
+                                                        rong::error::E_INVALID_DATA,
+                                                        "Invalid non-finite Number object",
+                                                    )
+                                                    .into());
+                                                }
+                                            };
+                                            Ok(JSValue::from_rust(&ctx, number))
+                                        }
+                                        _ => {
+                                            // Regular object, parse using JavaScript's JSON.parse
+                                            value_str.as_str().json_to_js_value(&ctx)
+                                        }
                                     }
                                 }
                                 serde_json::Value::Array(_) => {

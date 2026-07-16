@@ -96,6 +96,30 @@ describe("Storage API", () => {
     assert.equal(await storage.get("i64_min"), -9223372036854775808n);
   });
 
+  it("should preserve BigInt type and magnitude", async () => {
+    const small = 42n;
+    const huge = 1n << 100n;
+    await storage.set("small_bigint", small);
+    await storage.set("huge_bigint", huge);
+
+    const storedSmall = await storage.get("small_bigint");
+    const storedHuge = await storage.get("huge_bigint");
+    assert.equal(typeof storedSmall, "bigint");
+    assert.equal(storedSmall, small);
+    assert.equal(typeof storedHuge, "bigint");
+    assert.equal(storedHuge, huge);
+  });
+
+  it("should preserve non-finite numbers", async () => {
+    await storage.set("nan", NaN);
+    await storage.set("positive_infinity", Infinity);
+    await storage.set("negative_infinity", -Infinity);
+
+    assert(Number.isNaN(await storage.get("nan")));
+    assert.equal(await storage.get("positive_infinity"), Infinity);
+    assert.equal(await storage.get("negative_infinity"), -Infinity);
+  });
+
   it("should set and get boolean values", async () => {
     await storage.set("test_true", true);
     await storage.set("test_false", false);
