@@ -88,43 +88,11 @@ impl JSObjectOps for JSCValue {
     }
 
     fn set_property(&self, key: Self, value: Self) -> Result<(), Self> {
-        let mut exception: jsc::JSValueRef = std::ptr::null_mut();
-        unsafe {
-            if jsc::JSValueIsString(self.ctx, key.as_value()) {
-                let key = jsc::JSValueToStringCopy(self.ctx, key.as_value(), &mut exception);
-                if !exception.is_null() {
-                    return Err(JSCValue::from_owned_raw(self.ctx, exception).with_exception());
-                }
-                jsc::JSObjectSetProperty(
-                    self.ctx,
-                    self.as_obj(),
-                    key,
-                    value.as_value(),
-                    jsc::attr(jsc::kJSPropertyAttributeNone),
-                    &mut exception,
-                );
-                jsc::JSStringRelease(key);
-                return if exception.is_null() {
-                    Ok(())
-                } else {
-                    Err(JSCValue::from_owned_raw(self.ctx, exception).with_exception())
-                };
-            }
-
-            jsc::JSObjectSetPropertyForKey(
-                self.ctx,
-                self.as_obj(),
-                key.as_value(),
-                value.as_value(),
-                jsc::attr(jsc::kJSPropertyAttributeNone),
-                &mut exception,
-            );
-
-            if exception.is_null() {
-                Ok(())
-            } else {
-                Err(JSCValue::from_owned_raw(self.ctx, exception).with_exception())
-            }
+        let result = self.reflect_set(key.as_value(), value.as_value());
+        if result._is_exception() {
+            Err(result)
+        } else {
+            Ok(())
         }
     }
 
@@ -132,7 +100,8 @@ impl JSObjectOps for JSCValue {
         unsafe {
             let obj = self.as_obj();
             jsc::JSObjectSetPrototype(self.ctx, obj, prototype.as_value());
-            true
+            let actual = jsc::JSObjectGetPrototype(self.ctx, obj);
+            jsc::JSValueIsStrictEqual(self.ctx, actual, prototype.as_value())
         }
     }
 
