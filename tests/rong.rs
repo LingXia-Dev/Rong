@@ -1,10 +1,19 @@
 use rong::{
-    JSFunc, JSObject, JSResult, JsInvokePriority, Rong, RongJS, Source, TaskMessage,
-    enqueue_js_invoke,
+    JSContextService, JSFunc, JSObject, JSResult, JsInvokePriority, Rong, RongJS, Source,
+    TaskMessage, enqueue_js_invoke,
 };
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
+
+#[derive(Clone)]
+struct ShutdownFlag(Arc<AtomicBool>);
+
+impl JSContextService for ShutdownFlag {
+    fn on_shutdown(&self) {
+        self.0.store(true, Ordering::SeqCst);
+    }
+}
 
 #[tokio::test]
 async fn test_call_simple() -> JSResult<()> {
@@ -187,6 +196,62 @@ async fn test_enqueue_js_invoke_queue() -> JSResult<()> {
         Ok(())
     })
     .await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn pending_invoke_does_not_keep_context_alive() -> JSResult<()> {
+    let rong = Rong::<RongJS>::builder().shared().build()?;
+    let shutdown = Arc::new(AtomicBool::new(false));
+    let started = Arc::new(AtomicBool::new(false));
+    let shutdown_for_task = shutdown.clone();
+    let started_for_task = started.clone();
+
+    rong.call(move |runtime, _receiver| async move {
+        let ctx = runtime.context();
+        ctx.set_service(ShutdownFlag(shutdown_for_task.clone()));
+        ctx.global().set(
+            "markInvokeStarted",
+            JSFunc::new(&ctx, move || {
+                started_for_task.store(true, Ordering::SeqCst);
+            })?,
+        )?;
+        let pending: JSFunc = ctx.eval(Source::from_bytes(
+            r#"(async function () {
+                markInvokeStarted();
+                await new Promise(() => {});
+            })"#,
+        ))?;
+
+        enqueue_js_invoke(
+            &ctx,
+            pending,
+            None,
+            None,
+            JsInvokePriority::Event,
+            None,
+            false,
+        )
+        .await?;
+        tokio::time::timeout(Duration::from_secs(1), async {
+            while !started.load(Ordering::SeqCst) {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("pending invoke did not start");
+
+        drop(ctx);
+        tokio::task::yield_now().await;
+
+        assert!(
+            shutdown_for_task.load(Ordering::SeqCst),
+            "pending invoke work must not keep its JS context alive"
+        );
+        Ok(())
+    })
+    .await?;
+
     Ok(())
 }
 
