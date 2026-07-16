@@ -2,7 +2,7 @@ use crate::url::SharedUrlData;
 use rong::{function::*, *};
 use std::cell::RefCell;
 use std::rc::Rc;
-use url::{Url, form_urlencoded};
+use url::form_urlencoded;
 
 /// URLSearchParams implementation following the Web spec
 /// https://url.spec.whatwg.org/#interface-urlsearchparams
@@ -29,14 +29,12 @@ impl URLSearchParams {
             if init.is_string() {
                 // Initialize from query string
                 let query: String = init.to_rust()?;
+                let query = query.strip_prefix('?').unwrap_or(&query);
                 if !query.is_empty() {
-                    // Use Url to parse query string
-                    if let Ok(url) = Url::parse(&format!("http://dummy.com/?{}", query)) {
-                        params.extend(
-                            url.query_pairs()
-                                .map(|(k, v)| (k.into_owned(), v.into_owned())),
-                        );
-                    }
+                    params.extend(
+                        form_urlencoded::parse(query.as_bytes())
+                            .map(|(key, value)| (key.into_owned(), value.into_owned())),
+                    );
                 }
             } else if init.is_object() {
                 let obj: JSObject = init.into();
@@ -254,7 +252,11 @@ impl URLSearchParams {
         if let Some(shared_data) = &self.shared_data {
             let query_string = self.to_string();
             let mut url = shared_data.url.borrow_mut();
-            url.set_query(Some(&query_string));
+            url.set_query(if query_string.is_empty() {
+                None
+            } else {
+                Some(&query_string)
+            });
         }
     }
 }

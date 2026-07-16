@@ -76,6 +76,18 @@ describe("URL and URLSearchParams", () => {
       const url = new URL("https://example.com");
       expect(url.toString()).toBe("https://example.com/");
     });
+
+    it("should remove an empty query from the serialized URL", () => {
+      const url = new URL("https://example.com/?a=1");
+      url.search = "";
+      expect(url.search).toBe("");
+      expect(url.href).toBe("https://example.com/");
+
+      url.search = "b=2";
+      url.searchParams.delete("b");
+      expect(url.search).toBe("");
+      expect(url.href).toBe("https://example.com/");
+    });
   });
 
   describe("URLSearchParams functionality", () => {
@@ -132,6 +144,13 @@ describe("URL and URLSearchParams", () => {
         ["a", "1"],
         ["b", "2"],
       ]);
+      expect(params.toString()).toBe("a=1&b=2");
+    });
+
+    it("should ignore one leading question mark in a query string", () => {
+      const params = new URLSearchParams("?a=1&b=2");
+      expect(params.get("a")).toBe("1");
+      expect(params.get("?a")).toBe(null);
       expect(params.toString()).toBe("a=1&b=2");
     });
 
