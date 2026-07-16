@@ -292,14 +292,19 @@ impl EvalOptions {
 impl QJSContext {
     fn eval_raw(&self, source: &Source, flags: i32) -> QJSValue {
         let filename = source.name().unwrap_or("eval");
-        let c_code = CString::new(source.code()).unwrap();
-        let c_filename = CString::new(filename).unwrap();
+        let c_filename = CString::new(filename).unwrap_or_else(|_| {
+            CString::new(filename.replace('\0', "\u{fffd}"))
+                .expect("replacing null bytes must produce a valid C string")
+        });
+        let code_len = source.code().len();
+        let mut code = source.code().to_vec();
+        code.push(0);
 
         unsafe {
             let val = qjs::JS_Eval(
                 self.ctx,
-                c_code.as_ptr(),
-                c_code.as_bytes().len(),
+                code.as_ptr().cast(),
+                code_len,
                 c_filename.as_ptr(),
                 flags,
             );

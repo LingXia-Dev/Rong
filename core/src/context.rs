@@ -456,9 +456,10 @@ impl<C: JSContextImpl> JSContext<C> {
         C::Value: JSObjectOps,
         T: FromJSValue<C::Value>,
     {
-        let result = match source.kind() {
-            SourceKind::ByteCode(code) => self.rc.inner.run_bytecode(code),
-            SourceKind::JavaScript(code) => self.rc.inner.eval(Source::from_bytes(code.clone())),
+        let result = if let SourceKind::ByteCode(code) = source.kind() {
+            self.rc.inner.run_bytecode(code)
+        } else {
+            self.rc.inner.eval(source)
         };
         result.try_convert::<T>()
     }
@@ -721,9 +722,10 @@ impl<C: JSContextImpl> JSContext<C> {
         C::Value: JSTypeOf + JSObjectOps + 'static,
         T: FromJSValue<C::Value> + 'static,
     {
-        let result = match source.kind() {
-            SourceKind::ByteCode(code) => self.rc.inner.run_bytecode(code),
-            SourceKind::JavaScript(code) => self.rc.inner.eval(Source::from_bytes(code.clone())),
+        let result = if let SourceKind::ByteCode(code) = source.kind() {
+            self.rc.inner.run_bytecode(code)
+        } else {
+            self.rc.inner.eval(source)
         };
 
         if result.is_promise() {

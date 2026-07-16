@@ -21,6 +21,9 @@ fn test_symbol() {
         assert!(obj.set(symbol.clone(), 5).is_ok());
         assert_eq!(obj.get::<_, u32>(symbol).unwrap(), 5);
 
+        let symbol = JSSymbol::new(ctx, "a\0b")?;
+        assert_eq!(symbol.descripiton()?, "a\0b");
+
         Ok(())
     });
 }

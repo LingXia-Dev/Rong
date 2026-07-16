@@ -229,6 +229,16 @@ fn test_object_prototype() {
 }
 
 #[test]
+fn rejects_circular_prototype_chain() {
+    run(|ctx| {
+        let obj = JSObject::new(ctx);
+        assert!(!obj.prototype(obj.clone()));
+        assert_eq!(ctx.eval::<i32>(Source::from_bytes("1 + 1"))?, 2);
+        Ok(())
+    });
+}
+
+#[test]
 fn test_object_undefined_vs_missing_property() {
     run(|ctx| {
         let obj: JSObject = ctx.eval(Source::from_bytes(
@@ -320,6 +330,12 @@ fn test_from_json_string_invalid_json_throws_syntax_error() {
             "Property-name syntax errors should not be reported as EOF: {}",
             message
         );
+
+        let nul_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            JSObject::from_json_string(ctx, "{\0}")
+        }));
+        assert!(nul_result.is_ok(), "invalid JSON must not panic");
+        assert!(nul_result.unwrap().is_err());
         Ok(())
     });
 }

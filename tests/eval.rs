@@ -32,6 +32,41 @@ fn test_eval() {
 }
 
 #[test]
+fn eval_with_nul_byte_returns_error_without_panicking() {
+    run(|ctx| {
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            ctx.eval::<JSValue>(Source::from_bytes(b"1\0+1"))
+        }));
+        assert!(result.is_ok(), "evaluating byte source must not panic");
+        assert!(result.unwrap().is_err());
+
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            ctx.eval::<i32>(Source::from_bytes("1 + 1").with_name("name\0.js"))
+        }));
+        assert!(
+            result.is_ok(),
+            "source names must not cause an engine panic"
+        );
+        assert_eq!(result.unwrap()?, 2);
+        Ok(())
+    });
+}
+
+#[test]
+fn eval_preserves_source_name() {
+    run(|ctx| {
+        let stack: String = ctx.eval(
+            Source::from_bytes("new Error('named source').stack").with_name("named-source.js"),
+        )?;
+        assert!(
+            stack.contains("named-source.js"),
+            "unexpected stack: {stack}"
+        );
+        Ok(())
+    });
+}
+
+#[test]
 fn test_bytecode() {
     run(|ctx| {
         let code = "(4 + 8) * 3";
