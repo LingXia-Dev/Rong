@@ -1,5 +1,15 @@
 use rong_test::*;
+use std::cell::Cell;
+use std::rc::Rc;
 use std::time::Duration;
+
+struct DropMarker(Rc<Cell<bool>>);
+
+impl Drop for DropMarker {
+    fn drop(&mut self) {
+        self.0.set(true);
+    }
+}
 
 #[test]
 fn test_rust_promise_with_callback() {
@@ -106,6 +116,67 @@ fn test_rust_future_in_js() {
         // Check the final result
         let current: String = ctx.eval(Source::from_bytes("result"))?;
         assert_eq!(current, "completed after 50ms");
+        Ok(())
+    })
+}
+
+#[test]
+fn test_context_drop_cancels_pending_rust_future() {
+    async_run!(|ctx: JSContext| async move {
+        let started = Rc::new(Cell::new(false));
+        let dropped = Rc::new(Cell::new(false));
+        let started_for_task = started.clone();
+        let dropped_for_task = dropped.clone();
+
+        let pending_fn = JSFunc::new(&ctx, move || {
+            let started = started_for_task.clone();
+            let dropped = dropped_for_task.clone();
+            async move {
+                started.set(true);
+                let _marker = DropMarker(dropped);
+                std::future::pending::<()>().await;
+            }
+        })?;
+        ctx.global().set("pendingRustFuture", pending_fn)?;
+        ctx.eval::<()>(Source::from_bytes("pendingRustFuture()"))?;
+
+        tokio::task::yield_now().await;
+        assert!(started.get(), "pending Rust future did not start");
+
+        drop(ctx);
+        tokio::task::yield_now().await;
+
+        assert!(
+            dropped.get(),
+            "dropping a JS context must cancel its pending Rust futures"
+        );
+        Ok(())
+    })
+}
+
+#[test]
+fn test_context_shutdown_drains_pending_rust_future() {
+    async_run!(|ctx: JSContext| async move {
+        let dropped = Rc::new(Cell::new(false));
+        let dropped_for_task = dropped.clone();
+
+        let pending_fn = JSFunc::new(&ctx, move || {
+            let dropped = dropped_for_task.clone();
+            async move {
+                let _marker = DropMarker(dropped);
+                std::future::pending::<()>().await;
+            }
+        })?;
+        ctx.global().set("pendingRustFuture", pending_fn)?;
+        ctx.eval::<()>(Source::from_bytes("pendingRustFuture()"))?;
+        tokio::task::yield_now().await;
+
+        ctx.shutdown_tasks().await;
+
+        assert!(
+            dropped.get(),
+            "context shutdown must finish canceling pending Rust futures"
+        );
         Ok(())
     })
 }
