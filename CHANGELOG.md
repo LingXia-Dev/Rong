@@ -16,6 +16,9 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 - Scoped async iterator jobs, prioritized invoke queues, pending invoke
   promises, and `AbortSignal.timeout()` tasks to their JavaScript contexts so
   pending background work cannot block context teardown.
+- Made context shutdown follow lifecycle owners rather than temporary callback
+  handles, removed iterator and `AbortSignal.any()` context cycles, and bound
+  worker polling and worker threads to context shutdown.
 
 ### Release automation
 
