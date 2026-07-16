@@ -645,12 +645,26 @@ impl ReadableStreamDefaultController {
 /// readable side and returns the channel for Rust consumers.
 pub fn readable_stream_take_receiver(rs: &ReadableStream) -> Option<StreamReceiver> {
     let mut guard = rs.rx_slot.lock().ok()?;
+    if guard.is_none()
+        && let Some(init) = rs.initializer.borrow_mut().take()
+    {
+        *guard = Some(init());
+    }
     guard.take()
 }
 
 /// Check if a ReadableStream is locked (a reader has been acquired)
 pub fn readable_stream_is_locked(rs: &ReadableStream) -> bool {
-    rs.rx_slot.lock().map(|g| g.is_none()).unwrap_or(true)
+    let Ok(guard) = rs.rx_slot.lock() else {
+        return true;
+    };
+    if guard.is_some() {
+        return false;
+    }
+    rs.initializer
+        .try_borrow()
+        .map(|initializer| initializer.is_none())
+        .unwrap_or(true)
 }
 
 // Install instance-level async iterator: stream implements next() and [Symbol.asyncIterator]
@@ -794,6 +808,18 @@ pub fn init(ctx: &JSContext) -> JSResult<()> {
 mod tests {
     use super::*;
     use rong_test::*;
+
+    #[test]
+    fn lazy_stream_can_be_consumed_before_a_reader_is_created() {
+        let stream = ReadableStream::from_lazy_receiver(|| {
+            let (_tx, rx) = mpsc::channel(1);
+            rx
+        });
+
+        assert!(!readable_stream_is_locked(&stream));
+        assert!(readable_stream_take_receiver(&stream).is_some());
+        assert!(readable_stream_is_locked(&stream));
+    }
 
     fn run_stream_suite(unit: &str) {
         let unit = unit.to_string();
