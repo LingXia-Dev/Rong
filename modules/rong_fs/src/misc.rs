@@ -3,6 +3,17 @@ use rong::*;
 use std::time::SystemTime;
 use tokio::fs;
 
+fn file_time_from_millis(millis: f64) -> filetime::FileTime {
+    let seconds_float = (millis / 1000.0).floor();
+    let mut seconds = seconds_float as i64;
+    let mut nanoseconds = ((millis / 1000.0 - seconds_float) * 1_000_000_000.0).round() as u32;
+    if nanoseconds == 1_000_000_000 && seconds < i64::MAX {
+        seconds += 1;
+        nanoseconds = 0;
+    }
+    filetime::FileTime::from_unix_time(seconds, nanoseconds)
+}
+
 /// Create a symbolic link
 pub(crate) async fn symlink(old_path: String, new_path: String) -> JSResult<()> {
     let resolved_old = grant_file_access(&old_path)?;
@@ -77,12 +88,8 @@ pub(crate) async fn utime(path: String, options: UTimeOptions) -> JSResult<()> {
     let resolved = grant_file_access(&path)?;
     use filetime::FileTime;
 
-    let atime = options
-        .accessed
-        .map(|t| FileTime::from_unix_time((t / 1000.0) as i64, 0));
-    let mtime = options
-        .modified
-        .map(|t| FileTime::from_unix_time((t / 1000.0) as i64, 0));
+    let atime = options.accessed.map(file_time_from_millis);
+    let mtime = options.modified.map(file_time_from_millis);
 
     filetime::set_file_times(
         &resolved,

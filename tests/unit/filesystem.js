@@ -1216,4 +1216,31 @@ describe("Filesystem", () => {
 
     await cleanupTempDir();
   });
+
+  it("utime preserves timestamps before the Unix epoch", async () => {
+    await ensureTempDir();
+    const testFile = getTempPath("utime_pre_epoch.txt");
+    await Rong.write(testFile, "Test content");
+
+    await Rong.utime(testFile, { accessed: -1000, modified: -1000 });
+    const info = await Rong.file(testFile).stat();
+    assert.equal(info.accessed, -1000);
+    assert.equal(info.modified, -1000);
+
+    await cleanupTempDir();
+  });
+
+  it("utime preserves millisecond precision", async () => {
+    await ensureTempDir();
+    const testFile = getTempPath("utime_milliseconds.txt");
+    await Rong.write(testFile, "Test content");
+
+    const timestamp = 1700000000500;
+    await Rong.utime(testFile, { accessed: timestamp, modified: timestamp });
+    const info = await Rong.file(testFile).stat();
+    assert.equal(info.accessed, timestamp);
+    assert.equal(info.modified, timestamp);
+
+    await cleanupTempDir();
+  });
 });

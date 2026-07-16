@@ -1,6 +1,13 @@
 use rong::*;
 use std::{fs, time::SystemTime};
 
+fn unix_epoch_millis(time: SystemTime) -> f64 {
+    match time.duration_since(SystemTime::UNIX_EPOCH) {
+        Ok(duration) => duration.as_secs_f64() * 1000.0,
+        Err(error) => -error.duration().as_secs_f64() * 1000.0,
+    }
+}
+
 #[js_class]
 pub(crate) struct FileInfo {
     is_file: bool,
@@ -74,25 +81,19 @@ impl FileInfo {
     /// Last modification time in Unix epoch milliseconds, when available.
     #[js_method(getter)]
     fn modified(&self) -> Option<f64> {
-        self.modified
-            .and_then(|t| t.duration_since(SystemTime::UNIX_EPOCH).ok())
-            .map(|d| d.as_millis() as f64)
+        self.modified.map(unix_epoch_millis)
     }
 
     /// Last access time in Unix epoch milliseconds, when available.
     #[js_method(getter)]
     fn accessed(&self) -> Option<f64> {
-        self.accessed
-            .and_then(|t| t.duration_since(SystemTime::UNIX_EPOCH).ok())
-            .map(|d| d.as_millis() as f64)
+        self.accessed.map(unix_epoch_millis)
     }
 
     /// Creation time in Unix epoch milliseconds, when available.
     #[js_method(getter)]
     fn created(&self) -> Option<f64> {
-        self.created
-            .and_then(|t| t.duration_since(SystemTime::UNIX_EPOCH).ok())
-            .map(|d| d.as_millis() as f64)
+        self.created.map(unix_epoch_millis)
     }
 
     /// Unix permissions mode, or null on unsupported platforms.
