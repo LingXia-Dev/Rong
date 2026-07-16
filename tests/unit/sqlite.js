@@ -256,6 +256,7 @@ describe("SQLite — transactions", () => {
 
     assert.equal(db.inTransaction, false);
   });
+
 });
 
 describe("SQLite — type handling", () => {
@@ -330,6 +331,18 @@ describe("SQLite — type handling", () => {
     }
 
     assert(threw, "should reject bigint values outside SQLite's INTEGER range");
+  });
+
+  it("stores numeric values outside INTEGER range as REAL", () => {
+    db.exec("CREATE TABLE values_test (value)");
+    const value = 2 ** 63;
+    db.run("INSERT INTO values_test (value) VALUES (?)", [value]);
+    const row = db.query(
+      "SELECT value, typeof(value) AS storage_type FROM values_test",
+    )[0];
+    assert.equal(row.storage_type, "real");
+    assert.equal(typeof row.value, "number");
+    assert.equal(row.value, value);
   });
 });
 

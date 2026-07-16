@@ -252,7 +252,8 @@ fn js_value_to_sqlite(val: &JSValue) -> JSResult<Value> {
     }
     if val.is_number() {
         let n: f64 = val.clone().to_rust()?;
-        if n.fract() == 0.0 && n >= i64::MIN as f64 && n <= i64::MAX as f64 {
+        const I64_MAX_EXCLUSIVE: f64 = 9_223_372_036_854_775_808.0;
+        if n.fract() == 0.0 && n >= i64::MIN as f64 && n < I64_MAX_EXCLUSIVE {
             return Ok(Value::Integer(n as i64));
         }
         return Ok(Value::Real(n));
