@@ -145,6 +145,69 @@ describe("Worker", () => {
       worker.postMessage(null);
       await resultPromise;
     });
+
+    it("should handle undefined", async () => {
+      const worker = new Worker("tests/unit/worker-echo.js");
+      const resultPromise = new Promise((resolve) => {
+        worker.onmessage = (event) => {
+          assert.equal(event.data, "echo: undefined");
+          worker.terminate();
+          resolve();
+        };
+      });
+      worker.postMessage(undefined);
+      await Promise.race([
+        resultPromise,
+        new Promise((_, reject) =>
+          setTimeout(() => {
+            worker.terminate();
+            reject(new Error("undefined message timeout"));
+          }, 500),
+        ),
+      ]);
+    });
+
+    it("should handle bigint", async () => {
+      const worker = new Worker("tests/unit/worker-echo.js");
+      const resultPromise = new Promise((resolve) => {
+        worker.onmessage = (event) => {
+          assert.equal(event.data, "echo: 42");
+          worker.terminate();
+          resolve();
+        };
+      });
+      worker.postMessage(42n);
+      await Promise.race([
+        resultPromise,
+        new Promise((_, reject) =>
+          setTimeout(() => {
+            worker.terminate();
+            reject(new Error("bigint message timeout"));
+          }, 500),
+        ),
+      ]);
+    });
+
+    it("should handle non-finite numbers", async () => {
+      const worker = new Worker("tests/unit/worker-echo.js");
+      const resultPromise = new Promise((resolve) => {
+        worker.onmessage = (event) => {
+          assert.equal(event.data, "echo: NaN");
+          worker.terminate();
+          resolve();
+        };
+      });
+      worker.postMessage(NaN);
+      await Promise.race([
+        resultPromise,
+        new Promise((_, reject) =>
+          setTimeout(() => {
+            worker.terminate();
+            reject(new Error("non-finite message timeout"));
+          }, 500),
+        ),
+      ]);
+    });
   });
 
   describe("Error handling", () => {

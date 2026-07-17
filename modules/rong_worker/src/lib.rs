@@ -49,25 +49,62 @@ pub fn init(ctx: &JSContext) -> JSResult<()> {
     Ok(())
 }
 
-/// Serialize a JSValue to a JSON string using the context's JSON.stringify.
-fn js_value_to_json(ctx: &JSContext, data: &JSValue) -> JSResult<String> {
+/// Serialized payload passed between isolated worker runtimes.
+enum SerializedWorkerValue {
+    Json(String),
+    Undefined,
+    BigInt(String),
+    Number(f64),
+}
+
+/// Serialize a JSValue for transfer to another runtime.
+fn serialize_worker_value(ctx: &JSContext, data: &JSValue) -> JSResult<SerializedWorkerValue> {
+    if data.is_undefined() {
+        return Ok(SerializedWorkerValue::Undefined);
+    }
+    if data.is_bigint() {
+        return Ok(SerializedWorkerValue::BigInt(
+            data.clone().to_rust::<String>()?,
+        ));
+    }
+    if data.is_number() {
+        let number = data.clone().to_rust::<f64>()?;
+        if !number.is_finite() || (number == 0.0 && number.is_sign_negative()) {
+            return Ok(SerializedWorkerValue::Number(number));
+        }
+    }
+
     if let Some(obj) = data.clone().into_object() {
-        obj.to_json_string()
+        obj.to_json_string().map(SerializedWorkerValue::Json)
     } else {
         let json_obj = ctx.global().get::<_, JSObject>("JSON")?;
         let stringify = json_obj.get::<_, JSFunc>("stringify")?;
-        stringify.call::<_, String>(None, (data.clone(),))
+        stringify
+            .call::<_, String>(None, (data.clone(),))
+            .map(SerializedWorkerValue::Json)
+    }
+}
+
+fn deserialize_worker_value(ctx: &JSContext, data: SerializedWorkerValue) -> JSResult<JSValue> {
+    match data {
+        SerializedWorkerValue::Json(json) => json.as_str().json_to_js_value(ctx),
+        SerializedWorkerValue::Undefined => Ok(JSValue::undefined(ctx)),
+        SerializedWorkerValue::BigInt(value) => {
+            let constructor = ctx.global().get::<_, JSFunc>("BigInt")?;
+            constructor.call(None, (value,))
+        }
+        SerializedWorkerValue::Number(value) => Ok(JSValue::from_rust(ctx, value)),
     }
 }
 
 /// Messages from main thread → worker thread.
 enum ToWorker {
-    Message(String),
+    Message(SerializedWorkerValue),
 }
 
 /// Messages from worker thread → main thread.
 enum FromWorker {
-    Message(String),
+    Message(SerializedWorkerValue),
     Error(String),
 }
 
@@ -242,10 +279,10 @@ impl Worker {
             return Ok(());
         }
 
-        let json = js_value_to_json(&ctx, &data)?;
+        let data = serialize_worker_value(&ctx, &data)?;
         let tx = self.lifecycle.to_worker.clone();
         ctx.spawn_task(async move {
-            let _ = tx.send(ToWorker::Message(json)).await;
+            let _ = tx.send(ToWorker::Message(data)).await;
         });
         Ok(())
     }
@@ -299,12 +336,12 @@ impl Worker {
                 };
 
                 match msg {
-                    Some(FromWorker::Message(json_str)) => {
+                    Some(FromWorker::Message(data)) => {
                         if terminated.load(Ordering::Acquire) {
                             break;
                         }
 
-                        match JSObject::from_json_string(&polling_ctx, &json_str) {
+                        match deserialize_worker_value(&polling_ctx, data) {
                             Ok(value) => {
                                 let handler = message_handler.borrow().clone();
                                 if let Some(func) = handler {
@@ -402,8 +439,8 @@ impl Worker {
         let tx = from_worker_tx.clone();
         let post_message_fn = JSFunc::new(&ctx, move |ctx: JSContext, data: JSValue| {
             let t = tx.clone();
-            let message = match js_value_to_json(&ctx, &data) {
-                Ok(json) => FromWorker::Message(json),
+            let message = match serialize_worker_value(&ctx, &data) {
+                Ok(data) => FromWorker::Message(data),
                 Err(e) => FromWorker::Error(format!(
                     "postMessage serialization failed: {}",
                     worker_error_message(&ctx, e)
@@ -476,38 +513,36 @@ impl Worker {
             };
 
             match message {
-                Some(ToWorker::Message(json_str)) => {
-                    match JSObject::from_json_string(&ctx, &json_str) {
-                        Ok(data) => {
-                            if let Ok(handler) = ctx.global().get::<_, JSValue>("onmessage")
-                                && let Ok(func) = handler.to_rust::<JSFunc>()
-                            {
-                                let event = JSObject::new(&ctx);
-                                event.set("data", data).ok();
-                                let result = tokio::select! {
-                                    _ = terminate_rx.changed() => break 'message_loop,
-                                    result = func.call_async::<_, ()>(None, (event,)) => result,
-                                };
-                                if let Err(e) = result {
-                                    let _ = from_worker_tx
-                                        .send(FromWorker::Error(format!(
-                                            "worker onmessage handler error: {}",
-                                            worker_error_message(&ctx, e)
-                                        )))
-                                        .await;
-                                }
+                Some(ToWorker::Message(data)) => match deserialize_worker_value(&ctx, data) {
+                    Ok(data) => {
+                        if let Ok(handler) = ctx.global().get::<_, JSValue>("onmessage")
+                            && let Ok(func) = handler.to_rust::<JSFunc>()
+                        {
+                            let event = JSObject::new(&ctx);
+                            event.set("data", data).ok();
+                            let result = tokio::select! {
+                                _ = terminate_rx.changed() => break 'message_loop,
+                                result = func.call_async::<_, ()>(None, (event,)) => result,
+                            };
+                            if let Err(e) = result {
+                                let _ = from_worker_tx
+                                    .send(FromWorker::Error(format!(
+                                        "worker onmessage handler error: {}",
+                                        worker_error_message(&ctx, e)
+                                    )))
+                                    .await;
                             }
                         }
-                        Err(e) => {
-                            let _ = from_worker_tx
-                                .send(FromWorker::Error(format!(
-                                    "JSON deserialization failed: {}",
-                                    e
-                                )))
-                                .await;
-                        }
                     }
-                }
+                    Err(e) => {
+                        let _ = from_worker_tx
+                            .send(FromWorker::Error(format!(
+                                "worker message deserialization failed: {}",
+                                e
+                            )))
+                            .await;
+                    }
+                },
                 None => break,
             }
         }
