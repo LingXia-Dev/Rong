@@ -1,8 +1,8 @@
 use crate::{ArkJSContext, arkjs};
 use rong_core::{
-    JSContextImpl, JSRawContext, JSTypeOf, JSValueImpl, RongJSError, impl_js_converter,
+    JSContextImpl, JSErrorFactory, JSRawContext, JSTypeOf, JSValueImpl, RongJSError,
+    impl_js_converter,
 };
-use std::ffi::CString;
 use std::hash::Hash;
 use std::ptr;
 
@@ -83,6 +83,76 @@ impl ArkJSValue {
 
     pub(crate) fn _is_object(&self) -> bool {
         self.value_type == ArkJSValueType::Object
+    }
+
+    fn pending_exception_or_type_error(&self, message: &str) -> Self {
+        unsafe {
+            let mut exception: arkjs::JSVM_Value = ptr::null_mut();
+            arkjs::OH_JSVM_GetAndClearLastException(self.env, &mut exception);
+            if !exception.is_null() {
+                return Self::from_owned_raw(self.env, exception)
+                    .protect()
+                    .with_exception();
+            }
+        }
+
+        let ctx = <ArkJSContext as JSContextImpl>::from_borrowed_raw(self.env);
+        ctx.new_error("TypeError", message, None).with_exception()
+    }
+
+    pub(crate) fn reflect_set(&self, key: arkjs::JSVM_Value, value: arkjs::JSVM_Value) -> Self {
+        unsafe {
+            let mut global: arkjs::JSVM_Value = ptr::null_mut();
+            let mut reflect: arkjs::JSVM_Value = ptr::null_mut();
+            let mut set: arkjs::JSVM_Value = ptr::null_mut();
+
+            let status = arkjs::OH_JSVM_GetGlobal(self.env, &mut global);
+            if status != arkjs::JSVM_Status_JSVM_OK {
+                return self.pending_exception_or_type_error("Failed to get global object");
+            }
+            let status = arkjs::OH_JSVM_GetNamedProperty(
+                self.env,
+                global,
+                c"Reflect".as_ptr() as _,
+                &mut reflect,
+            );
+            if status != arkjs::JSVM_Status_JSVM_OK {
+                return self.pending_exception_or_type_error("Failed to get Reflect");
+            }
+            let status =
+                arkjs::OH_JSVM_GetNamedProperty(self.env, reflect, c"set".as_ptr() as _, &mut set);
+            if status != arkjs::JSVM_Status_JSVM_OK {
+                return self.pending_exception_or_type_error("Failed to get Reflect.set");
+            }
+
+            let args = [self.resolve_handle(), key, value];
+            let mut result: arkjs::JSVM_Value = ptr::null_mut();
+            let status = arkjs::OH_JSVM_CallFunction(
+                self.env,
+                reflect,
+                set,
+                args.len(),
+                args.as_ptr(),
+                &mut result,
+            );
+            if status != arkjs::JSVM_Status_JSVM_OK {
+                return self.pending_exception_or_type_error("Failed to set JavaScript property");
+            }
+
+            let mut was_set = false;
+            let status = arkjs::OH_JSVM_GetValueBool(self.env, result, &mut was_set);
+            if status != arkjs::JSVM_Status_JSVM_OK {
+                return self
+                    .pending_exception_or_type_error("Failed to read JavaScript property result");
+            }
+            if !was_set {
+                return self.pending_exception_or_type_error("Failed to set JavaScript property");
+            }
+
+            Self::create_undefined(&<ArkJSContext as JSContextImpl>::from_borrowed_raw(
+                self.env,
+            ))
+        }
     }
 
     /// Protects the current value from garbage collection by creating a reference
@@ -186,11 +256,14 @@ impl JSValueImpl for ArkJSValue {
 
     fn from_json_str(ctx: &Self::Context, str: &str) -> Self {
         let env = ctx.to_raw();
-        let c_str = CString::new(str).unwrap();
         unsafe {
             let mut json_string: arkjs::JSVM_Value = ptr::null_mut();
-            let status =
-                arkjs::OH_JSVM_CreateStringUtf8(env, c_str.as_ptr(), str.len(), &mut json_string);
+            let status = arkjs::OH_JSVM_CreateStringUtf8(
+                env,
+                str.as_ptr().cast(),
+                str.len(),
+                &mut json_string,
+            );
 
             if status == arkjs::JSVM_Status_JSVM_OK {
                 let mut result: arkjs::JSVM_Value = ptr::null_mut();
@@ -221,11 +294,10 @@ impl JSValueImpl for ArkJSValue {
         let env = ctx.to_raw();
         unsafe {
             // First create a string for the description
-            let c_str = CString::new(description).unwrap();
             let mut desc_string: arkjs::JSVM_Value = ptr::null_mut();
             let status = arkjs::OH_JSVM_CreateStringUtf8(
                 env,
-                c_str.as_ptr(),
+                description.as_ptr().cast(),
                 description.len(),
                 &mut desc_string,
             );

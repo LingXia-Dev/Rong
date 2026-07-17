@@ -15,6 +15,7 @@ impl JSObjectOps for ArkJSValue {
         }
     }
 
+    #[allow(clippy::not_unsafe_ptr_arg_deref)]
     fn make_instance(ctx: &Self::Context, constructor: Self, data: *mut ()) -> Self {
         // For callable classes (RustFunc), create a native JS function instead of
         // a class instance. This ensures `this_arg` in the callback is the correct
@@ -147,23 +148,11 @@ impl JSObjectOps for ArkJSValue {
     }
 
     fn set_property(&self, key: Self, value: Self) -> Result<(), Self> {
-        unsafe {
-            let obj = self.resolve_handle();
-            let status = arkjs::OH_JSVM_SetProperty(
-                self.env,
-                obj,
-                key.raw_value_for_api(),
-                value.raw_value_for_api(),
-            );
-            if status == arkjs::JSVM_Status_JSVM_OK {
-                Ok(())
-            } else {
-                let mut exception: arkjs::JSVM_Value = std::ptr::null_mut();
-                arkjs::OH_JSVM_GetAndClearLastException(self.env, &mut exception);
-                Err(ArkJSValue::from_owned_raw(self.env, exception)
-                    .protect()
-                    .with_exception())
-            }
+        let result = self.reflect_set(key.raw_value_for_api(), value.raw_value_for_api());
+        if result._is_exception() {
+            Err(result)
+        } else {
+            Ok(())
         }
     }
 

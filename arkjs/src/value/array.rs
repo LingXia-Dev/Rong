@@ -65,25 +65,17 @@ impl JSArrayOps for ArkJSValue {
 
     fn set_index(&self, index: u32, value: Self) -> Self {
         unsafe {
-            let status = arkjs::OH_JSVM_SetElement(
-                self.env,
-                self.resolve_handle(),
-                index,
-                value.resolve_handle(),
-            );
-
-            if status == arkjs::JSVM_Status_JSVM_OK {
-                let mut undefined: arkjs::JSVM_Value = std::ptr::null_mut();
-                arkjs::OH_JSVM_GetUndefined(self.env, &mut undefined);
-                ArkJSValue::from_owned_raw(self.env, undefined)
-            } else {
-                // Return exception
+            let mut key: arkjs::JSVM_Value = std::ptr::null_mut();
+            let status = arkjs::OH_JSVM_CreateUint32(self.env, index, &mut key);
+            if status != arkjs::JSVM_Status_JSVM_OK {
                 let mut exception: arkjs::JSVM_Value = std::ptr::null_mut();
                 arkjs::OH_JSVM_GetAndClearLastException(self.env, &mut exception);
-                ArkJSValue::from_owned_raw(self.env, exception)
+                return ArkJSValue::from_owned_raw(self.env, exception)
                     .protect()
-                    .with_exception()
+                    .with_exception();
             }
+
+            self.reflect_set(key, value.resolve_handle())
         }
     }
 }
