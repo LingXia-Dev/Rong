@@ -3,6 +3,13 @@ use std::error::Error;
 use std::time::Duration;
 use tracing::{error, info, warn};
 
+fn expression_dispatch_plan(worker_count: usize) -> Vec<(usize, usize, usize)> {
+    (1..worker_count)
+        .zip(0..worker_count.saturating_sub(1))
+        .map(|(worker_index, task_index)| (worker_index, worker_index, task_index))
+        .collect()
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     tracing_subscriber::fmt::init();
@@ -94,7 +101,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     // Send expressions ONLY to workers 1, 2, 3
     info!(count = workers.len() - 1, "Sending expressions to workers");
-    for (i, (worker, task)) in workers.iter().zip(expr_tasks.iter()).enumerate().skip(1) {
+    for (i, worker_index, task_index) in expression_dispatch_plan(workers.len()) {
+        let worker = &workers[worker_index];
+        let task = &expr_tasks[task_index];
         let expr = format!("{}+{}", i * 2 + 1, i * 2 + 2);
         info!(worker_id = worker.id(), expr = %expr, "Sending expression");
         if let Err(e) = task.send(TaskMessage::String(expr)).await {
@@ -119,4 +128,17 @@ async fn main() -> Result<(), Box<dyn Error>> {
     info!("All workers idle. Example complete.");
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn dispatches_one_expression_to_each_non_interval_worker() {
+        assert_eq!(
+            expression_dispatch_plan(4),
+            vec![(1, 1, 0), (2, 2, 1), (3, 3, 2)]
+        );
+    }
 }
