@@ -104,10 +104,7 @@ async fn run_file(ctx: &JSContext, path: PathBuf) -> Result<(), RongJSError> {
     match source.kind() {
         rong::SourceKind::JavaScript(code) => {
             let code_str = String::from_utf8_lossy(code);
-            let wrapped = if code_str.contains("await ")
-                && !code_str.contains("async function")
-                && !code_str.contains("async (")
-            {
+            let wrapped = if code_str.contains("await ") || code_str.contains("for await") {
                 format!("(async () => {{ {} }})();", code_str)
             } else {
                 code_str.to_string()
@@ -209,5 +206,30 @@ mod tests {
             Command::Run { path } => assert_eq!(path, PathBuf::from("app.js")),
             other => panic!("unexpected command: {other:?}"),
         }
+    }
+
+    #[tokio::test]
+    async fn run_file_supports_top_level_await_with_async_declarations() {
+        let path =
+            std::env::temp_dir().join(format!("rong-top-level-await-{}.js", std::process::id()));
+        std::fs::write(
+            &path,
+            "async function answer() { return 42; }\n\
+             globalThis.__rongTopLevelAwaitResult = await answer();",
+        )
+        .expect("write script");
+
+        let runtime = RongJS::runtime();
+        let ctx = runtime.context();
+        let result = run_file(&ctx, path.clone()).await;
+        let _ = std::fs::remove_file(path);
+
+        result.expect("run script with top-level await");
+        assert_eq!(
+            ctx.global()
+                .get::<_, i32>("__rongTopLevelAwaitResult")
+                .expect("read script result"),
+            42
+        );
     }
 }
