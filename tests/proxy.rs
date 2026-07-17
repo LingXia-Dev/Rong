@@ -1,20 +1,8 @@
 use rong_test::*;
 
-#[cfg(not(target_env = "ohos"))]
 const TEST_RUNNER_JS: &str = include_str!("unit/test-runner.js");
-#[cfg(target_env = "ohos")]
-const TEST_RUNNER_JS: &str = include_str!(concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/../../tests/unit/test-runner.js"
-));
 
-#[cfg(not(target_env = "ohos"))]
 const PROXY_UNIT_JS: &str = include_str!("unit/proxy.js");
-#[cfg(target_env = "ohos")]
-const PROXY_UNIT_JS: &str = include_str!(concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/../../tests/unit/proxy.js"
-));
 
 async fn run_embedded_unit_js(ctx: &JSContext, source: &str) -> JSResult<bool> {
     ctx.eval_async::<()>(Source::from_bytes(TEST_RUNNER_JS))

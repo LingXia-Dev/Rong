@@ -70,8 +70,15 @@ fn main() {
             continue;
         }
 
-        let (transformed, test_fns) =
-            transform_source(&source, &test_attr, &tokio_attr, &fn_decl, &stem, &skip_fns);
+        let (transformed, test_fns) = transform_source(
+            &source,
+            &test_attr,
+            &tokio_attr,
+            &fn_decl,
+            &stem,
+            &skip_fns,
+            &tests_dir,
+        );
 
         if test_fns.is_empty() {
             eprintln!("build.rs: skipping {} (no test functions found)", stem);
@@ -113,9 +120,11 @@ fn transform_source(
     fn_decl: &Regex,
     module_name: &str,
     skip_fns: &std::collections::HashSet<(&str, &str)>,
+    tests_dir: &std::path::Path,
 ) -> (String, Vec<TestFnInfo>) {
     let mut output = String::with_capacity(source.len());
     let mut test_fns = Vec::new();
+    let fn_name_re = Regex::new(r"fn\s+(\w+)").unwrap();
 
     let lines: Vec<&str> = source.lines().collect();
     let mut i = 0;
@@ -213,7 +222,6 @@ fn transform_source(
             prev_was_cfg_gated = false;
 
             // Extract function name
-            let fn_name_re = Regex::new(r"fn\s+(\w+)").unwrap();
             if let Some(cap) = fn_name_re.captures(line) {
                 let fn_name = cap[1].to_string();
 
@@ -252,12 +260,30 @@ fn transform_source(
         prev_was_test = false;
         prev_was_tokio_test = false;
 
-        output.push_str(line);
+        output.push_str(&rewrite_fixture_include(line, tests_dir));
         output.push('\n');
         i += 1;
     }
 
     (output, test_fns)
+}
+
+fn rewrite_fixture_include(line: &str, tests_dir: &std::path::Path) -> String {
+    let marker = "include_str!(\"";
+    let Some(marker_start) = line.find(marker) else {
+        return line.to_string();
+    };
+    let path_start = marker_start + marker.len();
+    let Some(path_end) = line[path_start..].find("\")") else {
+        return line.to_string();
+    };
+    let relative = &line[path_start..path_start + path_end];
+    if !relative.starts_with("unit/") {
+        return line.to_string();
+    }
+
+    let fixture = tests_dir.join(relative);
+    line.replacen(&format!("\"{relative}\""), &format!("{fixture:?}"), 1)
 }
 
 fn generate_mods(modules: &[ModuleInfo]) -> String {
