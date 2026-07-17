@@ -1,6 +1,6 @@
 [package]
 name = "rong_s3"
-version = "0.5.1"
+version = "0.5.2"
 edition.workspace = true
 
 description = "S3-compatible object storage module for RongJS"

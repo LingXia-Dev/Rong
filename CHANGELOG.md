@@ -6,6 +6,12 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 
 ## [Unreleased]
 
+## [0.5.2] - 2026-07-17
+
+Rong 0.5.2 is a correctness and lifecycle patch release across the shared
+runtime, all three JavaScript engine adapters, and built-in modules. It also
+hardens CLI and example behavior and improves release automation.
+
 ### Runtime and I/O reliability
 
 - Bound context-owned async work—including Rust-backed promises, cron and timer

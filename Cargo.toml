@@ -40,42 +40,42 @@ categories = ["api-bindings"]
 [workspace.dependencies]
 # Internal dependencies
 rong = { path = ".", default-features = false      , version = "0.5.0" }
-rong_core = { path = "core"      , version = "0.5.0" }
-rong_quickjs = { path = "quickjs"      , version = "0.5.0" }
+rong_core = { path = "core"      , version = "0.5.1" }
+rong_quickjs = { path = "quickjs"      , version = "0.5.1" }
 rong_quickjs_sys = { path = "quickjs/sys"      , version = "0.4.0" }
-rong_jscore = { path = "javascriptcore"      , version = "0.5.0" }
+rong_jscore = { path = "javascriptcore"      , version = "0.5.1" }
 rong_jscore_sys = { path = "javascriptcore/sys"      , version = "0.5.0" }
-rong_arkjs = { path = "arkjs"      , version = "0.5.0" }
+rong_arkjs = { path = "arkjs"      , version = "0.5.1" }
 rong_arkjs_sys = { path = "arkjs/sys"      , version = "0.4.0" }
-rong_macro = { path = "rong_macro"      , version = "0.5.0" }
+rong_macro = { path = "rong_macro"      , version = "0.5.1" }
 rong_test = { path = "testing/rong_test", default-features = false   , version = "0.4.0" }
 rong_test_harness = { path = "testing/rong_test_harness"   , version = "0.4.0" }
 rong_test_device = { path = "testing/rong_test_device"   , version = "0.4.0" }
 rong_modules = { path = "rong_modules"      , version = "0.5.0" }
-rong_rt = { path = "rong_rt"   , default-features = false   , version = "0.4.0" }
-rong_typegen = { path = "rong_typegen", default-features = false, version = "0.5.0" }
+rong_rt = { path = "rong_rt"   , default-features = false   , version = "0.4.1" }
+rong_typegen = { path = "rong_typegen", default-features = false, version = "0.5.1" }
 
 # Module dependencies
-rong_timer = { path = "modules/rong_timer"   , default-features = false   , version = "0.5.0" }
-rong_cron = { path = "modules/rong_cron"   , default-features = false   , version = "0.5.0" }
+rong_timer = { path = "modules/rong_timer"   , default-features = false   , version = "0.5.1" }
+rong_cron = { path = "modules/rong_cron"   , default-features = false   , version = "0.5.1" }
 rong_console = { path = "modules/rong_console"   , default-features = false   , version = "0.5.0" }
 rong_assert = { path = "modules/rong_assert"   , default-features = false   , version = "0.5.0" }
-rong_fs = { path = "modules/rong_fs"   , default-features = false   , version = "0.5.0" }
-rong_http = { path = "modules/rong_http"   , default-features = false   , version = "0.5.0" }
-rong_encoding = { path = "modules/rong_encoding"   , default-features = false   , version = "0.5.0" }
+rong_fs = { path = "modules/rong_fs"   , default-features = false   , version = "0.5.1" }
+rong_http = { path = "modules/rong_http"   , default-features = false   , version = "0.5.1" }
+rong_encoding = { path = "modules/rong_encoding"   , default-features = false   , version = "0.5.1" }
 rong_event = { path = "modules/rong_event"   , default-features = false   , version = "0.5.0" }
 rong_exception = { path = "modules/rong_exception"   , default-features = false   , version = "0.5.0" }
-rong_abort = { path = "modules/rong_abort"   , default-features = false   , version = "0.5.0" }
-rong_url = { path = "modules/rong_url"   , default-features = false   , version = "0.5.0" }
+rong_abort = { path = "modules/rong_abort"   , default-features = false   , version = "0.5.1" }
+rong_url = { path = "modules/rong_url"   , default-features = false   , version = "0.5.1" }
 rong_buffer = { path = "modules/rong_buffer"   , default-features = false   , version = "0.5.0" }
-rong_stream = { path = "modules/rong_stream"   , default-features = false   , version = "0.5.0" }
+rong_stream = { path = "modules/rong_stream"   , default-features = false   , version = "0.5.1" }
 rong_compression = { path = "modules/rong_compression"   , default-features = false   , version = "0.5.0" }
 rong_command = { path = "modules/rong_command"   , default-features = false   , version = "0.5.0" }
-rong_storage = { path = "modules/rong_storage"   , default-features = false   , version = "0.5.0" }
-rong_worker = { path = "modules/rong_worker"   , default-features = false   , version = "0.5.0" }
+rong_storage = { path = "modules/rong_storage"   , default-features = false   , version = "0.5.1" }
+rong_worker = { path = "modules/rong_worker"   , default-features = false   , version = "0.5.1" }
 rong_redis = { path = "modules/rong_redis"   , default-features = false   , version = "0.5.0" }
-rong_sqlite = { path = "modules/rong_sqlite"   , default-features = false   , version = "0.5.0" }
-rong_s3 = { path = "modules/rong_s3"   , version = "0.5.1", default-features = false }
+rong_sqlite = { path = "modules/rong_sqlite"   , default-features = false   , version = "0.5.1" }
+rong_s3 = { path = "modules/rong_s3"   , version = "0.5.2", default-features = false }
 
 # External dependencies
 tokio = { version = "1.52", features = ["rt", "rt-multi-thread", "time", "macros", "sync", "fs", "io-util", "process", "io-std"] }

@@ -1,6 +1,6 @@
 [package]
 name = "rong_cron"
-version = "0.5.0"
+version = "0.5.1"
 edition.workspace = true
 
 description = "Cron module for RongJS"
