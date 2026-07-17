@@ -1,6 +1,6 @@
 [package]
 name = "rong_abort"
-version = "0.5.0"
+version = "0.5.1"
 edition.workspace = true
 
 description = "Abort module for RongJS"
