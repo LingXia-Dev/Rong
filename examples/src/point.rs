@@ -2,7 +2,7 @@ use rong::*;
 use rong::{js_class, js_method};
 
 // Define the Point struct with js_class macro
-#[js_class]
+#[js_class(clone)]
 #[derive(Debug)]
 struct Point {
     x: i32,
@@ -125,4 +125,25 @@ fn main() {
     println!("\nMixing Rust and JavaScript:");
     println!("Rust point: {:?}", rust_point);
     println!("JS point: {:?}", js_point);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn point_instances_round_trip_through_methods() {
+        let runtime = RongJS::runtime();
+        let ctx = runtime.context();
+        ctx.register_class::<Point>().expect("register Point");
+
+        let point: Point = ctx
+            .eval(Source::from_bytes(
+                "new Point2D(2, 3).add(new Point2D(5, 7))",
+            ))
+            .expect("evaluate Point method");
+
+        assert_eq!(point.x, 7);
+        assert_eq!(point.y, 10);
+    }
 }
