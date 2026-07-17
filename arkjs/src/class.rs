@@ -1,3 +1,5 @@
+#![allow(clippy::missing_const_for_thread_local)]
+
 use crate::{ArkJSContext, ArkJSValue, arkjs};
 use rong_core::{JSClass, JSClassExt, JSContextImpl, JSTypeOf, JSValueImpl};
 use std::cell::{Cell, RefCell};
@@ -377,11 +379,11 @@ unsafe extern "C" fn callable_wrapper_finalizer(
         }
     }
 
-    if !wrapper.native_data.is_null() {
-        if let Some(finalizer) = wrapper.native_finalizer {
-            unsafe {
-                finalizer(env, wrapper.native_data, ptr::null_mut());
-            }
+    if !wrapper.native_data.is_null()
+        && let Some(finalizer) = wrapper.native_finalizer
+    {
+        unsafe {
+            finalizer(env, wrapper.native_data, ptr::null_mut());
         }
     }
 }
@@ -488,20 +490,12 @@ where
 pub(crate) fn get_finalizer_by_constructor(constructor: &ArkJSValue) -> arkjs::JSVM_Finalize {
     let constructor_ptr = *constructor.as_raw_value() as usize;
     CLASS.with(|map| {
-        if let Some(info) = map.borrow().get(&constructor_ptr) {
-            unsafe {
-                Some(std::mem::transmute::<
-                    usize,
-                    unsafe extern "C" fn(
-                        arkjs::JSVM_Env,
-                        *mut std::ffi::c_void,
-                        *mut std::ffi::c_void,
-                    ),
-                >(info.finalizer_ptr))
-            }
-        } else {
-            None
-        }
+        map.borrow().get(&constructor_ptr).map(|info| unsafe {
+            std::mem::transmute::<
+                usize,
+                unsafe extern "C" fn(arkjs::JSVM_Env, *mut std::ffi::c_void, *mut std::ffi::c_void),
+            >(info.finalizer_ptr)
+        })
     })
 }
 
@@ -576,11 +570,11 @@ pub(crate) fn cleanup_class_cache(env: arkjs::JSVM_Env) {
         }
 
         for constructor in stale {
-            if let Some(info) = map.remove(&constructor) {
-                if !info.constructor_callback.is_null() {
-                    unsafe {
-                        let _ = Box::from_raw(info.constructor_callback);
-                    }
+            if let Some(info) = map.remove(&constructor)
+                && !info.constructor_callback.is_null()
+            {
+                unsafe {
+                    let _ = Box::from_raw(info.constructor_callback);
                 }
             }
         }

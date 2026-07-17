@@ -1,3 +1,5 @@
+#![allow(clippy::missing_const_for_thread_local)]
+
 use crate::{ArkJSContext, ArkJSValue, arkjs};
 use rong_core::{JSEngine, JSRuntimeImpl};
 use std::cell::RefCell;
@@ -17,7 +19,7 @@ struct UnhandledRejection {
 }
 
 thread_local! {
-    static UNHANDLED_REJECTIONS: RefCell<Vec<UnhandledRejection>> = RefCell::new(Vec::new());
+    static UNHANDLED_REJECTIONS: RefCell<Vec<UnhandledRejection>> = const { RefCell::new(Vec::new()) };
 }
 
 /// Store a rejection.  Called from the promise_reject_handler.

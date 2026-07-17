@@ -73,6 +73,7 @@ impl JSContextImpl for ArkJSContext {
         *ctx as *const _ as usize
     }
 
+    #[allow(clippy::not_unsafe_ptr_arg_deref)]
     fn from_borrowed_raw(ctx: Self::RawContext) -> Self {
         // Recover the VM pointer from the env's instance data
         let vm = unsafe {
@@ -91,6 +92,11 @@ impl JSContextImpl for ArkJSContext {
 
     fn eval(&self, source: rong_core::Source) -> Self::Value {
         let code = source.code();
+        let resource_name = source.name().unwrap_or("eval");
+        let resource_name = CString::new(resource_name).unwrap_or_else(|_| {
+            CString::new(resource_name.replace('\0', "\u{fffd}"))
+                .expect("replacing null bytes must produce a valid C string")
+        });
 
         unsafe {
             // Clear any pending exception so JSVM API calls succeed
@@ -102,12 +108,10 @@ impl JSContextImpl for ArkJSContext {
             }
 
             let mut result: arkjs::JSVM_Value = ptr::null_mut();
-            let code_cstr = CString::new(code).unwrap();
-
             let mut script_value: arkjs::JSVM_Value = ptr::null_mut();
             let status = arkjs::OH_JSVM_CreateStringUtf8(
                 self.raw,
-                code_cstr.as_ptr(),
+                code.as_ptr().cast(),
                 code.len(),
                 &mut script_value,
             );
@@ -125,17 +129,31 @@ impl JSContextImpl for ArkJSContext {
 
             let mut script: arkjs::JSVM_Script = ptr::null_mut();
             let mut cache_rejected = false;
-            let status = arkjs::OH_JSVM_CompileScript(
+            let mut origin = arkjs::JSVM_ScriptOrigin {
+                sourceMapUrl: ptr::null(),
+                resourceName: resource_name.as_ptr(),
+                resourceLineOffset: 0,
+                resourceColumnOffset: 0,
+            };
+            let status = arkjs::OH_JSVM_CompileScriptWithOrigin(
                 self.raw,
                 script_value,
                 ptr::null(),
                 0,
                 true,
                 &mut cache_rejected,
+                &mut origin,
                 &mut script,
             );
 
             if status != arkjs::JSVM_Status_JSVM_OK {
+                let mut exception: arkjs::JSVM_Value = ptr::null_mut();
+                arkjs::OH_JSVM_GetAndClearLastException(self.raw, &mut exception);
+                if !exception.is_null() {
+                    return ArkJSValue::from_owned_raw(self.raw, exception)
+                        .protect()
+                        .with_exception();
+                }
                 return Self::Value::create_undefined(self);
             }
 
