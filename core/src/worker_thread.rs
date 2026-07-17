@@ -1,9 +1,13 @@
+#![allow(clippy::missing_const_for_thread_local)]
+
 use std::cell::Cell;
 use std::future::Future;
 use std::sync::{Arc, Mutex as StdMutex};
 use tokio::sync::Notify;
 use tracing::{Span, info, warn};
 
+// The initializer is already const, but cross-target Clippy reports
+// `missing_const_for_thread_local` for the OHOS target.
 thread_local! {
     static CURRENT_WORKER_ID: Cell<Option<usize>> = const { Cell::new(None) };
 }

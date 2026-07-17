@@ -45,7 +45,7 @@ pub fn run<F: FnOnce(&JSContext) -> JSResult<()>>(f: F) {
 #[macro_export]
 macro_rules! async_run {
     ($user_fn:expr) => {{
-        use crate::prelude::*;
+        use $crate::prelude::*;
         let rong = Rong::<RongJS>::builder().shared().build().unwrap();
         let call_closure = |runtime: JSRuntime, _receiver| {
             let ctx = runtime.context();
@@ -54,7 +54,7 @@ macro_rules! async_run {
         rong.call_blocking::<_, _, ()>(call_closure).unwrap();
     }};
     (async $user_fn:expr) => {{
-        use crate::prelude::*;
+        use $crate::prelude::*;
         let rong = Rong::<RongJS>::builder().shared().build().unwrap();
         let call_closure = |runtime: JSRuntime, _receiver| {
             let ctx = runtime.context();
