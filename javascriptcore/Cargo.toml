@@ -14,6 +14,11 @@ documentation = "https://docs.rs/rong_jscore"
 readme = "README.md"
 [features]
 source = ["rong_jscore_sys/source"]
+# Engine preemption via the execution-time-limit SPI (JSContextRefPrivate.h).
+# The symbol is exported from libJavaScriptCore but the header is private, so
+# this is opt-in: production iOS builds should leave it off to avoid
+# private-API references; without it interruption is cooperative-only.
+interrupt-spi = []
 
 [dependencies]
 rong_jscore_sys = { workspace = true }

@@ -3,6 +3,8 @@ use rong_core::{JSEngine, JSRuntimeImpl};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::{Rc, Weak};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 thread_local! {
     static RUNTIME_REGISTRY: RefCell<HashMap<usize, Weak<QJSRuntimeInner>>> =
@@ -11,6 +13,20 @@ thread_local! {
 
 pub(crate) struct QJSRuntimeInner {
     pub(crate) rt: *mut qjs::JSRuntime,
+    /// Keeps the flag the installed interrupt handler polls alive for the
+    /// whole runtime lifetime (its address is the handler's opaque pointer).
+    interrupt_flag: RefCell<Option<Arc<AtomicBool>>>,
+}
+
+/// QuickJS polls this handler inside the interpreter (and regex) loops; a
+/// nonzero return aborts execution with an uncatchable `InternalError:
+/// interrupted`, which breaks `while (true) {}`.
+unsafe extern "C" fn interrupt_handler(
+    _rt: *mut qjs::JSRuntime,
+    opaque: *mut std::os::raw::c_void,
+) -> std::os::raw::c_int {
+    let flag = unsafe { &*(opaque as *const AtomicBool) };
+    flag.load(Ordering::Relaxed) as std::os::raw::c_int
 }
 
 impl Drop for QJSRuntimeInner {
@@ -23,7 +39,9 @@ impl Drop for QJSRuntimeInner {
 
         unsafe {
             // Best-effort cleanup: drain jobs and run GC before freeing the runtime.
-            // This reduces shutdown-time crashes if user code leaves pending jobs.
+            // Keep the interrupt handler installed while draining: an active
+            // interruption request must still be able to abort a non-yielding
+            // pending job during teardown.
             let mut ctx = std::ptr::null_mut();
             let mut iterations: usize = 0;
             const MAX_JOB_DRAIN: usize = 10_000;
@@ -36,6 +54,12 @@ impl Drop for QJSRuntimeInner {
             }
             qjs::JS_RunGC(self.rt);
             qjs::JS_RunGC(self.rt);
+
+            // The Arc remains alive in `interrupt_flag` through the drain, so
+            // its opaque pointer is valid until the handler is uninstalled.
+            if self.interrupt_flag.get_mut().is_some() {
+                qjs::JS_SetInterruptHandler(self.rt, None, std::ptr::null_mut());
+            }
             qjs::JS_FreeRuntime(self.rt);
         }
     }
@@ -53,7 +77,10 @@ impl JSRuntimeImpl for QJSRuntime {
     // new QuickJS JS Runtime
     fn new() -> Self {
         let rt = unsafe { qjs::JS_NewRuntime() };
-        let inner = Rc::new(QJSRuntimeInner { rt });
+        let inner = Rc::new(QJSRuntimeInner {
+            rt,
+            interrupt_flag: RefCell::new(None),
+        });
         let key = rt as usize;
         RUNTIME_REGISTRY.with(|m| {
             m.borrow_mut().insert(key, Rc::downgrade(&inner));
@@ -97,6 +124,17 @@ impl JSRuntimeImpl for QJSRuntime {
             println!("run gc");
             qjs::JS_RunGC(self.inner.rt);
         }
+    }
+
+    fn install_interrupt(&self, flag: Arc<AtomicBool>) -> bool {
+        let opaque = Arc::as_ptr(&flag) as *mut std::os::raw::c_void;
+        // The Arc lives in the inner runtime until drop, so the opaque
+        // pointer outlives the installed handler.
+        *self.inner.interrupt_flag.borrow_mut() = Some(flag);
+        unsafe {
+            qjs::JS_SetInterruptHandler(self.inner.rt, Some(interrupt_handler), opaque);
+        }
+        true
     }
 }
 

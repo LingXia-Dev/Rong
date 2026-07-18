@@ -456,6 +456,7 @@ impl<C: JSContextImpl> JSContext<C> {
         C::Value: JSObjectOps,
         T: FromJSValue<C::Value>,
     {
+        self.check_interrupt()?;
         let result = if let SourceKind::ByteCode(code) = source.kind() {
             self.rc.inner.run_bytecode(code)
         } else {
@@ -722,6 +723,7 @@ impl<C: JSContextImpl> JSContext<C> {
         C::Value: JSTypeOf + JSObjectOps + 'static,
         T: FromJSValue<C::Value> + 'static,
     {
+        self.check_interrupt()?;
         let result = if let SourceKind::ByteCode(code) = source.kind() {
             self.rc.inner.run_bytecode(code)
         } else {
@@ -734,6 +736,19 @@ impl<C: JSContextImpl> JSContext<C> {
         } else {
             result.try_convert::<T>()
         }
+    }
+
+    /// Cooperative interruption layer: reject newly submitted evaluations
+    /// while the runtime's interrupt flag is set, on every engine.
+    fn check_interrupt(&self) -> JSResult<()> {
+        if self.rc.runtime.interrupt.is_interrupted() {
+            return Err(crate::HostError::new(
+                crate::error::E_INTERRUPTED,
+                "JavaScript execution was interrupted",
+            )
+            .into());
+        }
+        Ok(())
     }
 
     fn get_opaque(&self) -> *mut ContextOpaque<C::Value> {

@@ -32,12 +32,41 @@ log_warning() {
 HOST_TLS_BACKEND="${HOST_TLS_BACKEND:-tls-aws-lc}"
 SUPPORTED_ENGINES=("quickjs" "jscore" "arkjs")
 
+# The default jscore feature set is the production shape (no private SPI), so
+# the cooperative-only path and the interrupt test's skip branches stay
+# covered. Engine preemption is exercised by a dedicated interrupt-spi run;
+# see run_jscore_interrupt_spi.
 jscore_features() {
     local feature_set="jscore,$HOST_TLS_BACKEND"
     if [[ -n "${RONG_JSC_SOURCE:-}" ]]; then
         feature_set="$feature_set,rong/jscore-source"
     fi
     echo "$feature_set"
+}
+
+# Additionally exercise JSC hard interruption behind the opt-in SPI feature.
+run_jscore_interrupt_spi() {
+    local features
+    features="$(jscore_features),rong/jscore-interrupt"
+    log_info "Running interrupt tests with JSC execution-time-limit SPI"
+    TOTAL_TESTS=$((TOTAL_TESTS + 1))
+
+    if run_cargo_test --release --test=interrupt --no-default-features \
+        --features="$features" --quiet; then
+        log_success "JSC execution-time-limit SPI interrupt tests passed"
+        PASSED_TESTS=$((PASSED_TESTS + 1))
+        return 0
+    else
+        log_error "JSC execution-time-limit SPI interrupt tests failed"
+        FAILED_TESTS=$((FAILED_TESTS + 1))
+
+        if [[ "$FAIL_FAST" == true ]]; then
+            log_error "Stopping due to fail-fast mode (default); use -k/--continue-on-error to keep going"
+            print_summary
+            exit 1
+        fi
+        return 1
+    fi
 }
 
 run_cargo_test() {
@@ -398,6 +427,12 @@ for engine in "${ENGINES[@]}"; do
         # Run all tests
         run_all_core_tests "$engine"
         run_all_module_tests "$engine"
+        # JSC engine preemption lives behind the opt-in private SPI, run once
+        # more with it enabled (the default pass above covered the SPI-free
+        # production shape).
+        if [[ "$engine" == "jscore" ]]; then
+            run_jscore_interrupt_spi || true
+        fi
     fi
 done
 

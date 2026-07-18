@@ -2,6 +2,7 @@ mod class;
 mod context;
 pub mod error;
 pub mod function;
+mod interrupt;
 mod invoke;
 mod iterator;
 mod pinned;
@@ -35,6 +36,7 @@ pub use class::{Class, ClassSetup, JSClass};
 pub use context::{JSContext, PromiseHandlerRegistration};
 pub use error::{HostError, JSResult, RongJSError, illegal_constructor};
 pub use function::Constructor;
+pub use interrupt::InterruptHandle;
 pub use iterator::{
     IntoJSAsyncIteratorExt, IntoJSIteratorExt, JSAsyncIterator, JSIterator,
     install_async_iterator_symbol, install_iterator_symbol,
