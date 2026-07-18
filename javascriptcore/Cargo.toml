@@ -13,11 +13,12 @@ categories.workspace = true
 documentation = "https://docs.rs/rong_jscore"
 readme = "README.md"
 [features]
-source = ["rong_jscore_sys/source"]
+# Source/JSCOnly builds always enable engine preemption. The private-SPI caveat
+# only applies when linking Apple's system JavaScriptCore framework.
+source = ["rong_jscore_sys/source", "interrupt-spi"]
 # Engine preemption via the execution-time-limit SPI (JSContextRefPrivate.h).
-# The symbol is exported from libJavaScriptCore but the header is private, so
-# this is opt-in: production iOS builds should leave it off to avoid
-# private-API references; without it interruption is cooperative-only.
+# System-framework consumers opt in because the header is private on iOS;
+# source builds enable this automatically.
 interrupt-spi = []
 
 [dependencies]

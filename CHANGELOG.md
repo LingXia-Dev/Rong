@@ -12,16 +12,16 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
   `Worker::interrupt_handle()` return a `Send + Sync` `InterruptHandle` whose
   `interrupt()` aborts running JavaScript from another thread — QuickJS (via
   `JS_SetInterruptHandler`) and JavaScriptCore (via the execution-time-limit
-  watchdog, self-re-armed each quantum, opt-in via the `jscore-interrupt`
-  feature because the SPI symbol is private on iOS) break even non-yielding
-  code such as
+  watchdog, self-re-armed each quantum) break even non-yielding code such as
   `while (true) {}` with an uncatchable error, and every engine rejects newly
   submitted evaluations with `E_INTERRUPTED` until `clear()`. `engine_preemption()`
   reports per-engine support; ArkJS stays cooperative-only because the bound
   JSVM-API exposes no terminate primitive. Interruption is decoupled from
   `Worker::terminate()` — graceful shutdown still lets the in-flight task
   finish at its next yield; a caller that must break non-yielding JavaScript
-  interrupts through the handle explicitly.
+  interrupts through the handle explicitly. JSC source/JSCOnly builds always
+  enable hard interruption; Apple system-framework builds keep it opt-in via
+  `jscore-interrupt` because the SPI header is private on iOS.
 
 ## [0.5.2] - 2026-07-17
 

@@ -32,10 +32,9 @@ log_warning() {
 HOST_TLS_BACKEND="${HOST_TLS_BACKEND:-tls-aws-lc}"
 SUPPORTED_ENGINES=("quickjs" "jscore" "arkjs")
 
-# The default jscore feature set is the production shape (no private SPI), so
-# the cooperative-only path and the interrupt test's skip branches stay
-# covered. Engine preemption is exercised by a dedicated interrupt-spi run;
-# see run_jscore_interrupt_spi.
+# Apple's system-framework feature set omits private SPI by default, so that
+# production shape remains covered. Source/JSCOnly builds force preemption via
+# `jscore-source`; the system path gets a dedicated interrupt-spi run below.
 jscore_features() {
     local feature_set="jscore,$HOST_TLS_BACKEND"
     if [[ -n "${RONG_JSC_SOURCE:-}" ]]; then
@@ -427,10 +426,9 @@ for engine in "${ENGINES[@]}"; do
         # Run all tests
         run_all_core_tests "$engine"
         run_all_module_tests "$engine"
-        # JSC engine preemption lives behind the opt-in private SPI, run once
-        # more with it enabled (the default pass above covered the SPI-free
-        # production shape).
-        if [[ "$engine" == "jscore" ]]; then
+        # Source/JSCOnly builds already force preemption. Re-run only Apple's
+        # system-framework shape with its explicit private-SPI opt-in.
+        if [[ "$engine" == "jscore" ]] && host_is_apple && [[ -z "${RONG_JSC_SOURCE:-}" ]]; then
             run_jscore_interrupt_spi || true
         fi
     fi

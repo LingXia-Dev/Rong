@@ -90,9 +90,10 @@ cd WebKit && Tools/Scripts/build-jsc --jsc-only --release
 RONG_JSC_ROOT="$PWD/WebKitBuild/JSCOnly/Release" cargo build ...
 ```
 
-The helper validates the installed artifact and runs a bytecode smoke test for
-native builds. The build fails if required headers, libraries, or bytecode
-private headers are missing.
+The helper validates the installed artifact and runs bytecode plus hard-
+interruption smoke tests for native builds. The build fails if required
+headers, libraries, bytecode private headers, or the
+`JSContextGroup{Set,Clear}ExecutionTimeLimit` symbols are missing.
 
 ## Updating prebuilt artifacts
 

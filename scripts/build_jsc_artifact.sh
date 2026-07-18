@@ -941,6 +941,37 @@ require_no_absolute_forwarding_headers() { # <dir>
     [[ -z "$leak" ]] || { echo "Artifact contains absolute forwarding header: $leak" >&2; exit 1; }
 }
 
+require_defined_symbol() { # <library> <symbol>
+    local library="$1"
+    local symbol="$2"
+    local tool
+    local inspected=0
+    local pattern="^[[:space:]]*[[:xdigit:]]+[[:space:]]+[A-Za-z][[:space:]]+_?${symbol}$"
+
+    for tool in llvm-nm nm; do
+        command -v "$tool" >/dev/null 2>&1 || continue
+        inspected=1
+        if "$tool" -g "$library" 2>/dev/null | grep -E "$pattern" >/dev/null; then
+            return 0
+        fi
+    done
+
+    if command -v dumpbin >/dev/null 2>&1; then
+        inspected=1
+        if dumpbin /symbols "$library" 2>/dev/null \
+            | grep -E "External.*\\|[[:space:]]+_?${symbol}$" >/dev/null; then
+            return 0
+        fi
+    fi
+
+    if [[ "$inspected" -eq 0 ]]; then
+        echo "No nm-compatible tool or dumpbin available to validate $library" >&2
+    else
+        echo "Artifact library does not define required symbol: $symbol" >&2
+    fi
+    exit 1
+}
+
 echo "==> Validating artifact"
 require_file "$OUT_DIR/include/JavaScriptCore/JavaScript.h"
 require_file "$OUT_DIR/include/JavaScriptCore/private/JavaScriptCore/Completion.h"
@@ -951,11 +982,14 @@ require_no_absolute_forwarding_headers "$OUT_DIR/include"
 
 if [[ "${ARTIFACT_KIND:-}" == "framework" ]]; then
     require_dir "$OUT_DIR/lib/JavaScriptCore.framework"
+    JSC_LIBRARY="$OUT_DIR/lib/JavaScriptCore.framework/JavaScriptCore"
+    require_file "$JSC_LIBRARY"
 else
     if [[ "$IS_WINDOWS" -eq 1 ]]; then
         for a in JavaScriptCore WTF bmalloc sicuin sicuuc sicudt; do
             require_file "$OUT_DIR/lib/$a.lib"
         done
+        JSC_LIBRARY="$OUT_DIR/lib/JavaScriptCore.lib"
     else
         for a in JavaScriptCore WTF bmalloc; do
             require_file "$OUT_DIR/lib/lib$a.a"
@@ -964,8 +998,15 @@ else
             require_file "$OUT_DIR/lib/lib$a.a"
         done
         require_file "$OUT_DIR/include/unicode/utypes.h"
+        JSC_LIBRARY="$OUT_DIR/lib/libJavaScriptCore.a"
     fi
 fi
+
+# Source artifacts are required to support Rong's hard-interruption contract.
+# WebKit's JSCOnly build exports these APIs without an extra CMake toggle; fail
+# packaging here if a platform build ever omits or hides them.
+require_defined_symbol "$JSC_LIBRARY" JSContextGroupSetExecutionTimeLimit
+require_defined_symbol "$JSC_LIBRARY" JSContextGroupClearExecutionTimeLimit
 
 cat > "$OUT_DIR/rong-jsc-artifact.json" <<EOF
 {
@@ -974,7 +1015,8 @@ cat > "$OUT_DIR/rong-jsc-artifact.json" <<EOF
   "webkit_ref": "$WEBKIT_REF",
   "target": "$TARGET",
   "kind": "${ARTIFACT_KIND:-unknown}",
-  "bytecode_private_headers": true
+  "bytecode_private_headers": true,
+  "hard_interrupt": true
 }
 EOF
 
@@ -996,8 +1038,8 @@ if [[ "${RONG_JSC_SKIP_SMOKE:-0}" != "1" && "$HOST_TARGET" == "$TARGET" ]]; then
         fi
     fi
     ( cd "$ROOT_DIR" && \
-      env "${SMOKE_ENV[@]}" cargo test --release --test eval --no-default-features \
-        --features jscore-source,tls-aws-lc --quiet )
+      env "${SMOKE_ENV[@]}" cargo test --release --test eval --test interrupt \
+        --no-default-features --features jscore-source,tls-aws-lc --quiet )
 fi
 
 echo "Installed artifact:"

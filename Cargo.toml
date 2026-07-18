@@ -145,9 +145,10 @@ futures = { workspace = true }
 default = []
 quickjs = ["dep:rong_quickjs"]
 jscore = ["dep:rong_jscore"]
+# Source/JSCOnly builds always enable hard interruption in `rong_jscore`.
 jscore-source = ["jscore", "rong_jscore/source"]
-# Hard interruption of running JavaScript on JSC via private SPI; see
-# rong_jscore's `interrupt-spi` feature for the App Store caveat.
+# Opt in when linking Apple's system framework; source builds do not need this
+# extra feature. See rong_jscore's App Store caveat.
 jscore-interrupt = ["jscore", "rong_jscore/interrupt-spi"]
 arkjs = ["dep:rong_arkjs"]
 tls-aws-lc = ["rong_rt/tls-aws-lc"]
