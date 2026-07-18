@@ -80,7 +80,12 @@ fn engine_preemption() -> bool {
         .expect("preemption support must be known once the runtime exists")
 }
 
-#[cfg(any(feature = "quickjs", feature = "jscore-interrupt"))]
+#[cfg(any(
+    feature = "quickjs",
+    feature = "jscore-interrupt",
+    feature = "jscore-source",
+    all(feature = "jscore", not(any(target_os = "macos", target_os = "ios")))
+))]
 #[test]
 fn configured_engine_reports_native_preemption() {
     assert!(

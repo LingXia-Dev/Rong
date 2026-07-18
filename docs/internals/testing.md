@@ -23,6 +23,9 @@ source-built (JSCOnly) backend instead, use the `jscore-source` feature:
 cargo test --no-default-features --features jscore-source
 ```
 
+The source backend always enables JSC execution preemption. Apple
+system-framework tests need `jscore-interrupt` to exercise the private-SPI path.
+
 `./test.sh -e jscore` lets `build.rs` download a pinned source artifact or use
 one configured through `RONG_JSC_ROOT`. Set `RONG_JSC_SOURCE=1` to force the
 source backend in `test.sh` on Apple too. See

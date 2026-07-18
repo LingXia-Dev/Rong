@@ -9,6 +9,9 @@ This crate provides the JavaScriptCore (JSC) backend for RongJS.
   all other targets link a source-built WebKit/JSCOnly artifact. Force the
   source backend on macOS/iOS too with `jscore-source` on `rong` (or `source`
   on this crate).
+- Interruption: source/JSCOnly builds always enable execution preemption;
+  system-framework builds opt in with `jscore-interrupt` on `rong` (or
+  `interrupt-spi` on this crate).
 - Source artifact: downloaded and cached from the pinned artifact manifest, or
   supplied via `RONG_JSC_ROOT`.
   See [`sys/README.md`](sys/README.md) for the full setup, including bytecode

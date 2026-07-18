@@ -148,7 +148,9 @@ a pinned prebuilt artifact when one is listed for the target, or uses
 `RONG_JSC_ROOT` when an explicit artifact is provided. Force
 the source backend on macOS/iOS too with the `jscore-source` feature on the
 `rong` library. See [`javascriptcore/sys/README.md`](javascriptcore/sys/README.md)
-for source-backend setup and bytecode support.
+for source-backend setup and bytecode support. Source/JSCOnly builds always
+enable hard interruption; system-framework builds can opt in with
+`jscore-interrupt`.
 
 Build for ArkJS explicitly on HarmonyOS/OpenHarmony targets:
 
