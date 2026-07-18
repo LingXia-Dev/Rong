@@ -298,6 +298,15 @@ impl JSRuntimeImpl for ArkJSRuntime {
     fn run_gc(&self) {
         // Harmony Ark JS doesn't expose direct GC control
     }
+
+    // Engine preemption is intentionally NOT implemented: the JSVM-API surface
+    // bound here (ark_runtime/jsvm.h, OpenHarmony SDK 20) exposes no
+    // execution-terminate or interrupt-request primitive (no
+    // OH_JSVM_TerminateExecution or equivalent). Keeping the default
+    // `install_interrupt` (returns false) leaves only rong's cooperative
+    // layer: new evaluations are rejected while interrupted, but a
+    // non-yielding loop cannot be broken. Revisit when the SDK exposes a
+    // terminate API.
 }
 
 impl Drop for ArkJSRuntime {

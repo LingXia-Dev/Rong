@@ -16,6 +16,7 @@ pub const E_ILLEGAL_CONSTRUCTOR: &str = "E_ILLEGAL_CONSTRUCTOR";
 pub const E_INTERNAL: &str = "E_INTERNAL";
 pub const E_INVALID_ARG: &str = "E_INVALID_ARG";
 pub const E_INVALID_DATA: &str = "E_INVALID_DATA";
+pub const E_INTERRUPTED: &str = "E_INTERRUPTED";
 pub const E_INVALID_STATE: &str = "E_INVALID_STATE";
 pub const E_IO: &str = "E_IO";
 pub const E_JS_THROWN: &str = "E_JS_THROWN";

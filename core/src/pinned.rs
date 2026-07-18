@@ -45,6 +45,7 @@ pub struct PinnedWorker<E: JSEngine + 'static, K, S> {
     id: usize,
     task_tx: mpsc::Sender<PinnedAsyncTask<E, K, S>>,
     terminate_signal: Arc<Notify>,
+    interrupt: crate::InterruptHandle,
     inflight_tasks: Arc<AtomicUsize>,
     idle_notify: Arc<Notify>,
     any_worker_idle: Arc<Notify>,
@@ -58,6 +59,7 @@ impl<E: JSEngine + 'static, K, S> Clone for PinnedWorker<E, K, S> {
             id: self.id,
             task_tx: self.task_tx.clone(),
             terminate_signal: self.terminate_signal.clone(),
+            interrupt: self.interrupt.clone(),
             inflight_tasks: self.inflight_tasks.clone(),
             idle_notify: self.idle_notify.clone(),
             any_worker_idle: self.any_worker_idle.clone(),
@@ -236,6 +238,18 @@ where
         self.terminate_signal.notify_one();
         Ok(())
     }
+
+    /// The `Send + Sync` handle other threads use to abort JavaScript running
+    /// on this worker (and, until cleared, reject new evaluations). See
+    /// [`crate::InterruptHandle`].
+    ///
+    /// Interruption is deliberately decoupled from [`terminate`](Self::terminate):
+    /// a graceful shutdown lets the in-flight task finish at its next yield,
+    /// while a caller that must break non-yielding JavaScript interrupts
+    /// through this handle explicitly.
+    pub fn interrupt_handle(&self) -> crate::InterruptHandle {
+        self.interrupt.clone()
+    }
 }
 
 struct PinnedRongInner<E: JSEngine + 'static, K: Eq + Hash + Clone + Send + 'static, S: 'static> {
@@ -403,6 +417,7 @@ where
     for worker_id in 0..worker_count {
         let (task_tx, task_rx) = mpsc::channel(task_queue_capacity);
         let terminate_signal = crate::worker_thread::terminate_signal();
+        let interrupt = crate::InterruptHandle::new();
         let inflight_tasks = Arc::new(AtomicUsize::new(0));
         let idle_notify = Arc::new(Notify::new());
         let thread_handle = Arc::new(StdMutex::new(None));
@@ -412,6 +427,7 @@ where
             id: worker_id,
             task_tx,
             terminate_signal: terminate_signal.clone(),
+            interrupt: interrupt.clone(),
             inflight_tasks: inflight_tasks.clone(),
             idle_notify: idle_notify.clone(),
             any_worker_idle: any_worker_idle.clone(),
@@ -434,6 +450,7 @@ where
                     worker_id,
                     task_rx,
                     terminate_signal,
+                    interrupt,
                     inflight_tasks,
                     idle_notify,
                     thread_any_worker_idle,
@@ -492,6 +509,7 @@ async fn run_pinned_worker_loop<E, K, S>(
     worker_id: usize,
     mut task_rx: mpsc::Receiver<PinnedAsyncTask<E, K, S>>,
     terminate_signal: Arc<Notify>,
+    interrupt: crate::InterruptHandle,
     inflight_tasks: Arc<AtomicUsize>,
     idle_notify: Arc<Notify>,
     any_worker_idle: Arc<Notify>,
@@ -506,7 +524,7 @@ async fn run_pinned_worker_loop<E, K, S>(
 
     local
         .run_until(async move {
-            let js_runtime = E::runtime();
+            let js_runtime = E::runtime_with_interrupt(interrupt);
             let _ = ready_tx.send(Ok(()));
             let mut states = HashMap::<K, S>::new();
 

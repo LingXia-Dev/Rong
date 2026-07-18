@@ -1,4 +1,5 @@
 use crate::function::RustFunc;
+use crate::interrupt::InterruptHandle;
 use crate::value::JSBytesData;
 use crate::{
     JSArrayOps, JSContext, JSContextImpl, JSErrorFactory, JSExceptionThrower, JSObjectOps,
@@ -8,6 +9,8 @@ use std::any::TypeId;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
+use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 
 const RONG_VERSION: &str = env!("CARGO_PKG_VERSION");
 const RONG_REVISION: Option<&str> = option_env!("RONG_GIT_REVISION");
@@ -46,12 +49,24 @@ pub trait JSRuntimeImpl {
     /// - The exact behavior depends on the underlying JavaScript engine implementation.
     /// - Use this judiciously as it may impact performance.
     fn run_gc(&self);
+
+    /// Install the shared interruption flag into the engine.
+    ///
+    /// Engines that can preempt running JavaScript (abort a non-yielding loop
+    /// with an uncatchable error while the flag is set) install a native hook
+    /// polling the flag and return `true`. The default keeps only the
+    /// cooperative layer (new evaluations are rejected while interrupted) and
+    /// returns `false`.
+    fn install_interrupt(&self, _flag: Arc<AtomicBool>) -> bool {
+        false
+    }
 }
 
 pub struct JSRuntime<R: JSRuntimeImpl> {
     pub(crate) inner: Rc<R>,
     services: ServiceContainer,
     pub(crate) engine: &'static str,
+    pub(crate) interrupt: InterruptHandle,
 }
 
 impl<R: JSRuntimeImpl> Clone for JSRuntime<R> {
@@ -60,6 +75,7 @@ impl<R: JSRuntimeImpl> Clone for JSRuntime<R> {
             inner: self.inner.clone(),
             services: self.services.clone(),
             engine: self.engine,
+            interrupt: self.interrupt.clone(),
         }
     }
 }
@@ -119,6 +135,12 @@ impl<R: JSRuntimeImpl + 'static> JSRuntime<R> {
     /// - Use this judiciously as it may impact performance.
     pub fn run_gc(&self) {
         self.inner.run_gc();
+    }
+
+    /// The `Send + Sync` handle other threads use to abort JavaScript
+    /// execution on this runtime. See [`InterruptHandle`].
+    pub fn interrupt_handle(&self) -> InterruptHandle {
+        self.interrupt.clone()
     }
 
     /// Get or initialize a runtime service
@@ -183,11 +205,21 @@ pub trait JSEngine: Sized {
     /// - One thread have only one runtime instance.
     /// - This ensures proper isolation and thread-safety in JavaScript execution.
     fn runtime() -> JSRuntime<Self::Runtime> {
+        Self::runtime_with_interrupt(InterruptHandle::new())
+    }
+
+    /// Creates a runtime bound to a pre-existing [`InterruptHandle`], so the
+    /// handle can be shared with other threads before the runtime exists
+    /// (e.g. a worker pool creates the runtime lazily on its own thread).
+    fn runtime_with_interrupt(handle: InterruptHandle) -> JSRuntime<Self::Runtime> {
         let runtime = Rc::new(Self::Runtime::new());
+        let preemption = runtime.install_interrupt(handle.flag().clone());
+        handle.bind_engine(preemption);
         JSRuntime {
             inner: runtime,
             services: ServiceContainer::new(),
             engine: Self::name(),
+            interrupt: handle,
         }
     }
 }

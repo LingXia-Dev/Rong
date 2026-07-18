@@ -5,6 +5,26 @@
 
 include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
 
+/// Watchdog callback for [`JSContextGroupSetExecutionTimeLimit`]: return
+/// `true` to terminate the running script, `false` to grant another period.
+pub type JSShouldTerminateCallback = ::std::option::Option<
+    unsafe extern "C" fn(ctx: JSContextRef, context: *mut ::std::os::raw::c_void) -> bool,
+>;
+
+// Execution time limit SPI from JSContextRefPrivate.h. The header is private
+// (not shipped in the system framework's public Headers/), but the symbols are
+// exported from libJavaScriptCore on both the system and source backends, so
+// they are declared by hand instead of via bindgen.
+unsafe extern "C" {
+    pub fn JSContextGroupSetExecutionTimeLimit(
+        group: JSContextGroupRef,
+        limit: f64,
+        callback: JSShouldTerminateCallback,
+        context: *mut ::std::os::raw::c_void,
+    );
+    pub fn JSContextGroupClearExecutionTimeLimit(group: JSContextGroupRef);
+}
+
 // JavaScriptCore's full one-time global initialization (WTF, option parsing,
 // Gigacage, the executable allocator, signal handlers, Structure tables). The
 // system framework runs this from the dylib's static initializers before
