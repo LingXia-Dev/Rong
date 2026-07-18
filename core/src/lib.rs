@@ -36,7 +36,7 @@ pub use class::{Class, ClassSetup, JSClass};
 pub use context::{JSContext, PromiseHandlerRegistration};
 pub use error::{HostError, JSResult, RongJSError, illegal_constructor};
 pub use function::Constructor;
-pub use interrupt::InterruptHandle;
+pub use interrupt::{InterruptGuard, InterruptHandle, InterruptMode};
 pub use iterator::{
     IntoJSAsyncIteratorExt, IntoJSIteratorExt, JSAsyncIterator, JSIterator,
     install_async_iterator_symbol, install_iterator_symbol,
@@ -63,13 +63,14 @@ pub use engine::{
 
 pub mod prelude {
     pub use crate::{
-        Class, ClassSetup, FromJSValue, HostError, IntoJSAsyncIteratorExt, IntoJSIteratorExt,
-        IntoJSValue, JSArray, JSArrayBuffer, JSArrayBufferOps, JSArrayOps, JSAsyncIterator,
-        JSBytes, JSClass, JSContext, JSContextImpl, JSDate, JSEngine, JSErrorFactory, JSException,
-        JSExceptionThrower, JSFunc, JSIterator, JSObject, JSObjectOps, JSProxy, JSProxyOps,
-        JSRawContext, JSResult, JSRuntime, JSRuntimeImpl, JSSymbol, JSTypeOf, JSTypedArray,
-        JSTypedArrayOps, JSValue, JSValueConversion, JSValueImpl, JSValueMapper, JsInvokePriority,
-        Promise, RongJSError, Source, SourceKind, enqueue_js_invoke, install_async_iterator_symbol,
+        Class, ClassSetup, FromJSValue, HostError, InterruptGuard, InterruptHandle, InterruptMode,
+        IntoJSAsyncIteratorExt, IntoJSIteratorExt, IntoJSValue, JSArray, JSArrayBuffer,
+        JSArrayBufferOps, JSArrayOps, JSAsyncIterator, JSBytes, JSClass, JSContext, JSContextImpl,
+        JSDate, JSEngine, JSErrorFactory, JSException, JSExceptionThrower, JSFunc, JSIterator,
+        JSObject, JSObjectOps, JSProxy, JSProxyOps, JSRawContext, JSResult, JSRuntime,
+        JSRuntimeImpl, JSSymbol, JSTypeOf, JSTypedArray, JSTypedArrayOps, JSValue,
+        JSValueConversion, JSValueImpl, JSValueMapper, JsInvokePriority, Promise, RongJSError,
+        Source, SourceKind, enqueue_js_invoke, install_async_iterator_symbol,
         install_iterator_symbol,
     };
 }
