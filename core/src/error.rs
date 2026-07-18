@@ -652,6 +652,27 @@ impl RongJSError {
         }
     }
 
+    /// The stable host error code, or `None` for an unconverted value thrown by
+    /// JavaScript.
+    pub fn code(&self) -> Option<&'static str> {
+        self.as_host_error().map(|host| host.code)
+    }
+
+    /// Whether this is a host error with the given stable code.
+    pub fn is_code(&self, code: &str) -> bool {
+        self.code() == Some(code)
+    }
+
+    /// Whether JavaScript execution was interrupted.
+    pub fn is_interrupted(&self) -> bool {
+        self.is_code(E_INTERRUPTED)
+    }
+
+    /// Whether a worker task exceeded its requested timeout.
+    pub fn is_timeout(&self) -> bool {
+        self.is_code(E_TIMEOUT)
+    }
+
     pub fn is_thrown(&self) -> bool {
         matches!(self.0, RongJSErrorKind::Thrown(_))
     }

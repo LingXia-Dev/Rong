@@ -1,4 +1,7 @@
-use crate::shared::{MessageReceiver, TaskHandle, ensure_sync_bridge_allowed, spawn_local};
+use crate::shared::{
+    InflightGuard, MessageReceiver, TaskExecutionControl, TaskHandle, ensure_sync_bridge_allowed,
+    spawn_local, task_timeout_error,
+};
 use crate::{HostError, JSEngine, JSResult, JSRuntime};
 use futures::future::Aborted;
 use std::any::Any;
@@ -9,6 +12,7 @@ use std::hash::{Hash, Hasher};
 use std::pin::Pin;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex as StdMutex};
+use std::time::{Duration, Instant};
 use thiserror::Error;
 use tokio::sync::{Notify, mpsc, oneshot};
 use tracing::{Instrument, Span, debug, error, info_span, warn};
@@ -30,6 +34,7 @@ struct PinnedAsyncTask<E: JSEngine + 'static, K, S> {
     future_fn: BoxedPinnedFutureFn<E, K, S>,
     message_receiver: MessageReceiver,
     result_tx: oneshot::Sender<JSResult<Box<dyn Any + Send>>>,
+    execution: Arc<TaskExecutionControl>,
     parent_span: Span,
 }
 
@@ -105,6 +110,11 @@ where
         R: Send + 'static,
     {
         self.inflight_tasks.fetch_add(1, Ordering::SeqCst);
+        let mut inflight_guard = InflightGuard::new(
+            &self.inflight_tasks,
+            &self.idle_notify,
+            &self.any_worker_idle,
+        );
 
         let boxed_fn: BoxedPinnedFutureFn<E, K, S> = Box::new(
             move |runtime: JSRuntime<E::Runtime>,
@@ -125,16 +135,17 @@ where
 
         let (message_tx, message_rx) = mpsc::channel(self.message_queue_capacity);
         let (result_tx, result_rx) = oneshot::channel();
+        let execution = Arc::new(TaskExecutionControl::new(self.interrupt.clone()));
         let task = PinnedAsyncTask {
             key,
             future_fn: boxed_fn,
             message_receiver: MessageReceiver::new(message_rx),
             result_tx,
+            execution: execution.clone(),
             parent_span: Span::current(),
         };
 
         if let Err(error) = self.task_tx.send(task).await {
-            self.decrement_inflight();
             return Err(HostError::new(
                 crate::error::E_INTERNAL,
                 format!(
@@ -144,8 +155,9 @@ where
             )
             .into());
         }
+        inflight_guard.disarm();
 
-        Ok(TaskHandle::new(self.id, message_tx, result_rx))
+        Ok(TaskHandle::new(self.id, message_tx, result_rx, execution))
     }
 
     fn try_spawn_inner<F, Fut, R>(
@@ -179,16 +191,18 @@ where
 
         let (message_tx, message_rx) = mpsc::channel(self.message_queue_capacity);
         let (result_tx, result_rx) = oneshot::channel();
+        let execution = Arc::new(TaskExecutionControl::new(self.interrupt.clone()));
         let task = PinnedAsyncTask {
             key,
             future_fn: boxed_fn,
             message_receiver: MessageReceiver::new(message_rx),
             result_tx,
+            execution: execution.clone(),
             parent_span: Span::current(),
         };
 
         match self.task_tx.try_send(task) {
-            Ok(()) => Ok(TaskHandle::new(self.id, message_tx, result_rx)),
+            Ok(()) => Ok(TaskHandle::new(self.id, message_tx, result_rx, execution)),
             Err(mpsc::error::TrySendError::Full(_)) => {
                 self.decrement_inflight();
                 Err(PinnedSpawnError::QueueFull {
@@ -225,6 +239,67 @@ where
         self.try_spawn_inner(key, future_fn)
     }
 
+    pub async fn call<F, Fut, R>(&self, key: K, future_fn: F) -> JSResult<R>
+    where
+        F: FnOnce(JSRuntime<E::Runtime>, K, Option<S>, MessageReceiver) -> Fut + Send + 'static,
+        Fut: Future<Output = (JSResult<R>, Option<S>)> + 'static,
+        R: Send + 'static,
+    {
+        self.spawn(key, future_fn).await?.join().await
+    }
+
+    /// Run one pinned task with a wall-clock timeout covering queue and
+    /// execution time.
+    pub async fn call_with_timeout<F, Fut, R>(
+        &self,
+        timeout: Duration,
+        key: K,
+        future_fn: F,
+    ) -> JSResult<R>
+    where
+        F: FnOnce(JSRuntime<E::Runtime>, K, Option<S>, MessageReceiver) -> Fut + Send + 'static,
+        Fut: Future<Output = (JSResult<R>, Option<S>)> + 'static,
+        R: Send + 'static,
+    {
+        let started = Instant::now();
+        let handle = tokio::time::timeout(timeout, self.spawn(key, future_fn))
+            .await
+            .map_err(|_| task_timeout_error(self.id, timeout))??;
+        handle
+            .join_with_timeout_reported(timeout.saturating_sub(started.elapsed()), timeout)
+            .await
+    }
+
+    pub fn call_blocking<F, Fut, R>(&self, key: K, future_fn: F) -> JSResult<R>
+    where
+        F: FnOnce(JSRuntime<E::Runtime>, K, Option<S>, MessageReceiver) -> Fut + Send + 'static,
+        Fut: Future<Output = (JSResult<R>, Option<S>)> + 'static,
+        R: Send + 'static,
+    {
+        ensure_sync_bridge_allowed("PinnedWorker::call_blocking")?;
+        rong_rt::RongExecutor::global()
+            .handle()
+            .block_on(self.call(key, future_fn))
+    }
+
+    /// Blocking counterpart to [`call_with_timeout`](Self::call_with_timeout).
+    pub fn call_blocking_with_timeout<F, Fut, R>(
+        &self,
+        timeout: Duration,
+        key: K,
+        future_fn: F,
+    ) -> JSResult<R>
+    where
+        F: FnOnce(JSRuntime<E::Runtime>, K, Option<S>, MessageReceiver) -> Fut + Send + 'static,
+        Fut: Future<Output = (JSResult<R>, Option<S>)> + 'static,
+        R: Send + 'static,
+    {
+        ensure_sync_bridge_allowed("PinnedWorker::call_blocking_with_timeout")?;
+        rong_rt::RongExecutor::global()
+            .handle()
+            .block_on(self.call_with_timeout(timeout, key, future_fn))
+    }
+
     pub async fn join(&self) -> JSResult<()> {
         loop {
             if self.inflight_tasks.load(Ordering::SeqCst) == 0 {
@@ -237,6 +312,21 @@ where
     pub fn terminate(&self) -> JSResult<()> {
         self.terminate_signal.notify_one();
         Ok(())
+    }
+
+    /// Request a persistent hard interruption on this worker.
+    pub fn interrupt(&self) {
+        self.interrupt.interrupt();
+    }
+
+    /// Clear a persistent request made through [`interrupt`](Self::interrupt).
+    pub fn clear_interrupt(&self) {
+        self.interrupt.clear();
+    }
+
+    /// The interruption behavior of this worker's engine.
+    pub fn interrupt_mode(&self) -> crate::InterruptMode {
+        self.interrupt.mode()
     }
 
     /// The `Send + Sync` handle other threads use to abort JavaScript running
@@ -349,6 +439,24 @@ where
         self.spawn(key, future_fn).await?.join().await
     }
 
+    /// Dispatch one pinned task with a wall-clock timeout covering queue and
+    /// execution time.
+    pub async fn call_with_timeout<F, Fut, R>(
+        &self,
+        timeout: Duration,
+        key: K,
+        future_fn: F,
+    ) -> JSResult<R>
+    where
+        F: FnOnce(JSRuntime<E::Runtime>, K, Option<S>, MessageReceiver) -> Fut + Send + 'static,
+        Fut: Future<Output = (JSResult<R>, Option<S>)> + 'static,
+        R: Send + 'static,
+    {
+        self.worker_for_key(&key)
+            .call_with_timeout(timeout, key, future_fn)
+            .await
+    }
+
     pub fn call_blocking<F, Fut, R>(&self, key: K, future_fn: F) -> JSResult<R>
     where
         F: FnOnce(JSRuntime<E::Runtime>, K, Option<S>, MessageReceiver) -> Fut + Send + 'static,
@@ -359,6 +467,24 @@ where
         rong_rt::RongExecutor::global()
             .handle()
             .block_on(self.call(key, future_fn))
+    }
+
+    /// Blocking counterpart to [`call_with_timeout`](Self::call_with_timeout).
+    pub fn call_blocking_with_timeout<F, Fut, R>(
+        &self,
+        timeout: Duration,
+        key: K,
+        future_fn: F,
+    ) -> JSResult<R>
+    where
+        F: FnOnce(JSRuntime<E::Runtime>, K, Option<S>, MessageReceiver) -> Fut + Send + 'static,
+        Fut: Future<Output = (JSResult<R>, Option<S>)> + 'static,
+        R: Send + 'static,
+    {
+        ensure_sync_bridge_allowed("PinnedRong::call_blocking_with_timeout")?;
+        rong_rt::RongExecutor::global()
+            .handle()
+            .block_on(self.call_with_timeout(timeout, key, future_fn))
     }
 
     pub async fn join(&self) -> JSResult<()> {
@@ -554,6 +680,7 @@ async fn run_pinned_worker_loop<E, K, S>(
             let mut current_task_join: Option<TaskJoinHandle<K, S>> = None;
             let mut current_task_abort: Option<futures::future::AbortHandle> = None;
             let mut current_result_tx: Option<oneshot::Sender<JSResult<Box<dyn Any + Send>>>> = None;
+            let mut current_execution: Option<Arc<TaskExecutionControl>> = None;
             let mut current_task_span: Option<Span> = None;
             let mut shutting_down = false;
 
@@ -571,25 +698,49 @@ async fn run_pinned_worker_loop<E, K, S>(
                     maybe_task = task_rx.recv(), if current_task_join.is_none() && !shutting_down => {
                         match maybe_task {
                             Some(task) => {
-                                let task_span = info_span!(parent: &task.parent_span, "rong.pinned_task", worker_id = worker_id);
-                                debug!(target: "rong", parent: &task_span, "pinned worker task started");
+                                let PinnedAsyncTask {
+                                    key,
+                                    future_fn,
+                                    message_receiver,
+                                    result_tx,
+                                    execution,
+                                    parent_span,
+                                } = task;
+                                let task_span = info_span!(parent: &parent_span, "rong.pinned_task", worker_id = worker_id);
 
-                                let key = task.key;
-                                let state = states.remove(&key);
-                                let result_tx = task.result_tx;
-                                let message_receiver = task.message_receiver;
-                                let future = (task.future_fn)(js_runtime.clone(), key.clone(), state, message_receiver);
-                                let task_future = async move {
-                                    let (result, state) = future.await;
-                                    (result, key, state)
+                                if execution.begin_start() {
+                                    let state = states.remove(&key);
+                                    let future = future_fn(js_runtime.clone(), key.clone(), state, message_receiver);
+                                    let task_future = async move {
+                                        let (result, state) = future.await;
+                                        (result, key, state)
+                                    }
+                                    .instrument(task_span.clone());
+                                    let (abortable_future, abort_handle) = futures::future::abortable(task_future);
+
+                                    if execution.install_abort(abort_handle.clone()) {
+                                        debug!(target: "rong", parent: &task_span, "pinned worker task started");
+                                        current_task_abort = Some(abort_handle);
+                                        current_result_tx = Some(result_tx);
+                                        current_execution = Some(execution);
+                                        current_task_span = Some(task_span.clone());
+                                        current_task_join = Some(spawn_local(abortable_future.instrument(task_span)));
+                                    } else {
+                                        let timeout = execution.finish().expect("a cancelled starting pinned task has a timeout");
+                                        let _ = result_tx.send(Err(task_timeout_error(worker_id, timeout)));
+                                        if inflight_tasks.fetch_sub(1, Ordering::SeqCst) == 1 {
+                                            idle_notify.notify_waiters();
+                                            any_worker_idle.notify_one();
+                                        }
+                                    }
+                                } else {
+                                    let timeout = execution.finish().expect("a cancelled queued pinned task has a timeout");
+                                    let _ = result_tx.send(Err(task_timeout_error(worker_id, timeout)));
+                                    if inflight_tasks.fetch_sub(1, Ordering::SeqCst) == 1 {
+                                        idle_notify.notify_waiters();
+                                        any_worker_idle.notify_one();
+                                    }
                                 }
-                                .instrument(task_span.clone());
-                                let (abortable_future, abort_handle) = futures::future::abortable(task_future);
-
-                                current_task_abort = Some(abort_handle);
-                                current_result_tx = Some(result_tx);
-                                current_task_span = Some(task_span.clone());
-                                current_task_join = Some(spawn_local(abortable_future.instrument(task_span)));
                             }
                             None => {
                                 shutting_down = true;
@@ -598,24 +749,31 @@ async fn run_pinned_worker_loop<E, K, S>(
                     }
 
                     task_result = async { current_task_join.as_mut().unwrap().await }, if current_task_join.is_some() => {
-                        let final_result = match task_result {
-                            Ok(Ok((inner, key, state))) => {
-                                if let Some(state) = state {
-                                    states.insert(key, state);
+                        let timeout = current_execution
+                            .take()
+                            .and_then(|execution| execution.finish());
+                        let final_result = if let Some(timeout) = timeout {
+                            Err(task_timeout_error(worker_id, timeout))
+                        } else {
+                            match task_result {
+                                Ok(Ok((inner, key, state))) => {
+                                    if let Some(state) = state {
+                                        states.insert(key, state);
+                                    }
+                                    inner
                                 }
-                                inner
-                            }
-                            Ok(Err(_)) => Err(HostError::aborted(None).into()),
-                            Err(join_error) => {
-                                if let Some(task_span) = current_task_span.as_ref() {
-                                    error!(target: "rong", parent: task_span, worker_id = worker_id, error = ?join_error, "pinned task panicked or runtime dropped");
-                                } else {
-                                    error!(target: "rong", parent: &worker_span, worker_id = worker_id, error = ?join_error, "pinned task panicked or runtime dropped");
+                                Ok(Err(_)) => Err(HostError::aborted(None).into()),
+                                Err(join_error) => {
+                                    if let Some(task_span) = current_task_span.as_ref() {
+                                        error!(target: "rong", parent: task_span, worker_id = worker_id, error = ?join_error, "pinned task panicked or runtime dropped");
+                                    } else {
+                                        error!(target: "rong", parent: &worker_span, worker_id = worker_id, error = ?join_error, "pinned task panicked or runtime dropped");
+                                    }
+                                    Err(HostError::new(
+                                        crate::error::E_INTERNAL,
+                                        format!("Pinned task panicked or runtime dropped: {}", join_error),
+                                    ).into())
                                 }
-                                Err(HostError::new(
-                                    crate::error::E_INTERNAL,
-                                    format!("Pinned task panicked or runtime dropped: {}", join_error),
-                                ).into())
                             }
                         };
 
@@ -639,7 +797,11 @@ async fn run_pinned_worker_loop<E, K, S>(
             }
 
             while let Ok(task) = task_rx.try_recv() {
-                let _ = task.result_tx.send(Err(HostError::aborted(None).into()));
+                let result = match task.execution.finish() {
+                    Some(timeout) => Err(task_timeout_error(worker_id, timeout)),
+                    None => Err(HostError::aborted(None).into()),
+                };
+                let _ = task.result_tx.send(result);
                 if inflight_tasks.fetch_sub(1, Ordering::SeqCst) == 1 {
                     idle_notify.notify_waiters();
                     any_worker_idle.notify_one();

@@ -462,6 +462,10 @@ impl<C: JSContextImpl> JSContext<C> {
         } else {
             self.rc.inner.eval(source)
         };
+        // Native engines surface their own termination sentinel. Normalize it
+        // while the request is still active so callers can match E_INTERRUPTED
+        // without knowing which engine ran the code.
+        self.check_interrupt()?;
         result.try_convert::<T>()
     }
 
@@ -700,10 +704,14 @@ impl<C: JSContextImpl> JSContext<C> {
     /// }
     /// ```
     pub fn compile_to_bytecode<T: AsRef<[u8]>>(&self, code: T) -> JSResult<Source> {
-        self.rc
+        self.check_interrupt()?;
+        let result = self
+            .rc
             .inner
             .compile_to_bytecode(Source::from_bytes(code.as_ref()))
-            .map(Source::from_bytecode)
+            .map(Source::from_bytecode);
+        self.check_interrupt()?;
+        result
     }
 
     /// Evaluate JavaScript code and handle both Promise and immediate results
@@ -730,12 +738,17 @@ impl<C: JSContextImpl> JSContext<C> {
             self.rc.inner.eval(source)
         };
 
-        if result.is_promise() {
+        self.check_interrupt()?;
+
+        let output = if result.is_promise() {
             let promise = Promise::from_js_value(self, JSValue::from_raw(self, result))?;
             promise.into_future::<T>().await
         } else {
             result.try_convert::<T>()
-        }
+        };
+
+        self.check_interrupt()?;
+        output
     }
 
     /// Cooperative interruption layer: reject newly submitted evaluations

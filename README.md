@@ -106,6 +106,33 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 You must choose an execution model explicitly. There is no implicit
 `builder().build()` default.
 
+### Execution timeouts
+
+Prefer a task-scoped timeout when JavaScript execution must be bounded:
+
+```rust
+use std::time::Duration;
+
+let value: i32 = rong.call_with_timeout(
+    Duration::from_secs(1),
+    |runtime, _receiver| async move {
+        runtime.context().eval(Source::from_bytes("21 * 2"))
+    },
+).await?;
+```
+
+The deadline covers worker selection, queueing, and execution. A queued timeout
+does not interrupt the task ahead of it; a running timeout aborts the Rust
+future and interrupts JavaScript, then clears only its own request before the
+worker is reused. Timeouts return `E_TIMEOUT` and can be matched with
+`RongJSError::is_timeout()`.
+
+For manual supervision, `Worker::interrupt_mode()` reports
+`InterruptMode::{Cooperative, Preemptive}`, while `interrupt_handle()` exposes
+persistent and scoped low-level requests. See
+[Execution timeouts and interruption](docs/guides/interruption.md) for lifecycle,
+engine capability, error, and shutdown semantics.
+
 ## Advanced Runtime Control
 
 Most users do not need to construct `RongExecutor` directly. Rong host services
@@ -123,6 +150,7 @@ Reach for `RongExecutor::builder()` only when you need to:
 - [`examples/src/worker.rs`](examples/src/worker.rs) for a runnable shared worker example
 - [`examples/src/point.rs`](examples/src/point.rs) for class bindings
 - [`examples/src/executor.rs`](examples/src/executor.rs) for custom `RongExecutor` setup
+- [Execution timeouts and interruption](docs/guides/interruption.md) for bounded execution and hard interruption
 - [Worker Execution Model](docs/internals/worker_execution_model.md) for `shared` vs `pinned`
 - [Module Development Guide](docs/internals/module_development.md) for writing
   Rust-driven JS APIs, classes, and modules

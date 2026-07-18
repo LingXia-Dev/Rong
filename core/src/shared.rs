@@ -5,6 +5,7 @@ use std::marker::PhantomData;
 use std::pin::Pin;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex as StdMutex};
+use std::time::{Duration, Instant};
 use tokio::sync::{Notify, mpsc, oneshot};
 use tracing::{Instrument, Span, debug, error, info_span, warn};
 
@@ -43,10 +44,162 @@ type BoxedTaskFuture = Pin<Box<dyn Future<Output = JSResult<Box<dyn Any + Send>>
 type BoxedFutureFn<E> =
     Box<dyn FnOnce(JSRuntime<<E as JSEngine>::Runtime>, MessageReceiver) -> BoxedTaskFuture + Send>;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum TaskExecutionPhase {
+    Queued,
+    Starting,
+    Running,
+    TimedOut,
+    Finished,
+}
+
+struct TaskExecutionState {
+    phase: TaskExecutionPhase,
+    abort_handle: Option<futures::future::AbortHandle>,
+    timeout: Option<Duration>,
+    timeout_interrupt: Option<crate::InterruptGuard>,
+}
+
+pub(crate) struct TaskExecutionControl {
+    interrupt: crate::InterruptHandle,
+    state: StdMutex<TaskExecutionState>,
+}
+
+impl TaskExecutionControl {
+    pub(crate) fn new(interrupt: crate::InterruptHandle) -> Self {
+        Self {
+            interrupt,
+            state: StdMutex::new(TaskExecutionState {
+                phase: TaskExecutionPhase::Queued,
+                abort_handle: None,
+                timeout: None,
+                timeout_interrupt: None,
+            }),
+        }
+    }
+
+    /// Claim a queued task before invoking its future factory.
+    pub(crate) fn begin_start(&self) -> bool {
+        let mut state = self.state.lock().unwrap_or_else(|err| err.into_inner());
+        if state.phase != TaskExecutionPhase::Queued {
+            return false;
+        }
+        state.phase = TaskExecutionPhase::Starting;
+        true
+    }
+
+    /// Publish the abort handle once the task future has been constructed.
+    pub(crate) fn install_abort(&self, abort_handle: futures::future::AbortHandle) -> bool {
+        let mut state = self.state.lock().unwrap_or_else(|err| err.into_inner());
+        if state.phase == TaskExecutionPhase::Starting {
+            state.phase = TaskExecutionPhase::Running;
+            state.abort_handle = Some(abort_handle);
+            true
+        } else {
+            debug_assert_eq!(state.phase, TaskExecutionPhase::TimedOut);
+            abort_handle.abort();
+            false
+        }
+    }
+
+    /// Win the deadline race and cancel only this task.
+    fn request_timeout(&self, timeout: Duration) -> bool {
+        let mut state = self.state.lock().unwrap_or_else(|err| err.into_inner());
+        match state.phase {
+            TaskExecutionPhase::Queued => {
+                state.phase = TaskExecutionPhase::TimedOut;
+                state.timeout = Some(timeout);
+                true
+            }
+            TaskExecutionPhase::Starting | TaskExecutionPhase::Running => {
+                state.phase = TaskExecutionPhase::TimedOut;
+                state.timeout = Some(timeout);
+                state.timeout_interrupt = Some(self.interrupt.interrupt_scoped());
+                if let Some(abort_handle) = state.abort_handle.as_ref() {
+                    abort_handle.abort();
+                }
+                true
+            }
+            TaskExecutionPhase::TimedOut => true,
+            TaskExecutionPhase::Finished => false,
+        }
+    }
+
+    /// Close the execution boundary and release this task's interrupt request.
+    pub(crate) fn finish(&self) -> Option<Duration> {
+        let (timeout, timeout_interrupt) = {
+            let mut state = self.state.lock().unwrap_or_else(|err| err.into_inner());
+            state.phase = TaskExecutionPhase::Finished;
+            state.abort_handle = None;
+            (state.timeout.take(), state.timeout_interrupt.take())
+        };
+        drop(timeout_interrupt);
+        timeout
+    }
+}
+
+pub(crate) fn task_timeout_error(worker_id: usize, timeout: Duration) -> crate::RongJSError {
+    let timeout_ms = u64::try_from(timeout.as_millis()).unwrap_or(u64::MAX);
+    HostError::new(
+        crate::error::E_TIMEOUT,
+        format!("Worker task on worker {worker_id} timed out after {timeout:?}"),
+    )
+    .with_name("TimeoutError")
+    .with_data(crate::err_data!({ worker_id: worker_id, timeout_ms: timeout_ms }))
+    .into()
+}
+
+fn pool_timeout_error(timeout: Duration) -> crate::RongJSError {
+    let timeout_ms = u64::try_from(timeout.as_millis()).unwrap_or(u64::MAX);
+    HostError::new(
+        crate::error::E_TIMEOUT,
+        format!("Worker pool task timed out after {timeout:?}"),
+    )
+    .with_name("TimeoutError")
+    .with_data(crate::err_data!({ timeout_ms: timeout_ms }))
+    .into()
+}
+
+pub(crate) struct InflightGuard<'a> {
+    inflight_tasks: &'a AtomicUsize,
+    idle_notify: &'a Notify,
+    any_worker_idle: &'a Notify,
+    armed: bool,
+}
+
+impl<'a> InflightGuard<'a> {
+    pub(crate) fn new(
+        inflight_tasks: &'a AtomicUsize,
+        idle_notify: &'a Notify,
+        any_worker_idle: &'a Notify,
+    ) -> Self {
+        Self {
+            inflight_tasks,
+            idle_notify,
+            any_worker_idle,
+            armed: true,
+        }
+    }
+
+    pub(crate) fn disarm(&mut self) {
+        self.armed = false;
+    }
+}
+
+impl Drop for InflightGuard<'_> {
+    fn drop(&mut self) {
+        if self.armed && self.inflight_tasks.fetch_sub(1, Ordering::SeqCst) == 1 {
+            self.idle_notify.notify_waiters();
+            self.any_worker_idle.notify_one();
+        }
+    }
+}
+
 struct UserAsyncTask<E: JSEngine + 'static> {
     future_fn: BoxedFutureFn<E>,
     message_receiver: MessageReceiver,
     result_tx: oneshot::Sender<JSResult<Box<dyn Any + Send>>>,
+    execution: Arc<TaskExecutionControl>,
     parent_span: Span,
 }
 
@@ -54,6 +207,7 @@ pub struct TaskHandle<R> {
     worker_id: usize,
     message_tx: mpsc::Sender<TaskMessage>,
     result_rx: oneshot::Receiver<JSResult<Box<dyn Any + Send>>>,
+    execution: Arc<TaskExecutionControl>,
     _marker: PhantomData<R>,
 }
 
@@ -65,11 +219,13 @@ where
         worker_id: usize,
         message_tx: mpsc::Sender<TaskMessage>,
         result_rx: oneshot::Receiver<JSResult<Box<dyn Any + Send>>>,
+        execution: Arc<TaskExecutionControl>,
     ) -> Self {
         Self {
             worker_id,
             message_tx,
             result_rx,
+            execution,
             _marker: PhantomData,
         }
     }
@@ -92,12 +248,52 @@ where
     }
 
     pub async fn join(self) -> JSResult<R> {
-        let result = self.result_rx.await.map_err(|e| {
+        Self::decode_result(self.worker_id, self.result_rx.await)
+    }
+
+    /// Wait for the task, cancelling it if the timeout elapses first.
+    ///
+    /// The timeout includes time spent in the worker queue. A queued task is
+    /// cancelled without interrupting the task currently using that worker. A
+    /// running task has both its Rust future aborted and its JavaScript runtime
+    /// interrupted. The worker releases that scoped interruption before it
+    /// starts another task.
+    ///
+    /// On a cooperative-only engine, non-yielding synchronous JavaScript cannot
+    /// be preempted; this method still returns `E_TIMEOUT`, but that worker stays
+    /// busy until the engine call returns.
+    pub async fn join_with_timeout(self, timeout: Duration) -> JSResult<R> {
+        self.join_with_timeout_reported(timeout, timeout).await
+    }
+
+    pub(crate) async fn join_with_timeout_reported(
+        self,
+        wait_timeout: Duration,
+        reported_timeout: Duration,
+    ) -> JSResult<R> {
+        let worker_id = self.worker_id;
+        let execution = self.execution;
+        let mut result_rx = self.result_rx;
+
+        match tokio::time::timeout(wait_timeout, &mut result_rx).await {
+            Ok(result) => Self::decode_result(worker_id, result),
+            Err(_) if execution.request_timeout(reported_timeout) => {
+                Err(task_timeout_error(worker_id, reported_timeout))
+            }
+            Err(_) => Self::decode_result(worker_id, result_rx.await),
+        }
+    }
+
+    fn decode_result(
+        worker_id: usize,
+        result: Result<JSResult<Box<dyn Any + Send>>, oneshot::error::RecvError>,
+    ) -> JSResult<R> {
+        let result = result.map_err(|e| {
             HostError::new(
                 crate::error::E_INTERNAL,
                 format!(
                     "Failed to receive task result from worker {}: {:?}",
-                    self.worker_id, e
+                    worker_id, e
                 ),
             )
         })??;
@@ -151,13 +347,6 @@ impl<E: JSEngine + 'static> Worker<E> {
         self.inflight_tasks.fetch_add(1, Ordering::SeqCst);
     }
 
-    pub(crate) fn decrement_inflight(&self) {
-        if self.inflight_tasks.fetch_sub(1, Ordering::SeqCst) == 1 {
-            self.idle_notify.notify_waiters();
-            self.any_worker_idle.notify_one();
-        }
-    }
-
     pub(crate) async fn spawn_inner<F, Fut, R>(
         &self,
         future_fn: F,
@@ -171,6 +360,11 @@ impl<E: JSEngine + 'static> Worker<E> {
         if !already_reserved {
             self.increment_inflight();
         }
+        let mut inflight_guard = InflightGuard::new(
+            &self.inflight_tasks,
+            &self.idle_notify,
+            &self.any_worker_idle,
+        );
 
         let boxed_fn: BoxedFutureFn<E> = Box::new(
             move |runtime: JSRuntime<E::Runtime>, receiver: MessageReceiver| {
@@ -186,26 +380,29 @@ impl<E: JSEngine + 'static> Worker<E> {
 
         let (message_tx, message_rx) = mpsc::channel(self.message_queue_capacity);
         let (result_tx, result_rx) = oneshot::channel();
+        let execution = Arc::new(TaskExecutionControl::new(self.interrupt.clone()));
         let task = UserAsyncTask {
             future_fn: boxed_fn,
             message_receiver: MessageReceiver::new(message_rx),
             result_tx,
+            execution: execution.clone(),
             parent_span: Span::current(),
         };
 
         if let Err(e) = self.task_tx.send(task).await {
-            self.decrement_inflight();
             return Err(HostError::new(
                 crate::error::E_INTERNAL,
                 format!("Failed to queue task on worker {}: {:?}", self.id, e),
             )
             .into());
         }
+        inflight_guard.disarm();
 
         Ok(TaskHandle {
             worker_id: self.id,
             message_tx,
             result_rx,
+            execution,
             _marker: PhantomData,
         })
     }
@@ -228,6 +425,22 @@ impl<E: JSEngine + 'static> Worker<E> {
         self.spawn(future_fn).await?.join().await
     }
 
+    /// Run one task with a wall-clock timeout covering queue and execution time.
+    pub async fn call_with_timeout<F, Fut, R>(&self, timeout: Duration, future_fn: F) -> JSResult<R>
+    where
+        F: FnOnce(JSRuntime<E::Runtime>, MessageReceiver) -> Fut + Send + 'static,
+        Fut: Future<Output = JSResult<R>> + 'static,
+        R: Send + 'static,
+    {
+        let started = Instant::now();
+        let handle = tokio::time::timeout(timeout, self.spawn(future_fn))
+            .await
+            .map_err(|_| task_timeout_error(self.id, timeout))??;
+        handle
+            .join_with_timeout_reported(timeout.saturating_sub(started.elapsed()), timeout)
+            .await
+    }
+
     pub fn call_blocking<F, Fut, R>(&self, future_fn: F) -> JSResult<R>
     where
         F: FnOnce(JSRuntime<E::Runtime>, MessageReceiver) -> Fut + Send + 'static,
@@ -238,6 +451,23 @@ impl<E: JSEngine + 'static> Worker<E> {
         rong_rt::RongExecutor::global()
             .handle()
             .block_on(self.call(future_fn))
+    }
+
+    /// Blocking counterpart to [`call_with_timeout`](Self::call_with_timeout).
+    pub fn call_blocking_with_timeout<F, Fut, R>(
+        &self,
+        timeout: Duration,
+        future_fn: F,
+    ) -> JSResult<R>
+    where
+        F: FnOnce(JSRuntime<E::Runtime>, MessageReceiver) -> Fut + Send + 'static,
+        Fut: Future<Output = JSResult<R>> + 'static,
+        R: Send + 'static,
+    {
+        ensure_sync_bridge_allowed("Worker::call_blocking_with_timeout")?;
+        rong_rt::RongExecutor::global()
+            .handle()
+            .block_on(self.call_with_timeout(timeout, future_fn))
     }
 
     pub async fn join(&self) -> JSResult<()> {
@@ -252,6 +482,24 @@ impl<E: JSEngine + 'static> Worker<E> {
     pub fn terminate(&self) -> JSResult<()> {
         self.terminate_signal.notify_one();
         Ok(())
+    }
+
+    /// Request a persistent hard interruption on this worker.
+    ///
+    /// Call [`clear_interrupt`](Self::clear_interrupt) before reusing it. For a
+    /// task-scoped deadline, prefer [`call_with_timeout`](Self::call_with_timeout).
+    pub fn interrupt(&self) {
+        self.interrupt.interrupt();
+    }
+
+    /// Clear a persistent request made through [`interrupt`](Self::interrupt).
+    pub fn clear_interrupt(&self) {
+        self.interrupt.clear();
+    }
+
+    /// The interruption behavior of this worker's engine.
+    pub fn interrupt_mode(&self) -> crate::InterruptMode {
+        self.interrupt.mode()
     }
 
     /// The `Send + Sync` handle other threads use to abort JavaScript running
@@ -349,6 +597,23 @@ impl<E: JSEngine + 'static> Rong<E> {
         self.spawn(future_fn).await?.join().await
     }
 
+    /// Dispatch one task with a wall-clock timeout covering queue and execution
+    /// time.
+    pub async fn call_with_timeout<F, Fut, R>(&self, timeout: Duration, future_fn: F) -> JSResult<R>
+    where
+        F: FnOnce(JSRuntime<E::Runtime>, MessageReceiver) -> Fut + Send + 'static,
+        Fut: Future<Output = JSResult<R>> + 'static,
+        R: Send + 'static,
+    {
+        let started = Instant::now();
+        let handle = tokio::time::timeout(timeout, self.spawn(future_fn))
+            .await
+            .map_err(|_| pool_timeout_error(timeout))??;
+        handle
+            .join_with_timeout_reported(timeout.saturating_sub(started.elapsed()), timeout)
+            .await
+    }
+
     pub fn call_blocking<F, Fut, R>(&self, future_fn: F) -> JSResult<R>
     where
         F: FnOnce(JSRuntime<E::Runtime>, MessageReceiver) -> Fut + Send + 'static,
@@ -359,6 +624,23 @@ impl<E: JSEngine + 'static> Rong<E> {
         rong_rt::RongExecutor::global()
             .handle()
             .block_on(self.call(future_fn))
+    }
+
+    /// Blocking counterpart to [`call_with_timeout`](Self::call_with_timeout).
+    pub fn call_blocking_with_timeout<F, Fut, R>(
+        &self,
+        timeout: Duration,
+        future_fn: F,
+    ) -> JSResult<R>
+    where
+        F: FnOnce(JSRuntime<E::Runtime>, MessageReceiver) -> Fut + Send + 'static,
+        Fut: Future<Output = JSResult<R>> + 'static,
+        R: Send + 'static,
+    {
+        ensure_sync_bridge_allowed("Rong::call_blocking_with_timeout")?;
+        rong_rt::RongExecutor::global()
+            .handle()
+            .block_on(self.call_with_timeout(timeout, future_fn))
     }
 
     pub async fn join(&self) -> JSResult<()> {
@@ -576,6 +858,7 @@ async fn run_worker_loop<E: JSEngine + 'static>(
             let mut current_task_join: Option<TaskJoinHandle> = None;
             let mut current_task_abort: Option<futures::future::AbortHandle> = None;
             let mut current_result_tx: Option<oneshot::Sender<JSResult<Box<dyn Any + Send>>>> = None;
+            let mut current_execution: Option<Arc<TaskExecutionControl>> = None;
             let mut current_task_span: Option<Span> = None;
             let mut shutting_down = false;
 
@@ -593,17 +876,43 @@ async fn run_worker_loop<E: JSEngine + 'static>(
                     maybe_task = task_rx.recv(), if current_task_join.is_none() && !shutting_down => {
                         match maybe_task {
                             Some(task) => {
-                                let task_span = info_span!(parent: &task.parent_span, "rong.task", worker_id = worker_id);
-                                debug!(target: "rong", parent: &task_span, "worker task started");
+                                let UserAsyncTask {
+                                    future_fn,
+                                    message_receiver,
+                                    result_tx,
+                                    execution,
+                                    parent_span,
+                                } = task;
+                                let task_span = info_span!(parent: &parent_span, "rong.task", worker_id = worker_id);
 
-                                let future = (task.future_fn)(js_runtime.clone(), task.message_receiver)
-                                    .instrument(task_span.clone());
-                                let (abortable_future, abort_handle) = futures::future::abortable(future);
+                                if execution.begin_start() {
+                                    let future = future_fn(js_runtime.clone(), message_receiver)
+                                        .instrument(task_span.clone());
+                                    let (abortable_future, abort_handle) = futures::future::abortable(future);
 
-                                current_task_abort = Some(abort_handle);
-                                current_result_tx = Some(task.result_tx);
-                                current_task_span = Some(task_span.clone());
-                                current_task_join = Some(spawn_local(abortable_future.instrument(task_span)));
+                                    if execution.install_abort(abort_handle.clone()) {
+                                        debug!(target: "rong", parent: &task_span, "worker task started");
+                                        current_task_abort = Some(abort_handle);
+                                        current_result_tx = Some(result_tx);
+                                        current_execution = Some(execution);
+                                        current_task_span = Some(task_span.clone());
+                                        current_task_join = Some(spawn_local(abortable_future.instrument(task_span)));
+                                    } else {
+                                        let timeout = execution.finish().expect("a cancelled starting task has a timeout");
+                                        let _ = result_tx.send(Err(task_timeout_error(worker_id, timeout)));
+                                        if inflight_tasks.fetch_sub(1, Ordering::SeqCst) == 1 {
+                                            idle_notify.notify_waiters();
+                                            any_worker_idle.notify_one();
+                                        }
+                                    }
+                                } else {
+                                    let timeout = execution.finish().expect("a cancelled queued task has a timeout");
+                                    let _ = result_tx.send(Err(task_timeout_error(worker_id, timeout)));
+                                    if inflight_tasks.fetch_sub(1, Ordering::SeqCst) == 1 {
+                                        idle_notify.notify_waiters();
+                                        any_worker_idle.notify_one();
+                                    }
+                                }
                             }
                             None => {
                                 shutting_down = true;
@@ -612,19 +921,26 @@ async fn run_worker_loop<E: JSEngine + 'static>(
                     }
 
                     task_result = async { current_task_join.as_mut().unwrap().await }, if current_task_join.is_some() => {
-                        let final_result = match task_result {
-                            Ok(Ok(inner)) => inner,
-                            Ok(Err(_)) => Err(HostError::aborted(None).into()),
-                            Err(join_error) => {
-                                if let Some(task_span) = current_task_span.as_ref() {
-                                    error!(target: "rong", parent: task_span, worker_id = worker_id, error = ?join_error, "user task panicked or runtime dropped");
-                                } else {
-                                    error!(target: "rong", parent: &worker_span, worker_id = worker_id, error = ?join_error, "user task panicked or runtime dropped");
+                        let timeout = current_execution
+                            .take()
+                            .and_then(|execution| execution.finish());
+                        let final_result = if let Some(timeout) = timeout {
+                            Err(task_timeout_error(worker_id, timeout))
+                        } else {
+                            match task_result {
+                                Ok(Ok(inner)) => inner,
+                                Ok(Err(_)) => Err(HostError::aborted(None).into()),
+                                Err(join_error) => {
+                                    if let Some(task_span) = current_task_span.as_ref() {
+                                        error!(target: "rong", parent: task_span, worker_id = worker_id, error = ?join_error, "user task panicked or runtime dropped");
+                                    } else {
+                                        error!(target: "rong", parent: &worker_span, worker_id = worker_id, error = ?join_error, "user task panicked or runtime dropped");
+                                    }
+                                    Err(HostError::new(
+                                        crate::error::E_INTERNAL,
+                                        format!("User task panicked or runtime dropped: {}", join_error),
+                                    ).into())
                                 }
-                                Err(HostError::new(
-                                    crate::error::E_INTERNAL,
-                                    format!("User task panicked or runtime dropped: {}", join_error),
-                                ).into())
                             }
                         };
 
@@ -648,7 +964,11 @@ async fn run_worker_loop<E: JSEngine + 'static>(
             }
 
             while let Ok(task) = task_rx.try_recv() {
-                let _ = task.result_tx.send(Err(HostError::aborted(None).into()));
+                let result = match task.execution.finish() {
+                    Some(timeout) => Err(task_timeout_error(worker_id, timeout)),
+                    None => Err(HostError::aborted(None).into()),
+                };
+                let _ = task.result_tx.send(result);
                 if inflight_tasks.fetch_sub(1, Ordering::SeqCst) == 1 {
                     idle_notify.notify_waiters();
                     any_worker_idle.notify_one();

@@ -1,8 +1,8 @@
 pub use rong_core::err_data;
 pub use rong_core::{
     AnyJSTypedArray as CoreAnyJSTypedArray, Class as CoreClass, ClassSetup, FromJSValue, HostError,
-    InterruptHandle, IntoJSAsyncIteratorExt, IntoJSIteratorExt, IntoJSValue,
-    JSArray as CoreJSArray, JSArrayBuffer as CoreJSArrayBuffer, JSAsyncIterator,
+    InterruptGuard, InterruptHandle, InterruptMode, IntoJSAsyncIteratorExt, IntoJSIteratorExt,
+    IntoJSValue, JSArray as CoreJSArray, JSArrayBuffer as CoreJSArrayBuffer, JSAsyncIterator,
     JSBytes as CoreJSBytes, JSClass, JSContext as CoreJSContext, JSContextService,
     JSDate as CoreJSDate, JSEngine, JSException as CoreJSException, JSFunc as CoreJSFunc,
     JSIterator, JSObject as CoreJSObject, JSProxy as CoreJSProxy, JSResult,
