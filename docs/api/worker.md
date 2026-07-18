@@ -65,6 +65,13 @@ worker.onerror = (event) => {
 worker.terminate();
 ```
 
+`terminate()` returns immediately and permanently closes the worker to new
+messages. QuickJS and preemptive JavaScriptCore builds also stop currently
+running non-yielding JavaScript. ArkJS and cooperative JavaScriptCore builds can
+stop running code only at the next engine yield; if code never yields, its
+isolated worker thread may remain active. Expected termination does not emit
+`onerror`.
+
 ## Worker-Side API
 
 Global APIs available inside worker scripts:
@@ -81,4 +88,4 @@ Global APIs available inside worker scripts:
 - Each worker runs in a **dedicated OS thread** with its own JS engine instance
 - Messages are JSON-serialized — **no shared memory**
 - Workers have `console` by default; other modules can be configured via `rong_worker::set_initializer`
-- After `terminate()`, the worker stops processing new messages
+- After `terminate()`, the worker stops processing new messages and cannot be reused

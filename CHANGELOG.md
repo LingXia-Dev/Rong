@@ -17,6 +17,10 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
   blocking and pinned variants. Deadlines cover queueing and execution, return
   `E_TIMEOUT`, cancel queued work without disturbing other tasks, and leave
   workers reusable after interrupting running JavaScript.
+- Made JavaScript `Worker.terminate()` interrupt non-yielding code on
+  preemptive engines and return promptly on every engine. Threads that outlive
+  the bounded shutdown grace are detached and reported through termination
+  statistics instead of occupying the host blocking pool indefinitely.
 
 ## [0.5.2] - 2026-07-17
 

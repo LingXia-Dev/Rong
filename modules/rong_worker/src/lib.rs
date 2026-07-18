@@ -23,14 +23,37 @@ use std::path::PathBuf;
 use std::rc::{Rc, Weak};
 use std::sync::{
     Arc, OnceLock,
-    atomic::{AtomicBool, Ordering},
+    atomic::{AtomicBool, AtomicUsize, Ordering},
 };
+use std::time::Duration;
 use tokio::sync::{mpsc, watch};
 use tracing::{error, warn};
 
 type WorkerInitializer = Box<dyn Fn(&JSContext) -> JSResult<()> + Send + Sync>;
 
 static WORKER_INITIALIZER: OnceLock<WorkerInitializer> = OnceLock::new();
+static ACTIVE_DETACHED_WORKER_THREADS: AtomicUsize = AtomicUsize::new(0);
+static TOTAL_DETACHED_WORKER_THREADS: AtomicUsize = AtomicUsize::new(0);
+
+const WORKER_TERMINATION_GRACE: Duration = Duration::from_secs(1);
+
+/// Process-level accounting for worker threads that outlived their termination
+/// grace period.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct WorkerTerminationStats {
+    /// Detached worker threads that have not exited yet.
+    pub active_detached_threads: usize,
+    /// Worker threads detached since process start, including ones that later exited.
+    pub total_detached_threads: usize,
+}
+
+/// Return process-level JS Worker termination statistics.
+pub fn termination_stats() -> WorkerTerminationStats {
+    WorkerTerminationStats {
+        active_detached_threads: ACTIVE_DETACHED_WORKER_THREADS.load(Ordering::Acquire),
+        total_detached_threads: TOTAL_DETACHED_WORKER_THREADS.load(Ordering::Acquire),
+    }
+}
 
 /// Set a custom initializer for worker contexts.
 ///
@@ -115,17 +138,128 @@ struct WorkerLifecycleInner {
     to_worker: mpsc::Sender<ToWorker>,
     terminate_tx: watch::Sender<bool>,
     terminated: Arc<AtomicBool>,
+    termination_started: AtomicBool,
+    interrupt: InterruptHandle,
     polling_handle: Rc<RefCell<Option<tokio::task::AbortHandle>>>,
     thread_handle: Arc<std::sync::Mutex<Option<std::thread::JoinHandle<()>>>>,
     thread_stopped: Arc<AtomicBool>,
+    thread_detached: Arc<AtomicBool>,
+    thread_exit: watch::Receiver<bool>,
 }
 
-struct WorkerThreadExit(Arc<AtomicBool>);
+struct WorkerThreadExit {
+    stopped: Arc<AtomicBool>,
+    detached: Arc<AtomicBool>,
+    exit_tx: watch::Sender<bool>,
+}
 
 impl Drop for WorkerThreadExit {
     fn drop(&mut self) {
-        self.0.store(true, Ordering::Release);
+        self.stopped.store(true, Ordering::Release);
+        let was_detached = self.detached.swap(false, Ordering::AcqRel);
+        let active_detached_threads = was_detached.then(decrement_active_detached_worker_threads);
+        self.exit_tx.send_replace(true);
+
+        if let Some(active_detached_threads) = active_detached_threads {
+            warn!(
+                target: "rong",
+                active_detached_threads,
+                "detached JS Worker thread eventually exited"
+            );
+        }
     }
+}
+
+fn decrement_active_detached_worker_threads() -> usize {
+    ACTIVE_DETACHED_WORKER_THREADS
+        .fetch_update(Ordering::AcqRel, Ordering::Acquire, |count| {
+            count.checked_sub(1)
+        })
+        .map(|previous| previous - 1)
+        .unwrap_or(0)
+}
+
+fn mark_worker_thread_detached(
+    stopped: &AtomicBool,
+    detached: &AtomicBool,
+) -> Option<WorkerTerminationStats> {
+    ACTIVE_DETACHED_WORKER_THREADS.fetch_add(1, Ordering::AcqRel);
+    if detached
+        .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+        .is_err()
+    {
+        decrement_active_detached_worker_threads();
+        return None;
+    }
+
+    // The worker can exit immediately before or after it is marked detached.
+    // Let exactly one side undo the active count in either race ordering.
+    if stopped.load(Ordering::Acquire) {
+        if detached.swap(false, Ordering::AcqRel) {
+            decrement_active_detached_worker_threads();
+        }
+        return None;
+    }
+
+    TOTAL_DETACHED_WORKER_THREADS.fetch_add(1, Ordering::AcqRel);
+    Some(termination_stats())
+}
+
+async fn wait_for_worker_thread_exit(mut exit_rx: watch::Receiver<bool>) -> bool {
+    if *exit_rx.borrow() {
+        return true;
+    }
+
+    loop {
+        match exit_rx.changed().await {
+            Ok(()) if *exit_rx.borrow() => return true,
+            Ok(()) => {}
+            Err(_) => return *exit_rx.borrow(),
+        }
+    }
+}
+
+fn spawn_worker_thread_reaper(
+    handle: std::thread::JoinHandle<()>,
+    stopped: Arc<AtomicBool>,
+    detached: Arc<AtomicBool>,
+    exit_rx: watch::Receiver<bool>,
+    interrupt: InterruptHandle,
+    grace: Duration,
+) -> tokio::task::JoinHandle<()> {
+    let executor = RongExecutor::global();
+    let reaper_executor = executor.clone();
+    executor.spawn(async move {
+        let stopped_in_time = stopped.load(Ordering::Acquire)
+            || tokio::time::timeout(grace, wait_for_worker_thread_exit(exit_rx))
+                .await
+                .unwrap_or(false);
+
+        if !stopped_in_time {
+            if let Some(stats) = mark_worker_thread_detached(&stopped, &detached) {
+                warn!(
+                    target: "rong",
+                    mode = ?interrupt.mode(),
+                    grace_ms = u64::try_from(grace.as_millis()).unwrap_or(u64::MAX),
+                    active_detached_threads = stats.active_detached_threads,
+                    total_detached_threads = stats.total_detached_threads,
+                    "JS Worker thread did not stop within the termination grace; detaching it"
+                );
+            }
+            drop(handle);
+            return;
+        }
+
+        match reaper_executor.spawn_blocking(move || handle.join()).await {
+            Ok(Ok(())) => {}
+            Ok(Err(err)) => {
+                warn!(target: "rong", error = ?err, "JS Worker thread panicked during shutdown");
+            }
+            Err(err) => {
+                warn!(target: "rong", error = ?err, "failed to join stopped JS Worker thread");
+            }
+        }
+    })
 }
 
 impl Deref for WorkerLifecycle {
@@ -139,6 +273,11 @@ impl Deref for WorkerLifecycle {
 impl WorkerLifecycle {
     fn terminate(&self) {
         self.terminated.store(true, Ordering::Release);
+        if self.termination_started.swap(true, Ordering::AcqRel) {
+            return;
+        }
+
+        self.interrupt.interrupt();
         if !self.thread_stopped.load(Ordering::Acquire) {
             self.terminate_tx.send_replace(true);
         }
@@ -153,9 +292,14 @@ impl WorkerLifecycle {
             .ok()
             .and_then(|mut guard| guard.take());
         if let Some(handle) = thread_handle {
-            RongExecutor::global().spawn_blocking(move || {
-                let _ = handle.join();
-            });
+            drop(spawn_worker_thread_reaper(
+                handle,
+                self.thread_stopped.clone(),
+                self.thread_detached.clone(),
+                self.thread_exit.clone(),
+                self.interrupt.clone(),
+                WORKER_TERMINATION_GRACE,
+            ));
         }
     }
 }
@@ -227,12 +371,21 @@ impl Worker {
         let terminated = Arc::new(AtomicBool::new(false));
         let terminated_thread = terminated.clone();
         let terminate_thread_tx = terminate_tx.clone();
+        let interrupt = InterruptHandle::new();
+        let interrupt_worker = interrupt.clone();
         let thread_stopped = Arc::new(AtomicBool::new(false));
         let thread_stopped_worker = thread_stopped.clone();
+        let thread_detached = Arc::new(AtomicBool::new(false));
+        let thread_detached_worker = thread_detached.clone();
+        let (thread_exit_tx, thread_exit) = watch::channel(false);
 
         // Spawn a dedicated OS thread with its own tokio runtime + JS runtime.
         let thread_handle = std::thread::spawn(move || {
-            let _exit = WorkerThreadExit(thread_stopped_worker);
+            let _exit = WorkerThreadExit {
+                stopped: thread_stopped_worker,
+                detached: thread_detached_worker,
+                exit_tx: thread_exit_tx,
+            };
             let rt = tokio::runtime::Builder::new_current_thread()
                 .enable_all()
                 .build()
@@ -248,6 +401,7 @@ impl Worker {
                         terminated_thread,
                         terminate_thread_tx,
                         terminate_rx,
+                        interrupt_worker,
                     ))
                     .await;
             });
@@ -257,9 +411,13 @@ impl Worker {
             to_worker: to_worker_tx,
             terminate_tx,
             terminated,
+            termination_started: AtomicBool::new(false),
+            interrupt,
             polling_handle: Rc::new(RefCell::new(None)),
             thread_handle: Arc::new(std::sync::Mutex::new(Some(thread_handle))),
             thread_stopped,
+            thread_detached,
+            thread_exit,
         }));
         WorkerContextRegistry::get_or_init(&ctx).register(&lifecycle);
 
@@ -412,8 +570,9 @@ impl Worker {
         terminated: Arc<AtomicBool>,
         terminate_tx: watch::Sender<bool>,
         mut terminate_rx: watch::Receiver<bool>,
+        interrupt: InterruptHandle,
     ) {
-        let runtime = RongJS::runtime();
+        let runtime = RongJS::runtime_with_interrupt(interrupt);
         let ctx = runtime.context();
 
         if *terminate_rx.borrow() {
@@ -475,6 +634,9 @@ impl Worker {
                     result = ctx.eval_async::<()>(source) => result,
                 };
                 if let Err(e) = result {
+                    if terminated.load(Ordering::Acquire) {
+                        return;
+                    }
                     let _ = from_worker_tx
                         .send(FromWorker::Error(format!(
                             "script error in {:?}: {}",
@@ -525,6 +687,9 @@ impl Worker {
                                 result = func.call_async::<_, ()>(None, (event,)) => result,
                             };
                             if let Err(e) = result {
+                                if terminated.load(Ordering::Acquire) {
+                                    break 'message_loop;
+                                }
                                 let _ = from_worker_tx
                                     .send(FromWorker::Error(format!(
                                         "worker onmessage handler error: {}",
@@ -567,8 +732,84 @@ fn worker_error_event(ctx: &JSContext, message: &str) -> JSObject {
 mod tests {
     use super::*;
     use rong_test::*;
+    use std::sync::Once;
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+    use std::sync::mpsc as std_mpsc;
     use std::time::Duration;
+
+    static TEST_INITIALIZER: Once = Once::new();
+    static TEST_WORKER_STARTED: std::sync::Mutex<Option<std_mpsc::Sender<()>>> =
+        std::sync::Mutex::new(None);
+
+    fn install_test_initializer() {
+        TEST_INITIALIZER.call_once(|| {
+            set_initializer(|ctx| {
+                rong_console::init(ctx)?;
+                rong_timer::init(ctx)?;
+                let started = JSFunc::new(ctx, || {
+                    let sender = TEST_WORKER_STARTED
+                        .lock()
+                        .unwrap_or_else(|err| err.into_inner())
+                        .clone();
+                    if let Some(sender) = sender {
+                        let _ = sender.send(());
+                    }
+                })?;
+                ctx.global().set("__rongWorkerTestStarted", started)?;
+                Ok(())
+            });
+        });
+    }
+
+    fn set_test_worker_started_sender(sender: Option<std_mpsc::Sender<()>>) {
+        *TEST_WORKER_STARTED
+            .lock()
+            .unwrap_or_else(|err| err.into_inner()) = sender;
+    }
+
+    fn worker_fixture(name: &str) -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../tests/unit")
+            .join(name)
+            .canonicalize()
+            .expect("worker fixture")
+    }
+
+    async fn wait_for_worker_started(
+        receiver: &std_mpsc::Receiver<()>,
+        errors: &std_mpsc::Receiver<String>,
+    ) {
+        tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                match receiver.try_recv() {
+                    Ok(()) => return,
+                    Err(std_mpsc::TryRecvError::Empty) => tokio::task::yield_now().await,
+                    Err(std_mpsc::TryRecvError::Disconnected) => {
+                        panic!("worker start notifier disconnected")
+                    }
+                }
+                match errors.try_recv() {
+                    Ok(error) => panic!("worker fixture failed before busy loop: {error}"),
+                    Err(std_mpsc::TryRecvError::Empty) => {}
+                    Err(std_mpsc::TryRecvError::Disconnected) => {
+                        panic!("worker error notifier disconnected")
+                    }
+                }
+            }
+        })
+        .await
+        .expect("worker should enter the busy-loop fixture");
+    }
+
+    async fn wait_for_worker_stopped(lifecycle: &WorkerLifecycle) {
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while !lifecycle.thread_stopped.load(Ordering::Acquire) {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("worker thread should stop");
+    }
 
     #[derive(Clone)]
     struct ShutdownFlag(Arc<AtomicBool>);
@@ -581,18 +822,13 @@ mod tests {
 
     #[test]
     fn test_worker() {
+        install_test_initializer();
         // Set cwd to workspace root so relative paths in worker scripts resolve correctly
         let workspace_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../..")
             .canonicalize()
             .expect("workspace root");
         std::env::set_current_dir(&workspace_root).expect("set cwd");
-
-        set_initializer(|ctx| {
-            rong_console::init(ctx)?;
-            rong_timer::init(ctx)?;
-            Ok(())
-        });
 
         async_run!(|ctx: JSContext| async move {
             init(&ctx)?;
@@ -613,6 +849,7 @@ mod tests {
 
     #[test]
     fn worker_polling_stops_with_context() {
+        install_test_initializer();
         let shutdown = Arc::new(AtomicBool::new(false));
         async_run!(|ctx: JSContext| async move {
             init(&ctx)?;
@@ -660,5 +897,145 @@ mod tests {
             );
             Ok(())
         });
+    }
+
+    #[test]
+    fn terminate_stops_non_yielding_worker_scripts() {
+        let runtime = RongJS::runtime();
+        if !runtime.interrupt_handle().mode().is_preemptive() {
+            eprintln!("skipping busy-loop Worker test: engine is cooperative-only");
+            return;
+        }
+        drop(runtime);
+
+        install_test_initializer();
+        async_run!(|ctx: JSContext| async move {
+            for (fixture, send_message) in [
+                ("worker-busy-entry.js", false),
+                ("worker-busy-message.js", true),
+            ] {
+                let (started_tx, started_rx) = std_mpsc::channel();
+                let (error_tx, error_rx) = std_mpsc::channel();
+                set_test_worker_started_sender(Some(started_tx));
+
+                let worker = Worker::new(
+                    ctx.global().context(),
+                    worker_fixture(fixture).to_string_lossy().into_owned(),
+                )?;
+                let lifecycle = worker.lifecycle.clone();
+                worker.set_onerror(
+                    ctx.global().context(),
+                    JSFunc::new(&ctx, move |event: JSObject| {
+                        let message = event
+                            .get::<_, String>("message")
+                            .unwrap_or_else(|_| "unknown worker error".to_string());
+                        let _ = error_tx.send(message);
+                    })?,
+                )?;
+                if send_message {
+                    worker.post_message(ctx.global().context(), JSValue::undefined(&ctx))?;
+                }
+
+                wait_for_worker_started(&started_rx, &error_rx).await;
+                assert_eq!(lifecycle.interrupt.mode(), InterruptMode::Preemptive);
+
+                worker.terminate()?;
+                worker.terminate()?;
+                wait_for_worker_stopped(&lifecycle).await;
+                assert!(!lifecycle.thread_detached.load(Ordering::Acquire));
+                assert!(matches!(
+                    error_rx.try_recv(),
+                    Err(std_mpsc::TryRecvError::Empty)
+                ));
+
+                set_test_worker_started_sender(None);
+            }
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn terminate_is_idempotent_during_worker_startup() {
+        install_test_initializer();
+        async_run!(|ctx: JSContext| async move {
+            for _ in 0..8 {
+                let worker = Worker::new(
+                    ctx.global().context(),
+                    worker_fixture("worker-pending.js")
+                        .to_string_lossy()
+                        .into_owned(),
+                )?;
+                let lifecycle = worker.lifecycle.clone();
+                worker.terminate()?;
+                worker.terminate()?;
+                wait_for_worker_stopped(&lifecycle).await;
+                assert!(lifecycle.termination_started.load(Ordering::Acquire));
+                assert!(!lifecycle.thread_detached.load(Ordering::Acquire));
+            }
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn reaper_detaches_after_bounded_grace() {
+        let stats_before = termination_stats();
+        let stopped = Arc::new(AtomicBool::new(false));
+        let detached = Arc::new(AtomicBool::new(false));
+        let (exit_tx, exit_rx) = watch::channel(false);
+        let exit_after_detach = exit_rx.clone();
+        let (release_tx, release_rx) = std_mpsc::channel();
+        let thread_stopped = stopped.clone();
+        let thread_detached = detached.clone();
+        let handle = std::thread::spawn(move || {
+            let _exit = WorkerThreadExit {
+                stopped: thread_stopped,
+                detached: thread_detached,
+                exit_tx,
+            };
+            let _ = release_rx.recv();
+        });
+
+        let reaper = spawn_worker_thread_reaper(
+            handle,
+            stopped.clone(),
+            detached.clone(),
+            exit_rx,
+            InterruptHandle::new(),
+            Duration::from_millis(20),
+        );
+        RongExecutor::global().handle().block_on(async {
+            tokio::time::timeout(Duration::from_secs(1), reaper)
+                .await
+                .expect("worker reaper should respect its grace period")
+                .expect("worker reaper task should complete");
+        });
+
+        let detached_stats = termination_stats();
+        assert!(detached.load(Ordering::Acquire));
+        assert_eq!(
+            detached_stats.active_detached_threads,
+            stats_before.active_detached_threads + 1
+        );
+        assert_eq!(
+            detached_stats.total_detached_threads,
+            stats_before.total_detached_threads + 1
+        );
+
+        release_tx.send(()).expect("release detached worker thread");
+        RongExecutor::global().handle().block_on(async {
+            let exited = tokio::time::timeout(
+                Duration::from_secs(2),
+                wait_for_worker_thread_exit(exit_after_detach),
+            )
+            .await
+            .expect("detached worker thread should eventually exit");
+            assert!(exited);
+        });
+        assert!(stopped.load(Ordering::Acquire));
+        assert!(!detached.load(Ordering::Acquire));
+        assert_eq!(
+            termination_stats().active_detached_threads,
+            stats_before.active_detached_threads
+        );
     }
 }
