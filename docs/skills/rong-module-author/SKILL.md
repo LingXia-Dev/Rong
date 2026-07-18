@@ -2,12 +2,14 @@
 name: rong-module-author
 description: >-
   Author and modify RongJS (Rong) modules - expose Rust functions and classes to
-  JavaScript, convert values across the Rust<->JS boundary, raise JS errors from
-  Rust, and wire a new `rong_<name>` module crate into the runtime. Use when
+  JavaScript, convert values across the Rust/JS boundary, raise JS errors from
+  Rust, and wire a new `rong_*` module crate into the runtime. Use when
   writing or editing Rong module code: `js_api!`, `#[js_class]`, `#[js_method]`,
   `#[js_union]`, `#[js_numeric_enum]`, `FromJSObject` / `IntoJSObject` types,
   `JSResult`/`HostError` error handling, a module `init(ctx)` function, or
-  registering a class with `register_class` / `register_hidden_class`.
+  registering a class with `register_class` / `register_hidden_class`. Do not
+  use for Rust host/runtime/worker orchestration or JavaScript application
+  code.
 license: MIT OR Apache-2.0
 metadata:
   version: 0.1.0

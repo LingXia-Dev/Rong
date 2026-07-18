@@ -6,31 +6,17 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 
 ## [Unreleased]
 
-### Hard interruption
+### Runtime interruption
 
-- Added cross-engine hard interruption: `JSRuntime::interrupt_handle()` and
-  `Worker::interrupt_handle()` return a `Send + Sync` `InterruptHandle` whose
-  `interrupt()` aborts running JavaScript from another thread — QuickJS (via
-  `JS_SetInterruptHandler`) and JavaScriptCore (via the execution-time-limit
-  watchdog, self-re-armed each quantum) break even non-yielding code such as
-  `while (true) {}` with an uncatchable error, and every engine rejects newly
-  submitted evaluations with `E_INTERRUPTED` until `clear()`. Native
-  termination is normalized to `E_INTERRUPTED`, and `RongJSError` now exposes
-  `code()`, `is_code()`, `is_interrupted()`, and `is_timeout()` helpers.
-  `InterruptMode` reports typed `Unbound`, `Cooperative`, or `Preemptive`
-  behavior; ArkJS stays cooperative-only because the bound JSVM-API exposes no
-  terminate primitive. Interruption is decoupled from
-  `Worker::terminate()` — graceful shutdown still lets the in-flight task
-  finish at its next yield; a caller that must break non-yielding JavaScript
-  interrupts through the handle explicitly. JSC source/JSCOnly builds always
-  enable hard interruption; Apple system-framework builds keep it opt-in via
-  `jscore-interrupt` because the SPI header is private on iOS.
-- Added task-scoped execution deadlines through `call_with_timeout`, blocking
-  counterparts, and `TaskHandle::join_with_timeout`. Deadlines cover worker
-  selection, queueing, and execution; queued tasks time out without disturbing
-  the running task, while running tasks combine future abort with a scoped hard
-  interrupt and return stable `E_TIMEOUT`. `InterruptGuard` composes concurrent
-  low-level requests without one owner clearing another owner's interruption.
+- Added thread-safe `InterruptHandle` access for runtimes and workers, stable
+  `E_INTERRUPTED` errors, and typed `InterruptMode` capability reporting.
+  QuickJS and JSC source builds can stop non-yielding JavaScript; Apple system
+  JSC opts into preemption with `jscore-interrupt`, while ArkJS reports
+  cooperative cancellation. Graceful `Worker::terminate()` remains separate.
+- Added `call_with_timeout` and `TaskHandle::join_with_timeout`, including
+  blocking and pinned variants. Deadlines cover queueing and execution, return
+  `E_TIMEOUT`, cancel queued work without disturbing other tasks, and leave
+  workers reusable after interrupting running JavaScript.
 
 ## [0.5.2] - 2026-07-17
 

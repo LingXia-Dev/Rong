@@ -21,7 +21,11 @@ const repoRoot = join(packageRoot, "..", "..");
 const docsSkillsDir = join(repoRoot, "docs", "skills");
 const apiDocsDir = join(repoRoot, "docs", "api");
 const assetsDir = join(packageRoot, "assets");
-const PUBLIC_SKILLS = ["rong-module-author", "rong-runtime-developer"];
+const PUBLIC_SKILLS = [
+  "rong-module-author",
+  "rong-runtime-developer",
+  "rong-runtime-embedder",
+];
 
 function fail(message) {
   console.error(`rong-skill pack: ${message}`);
@@ -101,6 +105,13 @@ function assertPackedAssets(outDir) {
 
   const moduleRefs = join(outDir, "rong-module-author", "references");
   if (!statSync(moduleRefs).isDirectory()) fail("missing module author references");
+
+  const embedderRefs = join(outDir, "rong-runtime-embedder", "references");
+  for (const file of ["interruption.md", "runtime-setup.md", "worker-pools.md"]) {
+    if (!existsSync(join(embedderRefs, file))) {
+      fail(`missing runtime embedder reference ${file}`);
+    }
+  }
 }
 
 function build(outDir) {

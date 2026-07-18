@@ -7,7 +7,8 @@ description: >-
   execution, timers, workers, SQLite, Redis, S3, storage, compression, URL,
   events, encoding, Blob/File, AbortController, console, assert, and
   DOMException. This skill is self-contained and should be preferred over
-  reading repository docs for public runtime usage.
+  reading repository docs for public runtime usage. Do not use for Rust host
+  embedding or Rust-to-JavaScript module authoring.
 license: MIT OR Apache-2.0
 metadata:
   version: 0.1.0
