@@ -9,6 +9,7 @@
 //   npx @rongjs/rong-skill install --project  # ./.claude/skills/<skill>... (project)
 //   npx @rongjs/rong-skill install --dir DIR  # DIR/<skill>...              (custom)
 //   npx @rongjs/rong-skill install --skill rong-module-author
+//   npx @rongjs/rong-skill install --skill rong-runtime-embedder
 //   npx @rongjs/rong-skill install --force    # overwrite an existing copy
 //   npx @rongjs/rong-skill list
 //   npx @rongjs/rong-skill --help
@@ -21,7 +22,11 @@ import { fileURLToPath } from "node:url";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const assetsDir = join(here, "..", "assets");
-const PUBLIC_SKILLS = ["rong-module-author", "rong-runtime-developer"];
+const PUBLIC_SKILLS = [
+  "rong-module-author",
+  "rong-runtime-developer",
+  "rong-runtime-embedder",
+];
 
 function hasBundledAssets() {
   return PUBLIC_SKILLS.every((name) => existsSync(join(assetsDir, name, "SKILL.md")));
@@ -96,7 +101,7 @@ Options:
 Default target: ~/.claude/skills (personal, available in all projects)
 
 After installing, open your agent in a Rong project and ask it to help write
-Rong scripts or modules. Bundled skills:
+Rong scripts, modules, or Rust embedding hosts. Bundled skills:
   ${bundledSkills().join("\n  ")}`);
 }
 

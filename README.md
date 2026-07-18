@@ -129,9 +129,9 @@ worker is reused. Timeouts return `E_TIMEOUT` and can be matched with
 
 For manual supervision, `Worker::interrupt_mode()` reports
 `InterruptMode::{Cooperative, Preemptive}`, while `interrupt_handle()` exposes
-persistent and scoped low-level requests. See
-[Execution timeouts and interruption](docs/guides/interruption.md) for lifecycle,
-engine capability, error, and shutdown semantics.
+persistent and scoped low-level requests. Coding agents should use the
+[Rong Runtime Embedder skill](docs/skills/rong-runtime-embedder/SKILL.md) for
+engine policy, lifecycle, timeout, and interruption workflows.
 
 ## Advanced Runtime Control
 
@@ -150,7 +150,7 @@ Reach for `RongExecutor::builder()` only when you need to:
 - [`examples/src/worker.rs`](examples/src/worker.rs) for a runnable shared worker example
 - [`examples/src/point.rs`](examples/src/point.rs) for class bindings
 - [`examples/src/executor.rs`](examples/src/executor.rs) for custom `RongExecutor` setup
-- [Execution timeouts and interruption](docs/guides/interruption.md) for bounded execution and hard interruption
+- [Rong Runtime Embedder skill](docs/skills/rong-runtime-embedder/SKILL.md) for Rust host integration workflows
 - [Worker Execution Model](docs/internals/worker_execution_model.md) for `shared` vs `pinned`
 - [Module Development Guide](docs/internals/module_development.md) for writing
   Rust-driven JS APIs, classes, and modules
@@ -215,6 +215,7 @@ Rong comes with a rich set of built-in modules:
 ## 📚 Documentation
 
 - **[Contributing Guide](CONTRIBUTING.md)** - Local setup, verification, hooks, and release workflow
+- **[Rong Agent Skills](docs/skills/README.md)** - Installable guidance for scripts, module authors, and Rust embedders
 - **[Module Development Guide](docs/internals/module_development.md)** - Learn how to create Rust-driven JavaScript APIs and classes
 - **[Worker Execution Model](docs/internals/worker_execution_model.md)** - Understand `shared` vs `pinned` workers and internal runtime boundaries
 - **[Value System Guide](docs/internals/value_system.md)** - Understand type conversion between Rust and JavaScript

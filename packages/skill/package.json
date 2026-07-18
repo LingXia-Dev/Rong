@@ -1,7 +1,7 @@
 {
   "name": "@rongjs/rong-skill",
   "version": "0.5.0",
-  "description": "Self-contained agent skills for Rong runtime scripting and module authoring.",
+  "description": "Self-contained agent skills for Rong scripting, module authoring, and Rust runtime embedding.",
   "type": "module",
   "bin": {
     "rong-skill": "bin/cli.mjs"
@@ -31,6 +31,8 @@
     "rust",
     "quickjs",
     "javascriptcore",
+    "embedding",
+    "worker-pools",
     "module-authoring",
     "documentation"
   ],

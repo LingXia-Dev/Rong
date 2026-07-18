@@ -12,6 +12,8 @@ under `assets/` when packed or when the CLI is run from a source checkout.
   adapt examples, run `rong_cli`, and compile bytecode.
 - `rong-module-author` - write or edit Rust modules that expose Rong APIs,
   classes, functions, type conversions, and JavaScript errors.
+- `rong-runtime-embedder` - build Rust hosts around Rong runtimes, module
+  policies, worker pools, timeouts, interruption, and lifecycle management.
 
 ## Install
 
@@ -31,6 +33,12 @@ Install one skill:
 
 ```bash
 npx @rongjs/rong-skill install --skill rong-module-author
+```
+
+Install the Rust host embedding skill:
+
+```bash
+npx @rongjs/rong-skill install --skill rong-runtime-embedder
 ```
 
 Custom skills directory:
@@ -60,7 +68,8 @@ Source of truth:
 |-- api/
 `-- skills/
     |-- rong-module-author/
-    `-- rong-runtime-developer/
+    |-- rong-runtime-developer/
+    `-- rong-runtime-embedder/
 ```
 
 Generated package assets:
@@ -75,13 +84,19 @@ assets/
 |       |-- functions.md
 |       |-- module-structure.md
 |       `-- type-conversion.md
-`-- rong-runtime-developer/
+|-- rong-runtime-developer/
+|   |-- SKILL.md
+|   `-- references/
+|       |-- api-*.md
+|       |-- api-index.md
+|       |-- examples.md
+|       `-- quickstart.md
+`-- rong-runtime-embedder/
     |-- SKILL.md
     `-- references/
-        |-- api-*.md
-        |-- api-index.md
-        |-- examples.md
-        `-- quickstart.md
+        |-- interruption.md
+        |-- runtime-setup.md
+        `-- worker-pools.md
 ```
 
 Each installed skill follows the standard `SKILL.md` + optional `references/`
