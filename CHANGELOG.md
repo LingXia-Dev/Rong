@@ -6,6 +6,10 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 
 ## [Unreleased]
 
+### Engine updates
+
+- Upgraded the bundled QuickJS-NG runtime from v0.13.0 to v0.15.1.
+
 ### Runtime interruption
 
 - Added thread-safe `InterruptHandle` access for runtimes and workers, stable
