@@ -1,3 +1,4 @@
+use crate::context::{ArkJSContextInner, context_guard_from_env};
 use crate::{ArkJSContext, arkjs};
 use rong_core::{
     JSContextImpl, JSErrorFactory, JSRawContext, JSTypeOf, JSValueImpl, RongJSError,
@@ -5,6 +6,7 @@ use rong_core::{
 };
 use std::hash::Hash;
 use std::ptr;
+use std::rc::Rc;
 
 mod array;
 mod array_buffer;
@@ -26,6 +28,7 @@ pub struct ArkJSValue {
     env: arkjs::JSVM_Env,
     value_type: ArkJSValueType,
     reference: Option<arkjs::JSVM_Ref>, // Track reference for proper cleanup
+    context_guard: Option<Rc<ArkJSContextInner>>,
 }
 
 impl PartialEq for ArkJSValue {
@@ -55,6 +58,7 @@ impl ArkJSValue {
             value,
             value_type: ArkJSValueType::Other,
             reference: None,
+            context_guard: context_guard_from_env(env),
         }
     }
 
@@ -220,7 +224,9 @@ impl JSValueImpl for ArkJSValue {
 
     fn into_raw_value(self) -> Self::RawValue {
         let value = self.resolve_handle();
-        std::mem::forget(self); // Prevent drop from being called
+        // A resolved local handle remains valid for the active native callback;
+        // release our persistent reference instead of leaking it.
+        drop(self);
         value
     }
 
@@ -350,6 +356,7 @@ impl Clone for ArkJSValue {
                             value: self.value, // keep original handle identity
                             reference: Some(ref_value),
                             value_type: self.value_type,
+                            context_guard: self.context_guard.clone(),
                         };
                     }
                 }

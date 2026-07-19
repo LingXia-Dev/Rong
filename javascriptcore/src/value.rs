@@ -323,6 +323,7 @@ pub struct JSCValue {
     ctx: *mut jsc::OpaqueJSContext,
     value_type: JSCValueType,
     protected: bool,
+    context_retained: bool,
 }
 
 impl PartialEq for JSCValue {
@@ -341,11 +342,18 @@ impl Hash for JSCValue {
 
 impl JSCValue {
     pub(crate) fn new(ctx: *mut jsc::OpaqueJSContext, value: *const jsc::OpaqueJSValue) -> Self {
+        let context_retained = !ctx.is_null();
+        if context_retained {
+            unsafe {
+                jsc::JSGlobalContextRetain(ctx);
+            }
+        }
         Self {
             ctx,
             value,
             value_type: JSCValueType::Other,
             protected: false,
+            context_retained,
         }
     }
 
@@ -466,10 +474,17 @@ impl JSCValue {
 
 impl Drop for JSCValue {
     fn drop(&mut self) {
-        // Finalizer callback, ctx is set to NULL
+        // Finalizer callbacks use a NULL context and therefore own no retain.
+        // For ordinary values, unprotect while the retained context is still
+        // alive, then release the context last.
         if self.protected && !self.ctx.is_null() {
             unsafe {
                 jsc::JSValueUnprotect(self.ctx, self.value);
+            }
+        }
+        if self.context_retained {
+            unsafe {
+                jsc::JSGlobalContextRelease(self.ctx);
             }
         }
     }
@@ -510,7 +525,7 @@ impl JSValueImpl for JSCValue {
         }
 
         let value = this.value;
-        std::mem::forget(this);
+        drop(this);
         value
     }
 
