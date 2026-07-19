@@ -1,6 +1,6 @@
 [package]
 name = "rong_worker"
-version = "0.5.1"
+version = "0.6.0"
 edition.workspace = true
 
 description = "Worker module for RongJS"

@@ -8,7 +8,7 @@ Disable default features and select exactly one engine in the host crate:
 
 ```toml
 [dependencies]
-rong = { version = "0.5", default-features = false, features = ["quickjs"] }
+rong = { version = "0.6", default-features = false, features = ["quickjs"] }
 ```
 
 Engine features:
@@ -49,7 +49,7 @@ host, then initialize the smallest dependency-closed set:
 
 ```toml
 [dependencies]
-rong_modules = { version = "0.5", default-features = false, features = [
+rong_modules = { version = "0.6", default-features = false, features = [
   "quickjs",
   "console",
   "timer",

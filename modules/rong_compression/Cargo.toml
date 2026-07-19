@@ -1,6 +1,6 @@
 [package]
 name = "rong_compression"
-version = "0.5.0"
+version = "0.6.0"
 edition.workspace = true
 
 description = "Compression utilities for RongJS"

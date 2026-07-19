@@ -1,6 +1,6 @@
 {
   "name": "@rongjs/rong-skill",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "Self-contained agent skills for Rong scripting, module authoring, and Rust runtime embedding.",
   "type": "module",
   "bin": {

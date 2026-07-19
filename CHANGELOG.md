@@ -6,35 +6,109 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-07-19
+
+Rong 0.6.0 adds bounded JavaScript execution, cross-engine interruption
+capability reporting, and the first public release of `@rongjs/test`. It also
+hardens worker termination, upgrades QuickJS-NG, and adds dedicated guidance
+for runtime embedders. All publishable Rong Rust crates and all repo-maintained
+`@rongjs` npm packages are aligned at version 0.6.0 for this release.
+
+### Execution deadlines and interruption
+
+- Added `call_with_timeout` for shared and pinned Rong pools, plus
+  `TaskHandle::join_with_timeout` for previously spawned tasks. Blocking hosts
+  can use the corresponding `call_blocking_with_timeout` methods.
+- Deadlines cover worker selection, queueing, and execution. Queued timeouts do
+  not interrupt the task ahead of them; running timeouts interrupt JavaScript,
+  return `E_TIMEOUT`, and clear only their own request before worker reuse.
+- Added thread-safe `InterruptHandle` access from runtimes and workers, stable
+  `E_INTERRUPTED` errors, and typed `InterruptMode::{Cooperative, Preemptive}`
+  capability reporting. QuickJS and source-built JavaScriptCore can preempt
+  non-yielding code. Apple system JavaScriptCore opts in with
+  `jscore-interrupt`, while ArkJS reports cooperative interruption.
+
+Use a task-scoped timeout when an entire Rong call must be bounded:
+
+```rust
+use std::time::Duration;
+use rong::{Rong, RongJS, Source};
+
+let rong = Rong::<RongJS>::builder().shared().build()?;
+let value: i32 = rong
+    .call_with_timeout(Duration::from_secs(1), |runtime, _receiver| async move {
+        runtime.context().eval(Source::from_bytes("21 * 2"))
+    })
+    .await?;
+```
+
+Use `Worker::interrupt_mode()` before promising hard preemption to callers,
+and use `interrupt_handle()` only for host-managed cancellation that cannot be
+expressed as a task deadline.
+
+### Worker termination
+
+- Made JavaScript `Worker.terminate()` interrupt non-yielding code on
+  preemptive engines and return promptly on every engine.
+- Worker threads that outlive the bounded shutdown grace are detached and
+  reported through termination statistics instead of occupying the host
+  blocking pool indefinitely. Graceful completion remains separate from forced
+  termination.
+
 ### JavaScript testing
 
 - Added the zero-dependency `@rongjs/test` package with sequential async cases,
-  nested hooks, strict matchers, structured reports, and a generic host event
-  handshake. Rong's JavaScript unit suites now use the same framework across
-  QuickJS, JavaScriptCore, and the ArkJS device path.
+  nested suites and hooks, strict matchers, skipped cases, structured reports,
+  and optional host lifecycle events.
+- The author-facing API is `describe`, `test`, `test.skip`, `beforeEach`,
+  `afterEach`, and `expect`. The package deliberately does not provide `it`, a
+  callback-style `done`, timers, file discovery, mocks, or snapshots.
+- Rong's JavaScript unit suites now use the same framework across QuickJS,
+  JavaScriptCore, and the ArkJS device path.
 
-### Engine updates
+Install and register tests as an ECMAScript module:
+
+```bash
+npm install --save-dev @rongjs/test@0.6.0
+```
+
+```js
+import { describe, expect, test } from "@rongjs/test";
+
+describe("URL", () => {
+  test("parses the host", () => {
+    expect(new URL("https://example.com/path").host).toBe("example.com");
+  });
+});
+```
+
+Loading test source only registers cases. After evaluation, the embedding host
+must execute the registry and consume its JSON-compatible report:
+
+```js
+const report = await globalThis.__RONG_TEST__.run();
+if (report.failed > 0) {
+  // Convert failed cases into the host's process or protocol status.
+}
+```
+
+Classic-script embedders can resolve `@rongjs/test/runtime`, evaluate it before
+test source, and then call the same controller. Hosts remain responsible for
+source loading, TypeScript transformation, overall deadlines, interruption,
+console capture, and context teardown.
+
+### Engines, tooling, and documentation
 
 - Upgraded the bundled QuickJS-NG runtime from v0.13.0 to v0.15.1.
 - Kept engine resources alive until retained JavaScript values release their
   native handles, so values can be dropped safely after their originating
   context and runtime handles are released.
-
-### Runtime interruption
-
-- Added thread-safe `InterruptHandle` access for runtimes and workers, stable
-  `E_INTERRUPTED` errors, and typed `InterruptMode` capability reporting.
-  QuickJS and JSC source builds can stop non-yielding JavaScript; Apple system
-  JSC opts into preemption with `jscore-interrupt`, while ArkJS reports
-  cooperative cancellation. Graceful `Worker::terminate()` remains separate.
-- Added `call_with_timeout` and `TaskHandle::join_with_timeout`, including
-  blocking and pinned variants. Deadlines cover queueing and execution, return
-  `E_TIMEOUT`, cancel queued work without disturbing other tasks, and leave
-  workers reusable after interrupting running JavaScript.
-- Made JavaScript `Worker.terminate()` interrupt non-yielding code on
-  preemptive engines and return promptly on every engine. Threads that outlive
-  the bounded shutdown grace are detached and reported through termination
-  statistics instead of occupying the host blocking pool indefinitely.
+- Added the `rong-runtime-embedder` agent skill for runtime setup, module
+  capability selection, worker pools, timeouts, interruption, and teardown.
+  `@rongjs/rong-skill` now ships three installable skills.
+- Added a user-facing JavaScript testing guide and refreshed the project website
+  with the new package, current MSRV, runtime capabilities, keyboard-accessible
+  code tabs, metadata, and a custom 404 page.
 
 ## [0.5.2] - 2026-07-17
 
