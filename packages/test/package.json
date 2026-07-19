@@ -1,6 +1,6 @@
 {
   "name": "@rongjs/test",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "A lightweight, engine-neutral JavaScript test framework for Rong",
   "type": "module",
   "exports": {

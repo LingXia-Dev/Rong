@@ -76,7 +76,7 @@ When embedding `rong` as a library, select the engine and TLS backend
 explicitly in your dependency features. Example for desktop QuickJS:
 
 ```toml
-rong = { version = "0.3.0", features = ["quickjs", "tls-aws-lc"] }
+rong = { version = "0.6", features = ["quickjs", "tls-aws-lc"] }
 ```
 
 ## Common Usage: Worker Pools
