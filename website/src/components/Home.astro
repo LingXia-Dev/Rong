@@ -131,7 +131,7 @@ const codeSamples = [
       </div>
       <div class="hero-install">
         <code>cargo add rong --features quickjs,tls-aws-lc</code>
-        <button class="copy-btn" data-copy="cargo add rong --features quickjs,tls-aws-lc" aria-label="Copy install command">
+        <button class="copy-btn" data-copy="cargo add rong --features quickjs,tls-aws-lc" aria-label={t.hero.copyInstall}>
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
         </button>
       </div>
@@ -238,14 +238,29 @@ const codeSamples = [
       </div>
 
       <div class="code-block" data-reveal>
-        <div class="code-tabs" role="tablist">
+        <div class="code-tabs" role="tablist" aria-label={t.startHead.tabsLabel}>
           {t.codeTabs.map((label, i) => (
-            <button class:list={["code-tab", { "is-active": i === 0 }]} data-tab={`${i}`} role="tab">{label}</button>
+            <button
+              class:list={["code-tab", { "is-active": i === 0 }]}
+              id={`code-tab-${lang}-${i}`}
+              data-tab={`${i}`}
+              role="tab"
+              aria-selected={i === 0 ? "true" : "false"}
+              aria-controls={`code-pane-${lang}-${i}`}
+              tabindex={i === 0 ? 0 : -1}
+            >{label}</button>
           ))}
         </div>
         <div class="code-panes">
           {codeSamples.map((s, i) => (
-            <div class:list={["code-pane", { "is-active": i === 0 }]} data-pane={`${i}`}><Code code={s.code} lang={s.lang} theme="vitesse-dark" /></div>
+            <div
+              class:list={["code-pane", { "is-active": i === 0 }]}
+              id={`code-pane-${lang}-${i}`}
+              data-pane={`${i}`}
+              role="tabpanel"
+              aria-labelledby={`code-tab-${lang}-${i}`}
+              hidden={i !== 0}
+            ><Code code={s.code} lang={s.lang} theme="vitesse-dark" /></div>
           ))}
         </div>
       </div>
@@ -281,12 +296,17 @@ const codeSamples = [
         <p>{t.ecoHead.body}</p>
       </div>
       <div class="eco-grid">
-        <a class="card eco" data-reveal href="https://crates.io/crates/rong" target="_blank" rel="noopener">
+        <a class="card eco eco-primary" data-reveal href="https://crates.io/crates/rong" target="_blank" rel="noopener">
           <span class="eco-kind">crates.io</span>
           <h3>rong</h3>
           <p>{t.eco.crate}</p>
         </a>
-        <a class="card eco" data-reveal style="transition-delay:80ms" href="https://www.npmjs.com/package/@rongjs/rong" target="_blank" rel="noopener">
+        <a class="card eco" data-reveal style="transition-delay:80ms" href={`${repo}/blob/master/docs/guides/javascript-testing.md`} target="_blank" rel="noopener">
+          <span class="eco-kind">JS testing</span>
+          <h3>@rongjs/test</h3>
+          <p>{t.eco.test}</p>
+        </a>
+        <a class="card eco" data-reveal style="transition-delay:120ms" href="https://www.npmjs.com/package/@rongjs/rong" target="_blank" rel="noopener">
           <span class="eco-kind">npm</span>
           <h3>@rongjs/rong</h3>
           <p>{t.eco.types}</p>
@@ -296,7 +316,7 @@ const codeSamples = [
           <h3>@rongjs/rong-skill</h3>
           <p>{t.eco.skill}</p>
         </a>
-        <a class="card eco" data-reveal style="transition-delay:240ms" href={`${repo}/tree/master/rong_cli`} target="_blank" rel="noopener">
+        <a class="card eco" data-reveal style="transition-delay:200ms" href={`${repo}/tree/master/rong_cli`} target="_blank" rel="noopener">
           <span class="eco-kind">CLI</span>
           <h3>rong_cli</h3>
           <p>{t.eco.cli}</p>
@@ -314,18 +334,22 @@ const codeSamples = [
         <p set:html={t.skillsHead.bodyHtml} />
       </div>
       <div class="skills-grid">
-        <article class="card skill-card" data-reveal>
+        <article class="card skill-card skill-card-wide" data-reveal>
+          <h3><code>rong-runtime-embedder</code></h3>
+          <p set:html={t.skills.runtimeEmbedder} />
+        </article>
+        <article class="card skill-card" data-reveal style="transition-delay:60ms">
           <h3><code>rong-runtime-developer</code></h3>
           <p set:html={t.skills.runtimeDev} />
         </article>
-        <article class="card skill-card" data-reveal style="transition-delay:80ms">
+        <article class="card skill-card" data-reveal style="transition-delay:120ms">
           <h3><code>rong-module-author</code></h3>
           <p set:html={t.skills.moduleAuthor} />
         </article>
       </div>
       <div class="skill-install" data-reveal>
         <code>npx @rongjs/rong-skill install</code>
-        <button class="copy-btn" data-copy="npx @rongjs/rong-skill install" aria-label="Copy skill install command">
+        <button class="copy-btn" data-copy="npx @rongjs/rong-skill install" aria-label={t.skills.copyInstall}>
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
         </button>
       </div>
@@ -678,10 +702,21 @@ const codeSamples = [
   /* ECOSYSTEM */
   .eco-grid {
     display: grid;
-    grid-template-columns: repeat(4, 1fr);
+    grid-template-columns: repeat(3, 1fr);
     gap: 20px;
   }
-  .eco { display: block; }
+  .eco {
+    display: block;
+    min-height: 210px;
+  }
+  .eco-primary {
+    grid-column: span 2;
+    background:
+      radial-gradient(32rem 18rem at 10% 0%, rgba(62, 219, 178, 0.1), transparent 70%),
+      var(--surface);
+  }
+  .eco-primary h3 { font-size: 1.3rem; }
+  .eco-primary p { max-width: 56ch; }
   .eco-kind {
     display: inline-block;
     padding: 3px 10px;
@@ -718,6 +753,13 @@ const codeSamples = [
     gap: 20px;
     max-width: 860px;
   }
+  .skill-card-wide {
+    grid-column: span 2;
+    background:
+      radial-gradient(30rem 16rem at 0% 0%, rgba(79, 184, 216, 0.09), transparent 72%),
+      var(--surface);
+  }
+  .skill-card-wide p { max-width: 68ch; }
   .skill-card h3 {
     font-size: 1.05rem;
     margin-bottom: 10px;
@@ -803,6 +845,8 @@ const codeSamples = [
     .engines-grid { grid-template-columns: 1fr; }
     .features-grid { grid-template-columns: 1fr; }
     .eco-grid { grid-template-columns: 1fr; }
+    .eco-primary, .skill-card-wide { grid-column: span 1; }
+    .skills-grid { grid-template-columns: 1fr; }
     .arch-services { grid-template-columns: repeat(2, 1fr); }
     .modules-grid { grid-template-columns: repeat(2, 1fr); }
   }
@@ -832,11 +876,34 @@ const codeSamples = [
   // Code tabs
   const tabs = document.querySelectorAll<HTMLButtonElement>(".code-tab");
   const panes = document.querySelectorAll<HTMLElement>(".code-pane");
-  tabs.forEach((tab) => {
-    tab.addEventListener("click", () => {
-      const idx = tab.dataset.tab;
-      tabs.forEach((t) => t.classList.toggle("is-active", t === tab));
-      panes.forEach((p) => p.classList.toggle("is-active", p.dataset.pane === idx));
+  const activateTab = (active: HTMLButtonElement, moveFocus = false) => {
+    const idx = active.dataset.tab;
+    tabs.forEach((tab) => {
+      const selected = tab === active;
+      tab.classList.toggle("is-active", selected);
+      tab.setAttribute("aria-selected", selected ? "true" : "false");
+      tab.tabIndex = selected ? 0 : -1;
+    });
+    panes.forEach((pane) => {
+      const selected = pane.dataset.pane === idx;
+      pane.classList.toggle("is-active", selected);
+      pane.hidden = !selected;
+    });
+    if (moveFocus) active.focus();
+  };
+
+  tabs.forEach((tab, index) => {
+    tab.addEventListener("click", () => activateTab(tab));
+    tab.addEventListener("keydown", (event) => {
+      if (event.key !== "ArrowLeft" && event.key !== "ArrowRight" && event.key !== "Home" && event.key !== "End") return;
+      event.preventDefault();
+      let next = index;
+      if (event.key === "ArrowLeft") next = (index - 1 + tabs.length) % tabs.length;
+      if (event.key === "ArrowRight") next = (index + 1) % tabs.length;
+      if (event.key === "Home") next = 0;
+      if (event.key === "End") next = tabs.length - 1;
+      const nextTab = tabs.item(next);
+      if (nextTab) activateTab(nextTab, true);
     });
   });
 </script>

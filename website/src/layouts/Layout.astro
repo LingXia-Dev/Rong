@@ -18,6 +18,7 @@ const repo = "https://github.com/LingXia-Dev/Rong";
 // the language switcher / hreflang alternates.
 const home = homeBase(lang, base);
 const alt = localeUrls(Astro.url.pathname, base);
+const canonical = new URL(Astro.url.pathname, Astro.site);
 ---
 
 <!doctype html>
@@ -31,6 +32,7 @@ const alt = localeUrls(Astro.url.pathname, base);
     <meta name="theme-color" content="#070b0b" />
     <meta name="color-scheme" content="dark" />
     <link rel="icon" type="image/svg+xml" href={`${base}/favicon.svg`} />
+    <link rel="canonical" href={canonical} />
 
     <link rel="alternate" hreflang="en" href={new URL(alt.en, Astro.site)} />
     <link rel="alternate" hreflang="zh-CN" href={new URL(alt.zh, Astro.site)} />
@@ -39,6 +41,7 @@ const alt = localeUrls(Astro.url.pathname, base);
     <meta property="og:type" content="website" />
     <meta property="og:title" content={title} />
     <meta property="og:description" content={description} />
+    <meta property="og:url" content={canonical} />
 
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content={title} />
@@ -47,11 +50,12 @@ const alt = localeUrls(Astro.url.pathname, base);
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
-      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap"
+      href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Manrope:wght@400;500;600;700;800&display=swap"
       rel="stylesheet"
     />
   </head>
   <body>
+    <a class="skip-link" href="#main-content">{t.skipToContent}</a>
     <header class="nav" id="nav">
       <div class="container nav-inner">
         <a class="brand" href={`${home}/`}>
@@ -80,7 +84,7 @@ const alt = localeUrls(Astro.url.pathname, base);
       </div>
     </header>
 
-    <main>
+    <main id="main-content">
       <slot />
     </main>
 
@@ -106,12 +110,14 @@ const alt = localeUrls(Astro.url.pathname, base);
             <a href={`${repo}/blob/master/docs/internals/worker_execution_model.md`} target="_blank" rel="noopener">{t.footer.workerModel}</a>
             <a href={`${repo}/blob/master/docs/internals/value_system.md`} target="_blank" rel="noopener">{t.footer.valueSystem}</a>
             <a href={`${repo}/blob/master/docs/internals/error_handling.md`} target="_blank" rel="noopener">{t.footer.errorHandling}</a>
+            <a href={`${repo}/blob/master/docs/guides/javascript-testing.md`} target="_blank" rel="noopener">{t.footer.jsTesting}</a>
           </div>
           <div>
             <h4>{t.footer.packages}</h4>
             <a href="https://crates.io/crates/rong" target="_blank" rel="noopener">{t.footer.cratesIo}</a>
             <a href="https://www.npmjs.com/package/@rongjs/rong" target="_blank" rel="noopener">@rongjs/rong</a>
             <a href="https://www.npmjs.com/package/@rongjs/rong-skill" target="_blank" rel="noopener">@rongjs/rong-skill</a>
+            <a href="https://www.npmjs.com/package/@rongjs/test" target="_blank" rel="noopener">@rongjs/test</a>
           </div>
           <div>
             <h4>{t.footer.license}</h4>

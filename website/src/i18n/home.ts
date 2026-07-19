@@ -11,7 +11,7 @@ const FEATURE_ICONS = [
   "M12 2l3 3-3 3-3-3 3-3zM12 16l3 3-3 3-3-3 3-3zM2 12l3-3 3 3-3 3-3-3zM16 12l3-3 3 3-3 3-3-3z",
   "M13 2L3 14h7l-1 8 10-12h-7l1-8z",
   "M3 3h7v7H3zM14 3h7v7h-7zM14 14h7v7h-7zM3 14h7v7H3z",
-  "M12 2a10 10 0 100 20 10 10 0 000-20zM2 12h20",
+  "M12 2v3M12 19v3M4.93 4.93l2.12 2.12M16.95 16.95l2.12 2.12M2 12h3M19 12h3M4.93 19.07l2.12-2.12M16.95 7.05l2.12-2.12M12 9v3l2 2",
   "M12 5v14M5 12h14",
 ];
 
@@ -26,6 +26,7 @@ export interface HomeStrings {
     getStarted: string;
     viewOnGitHub: string;
     enginesLabel: string;
+    copyInstall: string;
   };
   stats: [string, string][];
   featuresHead: { eyebrow: string; title: string; body: string };
@@ -34,13 +35,19 @@ export interface HomeStrings {
   engines: Engine[];
   archHead: { eyebrow: string; title: string; body: string };
   arch: { core: string; services: string[]; modulesTitle: string };
-  startHead: { eyebrow: string; title: string; body: string };
+  startHead: { eyebrow: string; title: string; body: string; tabsLabel: string };
   codeTabs: string[];
   modulesHead: { eyebrow: string; title: string; body: string };
   ecoHead: { eyebrow: string; title: string; body: string };
-  eco: { crate: string; types: string; skill: string; cli: string };
+  eco: { crate: string; test: string; types: string; skill: string; cli: string };
   skillsHead: { eyebrow: string; title: string; bodyHtml: string };
-  skills: { runtimeDev: string; moduleAuthor: string; noteHtml: string };
+  skills: {
+    runtimeEmbedder: string;
+    runtimeDev: string;
+    moduleAuthor: string;
+    noteHtml: string;
+    copyInstall: string;
+  };
   cta: { title: string; body: string; start: string; moduleGuide: string };
 }
 
@@ -55,11 +62,12 @@ export const HOME: Record<Locale, HomeStrings> = {
       getStarted: "Get started",
       viewOnGitHub: "View on GitHub",
       enginesLabel: "Supported engines",
+      copyInstall: "Copy install command",
     },
     stats: [
       ["3", "JavaScript engines"],
       ["20", "built-in modules"],
-      ["1.90+", "Rust toolchain (2024 edition)"],
+      ["1.95+", "Rust toolchain (2024 edition)"],
       ["MIT / Apache-2.0", "dual licensed"],
     ],
     featuresHead: {
@@ -90,8 +98,8 @@ export const HOME: Record<Locale, HomeStrings> = {
       },
       {
         icon: FEATURE_ICONS[4],
-        title: "Cross-platform CI",
-        body: "Continuously tested on Windows, Linux, and macOS — QuickJS everywhere, system JavaScriptCore on macOS, and source-built JSC consumers on all three.",
+        title: "Bounded execution",
+        body: "Apply task deadlines across queueing and execution, interrupt non-yielding JavaScript where the engine supports it, and reuse workers safely after timeout.",
       },
       {
         icon: FEATURE_ICONS[5],
@@ -114,7 +122,7 @@ export const HOME: Record<Locale, HomeStrings> = {
       {
         name: "JavaScriptCore",
         tag: "Apple system + source builds",
-        body: "Links the system JavaScriptCore.framework on macOS and iOS, or pinned source-built WebKit/JSCOnly artifacts on macOS, Linux, and Windows.",
+        body: "Links the system JavaScriptCore.framework on macOS and iOS, or uses pinned source-built WebKit/JSCOnly artifacts on supported targets. Windows source artifacts are currently unavailable.",
         accent: ENGINE_ACCENTS[1],
       },
       {
@@ -138,6 +146,7 @@ export const HOME: Record<Locale, HomeStrings> = {
       eyebrow: "Quick start",
       title: "From zero to evaluating JS in seconds.",
       body: "Add the dependency, pick an engine, and run JavaScript from Rust — or expose Rust classes to JavaScript.",
+      tabsLabel: "Quick start examples",
     },
     codeTabs: ["Embed & eval", "Worker pool", "Class bindings", "Cargo.toml", "CLI"],
     modulesHead: {
@@ -148,11 +157,13 @@ export const HOME: Record<Locale, HomeStrings> = {
     ecoHead: {
       eyebrow: "Ecosystem",
       title: "Beyond the crate.",
-      body: "Rong ships to crates.io and npm, with tooling for TypeScript users and AI agents.",
+      body: "Rong ships to crates.io and npm, with focused packages for TypeScript, JavaScript testing, and AI agents.",
     },
     eco: {
       crate:
         "The runtime itself, plus per-module crates published in dependency order from a single release workflow.",
+      test:
+        "A zero-dependency test framework with sequential async cases, nested hooks, strict matchers, and structured reports across Rong engines.",
       types:
         "TypeScript type definitions for the Rong runtime, so JS authored for Rong gets full editor support.",
       skill:
@@ -163,15 +174,18 @@ export const HOME: Record<Locale, HomeStrings> = {
       eyebrow: "Agent skills",
       title: "Teach your AI agent Rong.",
       bodyHtml:
-        '<code class="inline-code">@rongjs/rong-skill</code> bundles two installable agent skills — self-contained <code class="inline-code">SKILL.md</code> documents with generated API references, for any agent runtime that supports file-based skills.',
+        '<code class="inline-code">@rongjs/rong-skill</code> bundles three installable agent skills — self-contained <code class="inline-code">SKILL.md</code> documents with generated API references, for any agent runtime that supports file-based skills.',
     },
     skills: {
+      runtimeEmbedder:
+        "Build Rust hosts around Rong runtimes, choose module capabilities, supervise worker lifecycles, and apply cancellation, deadlines, and interruption correctly.",
       runtimeDev:
         'Write Rong JavaScript scripts, choose the right public APIs, adapt examples, run <code class="inline-code">rong_cli</code>, and compile bytecode.',
       moduleAuthor:
         "Write or edit Rust modules that expose Rong APIs, classes, functions, type conversions, and JavaScript errors.",
       noteHtml:
         'Use <code class="inline-code">--project</code> for a project-local install, or <code class="inline-code">--skill &lt;name&gt;</code> to install just one. The skills share their source with the module API docs on this site — one source of truth.',
+      copyInstall: "Copy skill install command",
     },
     cta: {
       title: "Bring JavaScript into your Rust application.",
@@ -190,11 +204,12 @@ export const HOME: Record<Locale, HomeStrings> = {
       getStarted: "快速开始",
       viewOnGitHub: "在 GitHub 上查看",
       enginesLabel: "支持的引擎",
+      copyInstall: "复制安装命令",
     },
     stats: [
       ["3", "种 JavaScript 引擎"],
       ["20", "个内置模块"],
-      ["1.90+", "Rust 工具链（2024 edition）"],
+      ["1.95+", "Rust 工具链（2024 edition）"],
       ["MIT / Apache-2.0", "双重许可"],
     ],
     featuresHead: {
@@ -225,8 +240,8 @@ export const HOME: Record<Locale, HomeStrings> = {
       },
       {
         icon: FEATURE_ICONS[4],
-        title: "跨平台 CI",
-        body: "在 Windows、Linux 和 macOS 上持续测试 —— QuickJS 覆盖全平台，macOS 上使用系统 JavaScriptCore，三大平台均有源码构建的 JSC 消费者。",
+        title: "有界执行",
+        body: "让任务截止时间覆盖排队与执行；在引擎支持时中断不让出执行权的 JavaScript，并在超时后安全复用 worker。",
       },
       {
         icon: FEATURE_ICONS[5],
@@ -249,7 +264,7 @@ export const HOME: Record<Locale, HomeStrings> = {
       {
         name: "JavaScriptCore",
         tag: "Apple 系统 + 源码构建",
-        body: "在 macOS 和 iOS 上链接系统 JavaScriptCore.framework，或在 macOS、Linux、Windows 上使用固定版本、源码构建的 WebKit/JSCOnly 产物。",
+        body: "在 macOS 和 iOS 上链接系统 JavaScriptCore.framework，或在受支持目标上使用固定版本、源码构建的 WebKit/JSCOnly 产物。Windows 源码产物目前不可用。",
         accent: ENGINE_ACCENTS[1],
       },
       {
@@ -273,6 +288,7 @@ export const HOME: Record<Locale, HomeStrings> = {
       eyebrow: "快速上手",
       title: "从零到运行 JS，只需几秒。",
       body: "添加依赖、选择引擎，即可在 Rust 中运行 JavaScript —— 或将 Rust 类暴露给 JavaScript。",
+      tabsLabel: "快速上手示例",
     },
     codeTabs: ["嵌入与求值", "Worker 池", "类绑定", "Cargo.toml", "CLI"],
     modulesHead: {
@@ -283,10 +299,11 @@ export const HOME: Record<Locale, HomeStrings> = {
     ecoHead: {
       eyebrow: "生态",
       title: "不止于 crate。",
-      body: "Rong 同时发布到 crates.io 和 npm，并为 TypeScript 用户与 AI 智能体提供配套工具。",
+      body: "Rong 同时发布到 crates.io 和 npm，并为 TypeScript、JavaScript 测试与 AI 智能体提供专用软件包。",
     },
     eco: {
       crate: "运行时本体，以及由单一发布工作流按依赖顺序发布的各模块 crate。",
+      test: "零依赖测试框架，在所有 Rong 引擎上提供顺序异步用例、嵌套 hooks、严格 matchers 与结构化报告。",
       types: "Rong 运行时的 TypeScript 类型定义，让面向 Rong 编写的 JS 获得完整的编辑器支持。",
       skill: "可安装的智能体技能，内含自洽的文档与生成式 API 参考，服务 AI 编码智能体。",
       cli: "本地运行时执行与 REPL 工作流，通过 Cargo features 选择引擎。",
@@ -295,14 +312,16 @@ export const HOME: Record<Locale, HomeStrings> = {
       eyebrow: "智能体技能",
       title: "让你的 AI 智能体学会 Rong。",
       bodyHtml:
-        '<code class="inline-code">@rongjs/rong-skill</code> 打包了两个可安装的智能体技能 —— 自洽的 <code class="inline-code">SKILL.md</code> 文档与生成式 API 参考，适用于任何支持文件式技能的智能体运行时。',
+        '<code class="inline-code">@rongjs/rong-skill</code> 打包了三个可安装的智能体技能 —— 自洽的 <code class="inline-code">SKILL.md</code> 文档与生成式 API 参考，适用于任何支持文件式技能的智能体运行时。',
     },
     skills: {
+      runtimeEmbedder: "围绕 Rong runtime 构建 Rust host，选择模块能力，管理 worker 生命周期，并正确应用取消、截止时间与执行中断。",
       runtimeDev:
         '编写 Rong JavaScript 脚本、选择正确的公共 API、改编示例、运行 <code class="inline-code">rong_cli</code> 并编译字节码。',
       moduleAuthor: "编写或修改 Rust 模块，暴露 Rong API、类、函数、类型转换及 JavaScript 错误。",
       noteHtml:
         '使用 <code class="inline-code">--project</code> 进行项目级安装，或用 <code class="inline-code">--skill &lt;name&gt;</code> 只安装其中一个。这些技能与本站的模块 API 文档同源 —— 单一事实来源。',
+      copyInstall: "复制技能安装命令",
     },
     cta: {
       title: "把 JavaScript 带进你的 Rust 应用。",
