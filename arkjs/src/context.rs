@@ -1,10 +1,14 @@
+use crate::runtime::ArkJSRuntimeInner;
 use crate::{ArkJSRuntime, ArkJSValue, arkjs};
 use rong_core::{
     HostError, JSClass, JSContextImpl, JSErrorFactory, JSExceptionThrower, JSRuntimeImpl,
     JSValueImpl, PromiseHandlerRegistration, RongJSError,
 };
+use std::cell::RefCell;
+use std::collections::HashMap;
 use std::ffi::CString;
 use std::ptr;
+use std::rc::{Rc, Weak};
 
 fn compile_to_bytecode_failed() -> RongJSError {
     HostError::new(
@@ -14,12 +18,58 @@ fn compile_to_bytecode_failed() -> RongJSError {
     .into()
 }
 
+thread_local! {
+    static CONTEXT_REGISTRY: RefCell<HashMap<usize, Weak<ArkJSContextInner>>> =
+        RefCell::new(HashMap::new());
+}
+
+pub(crate) struct ArkJSContextInner {
+    raw: arkjs::JSVM_Env,
+    env_scope: arkjs::JSVM_EnvScope,
+    handle_scope: arkjs::JSVM_HandleScope,
+    runtime: Rc<ArkJSRuntimeInner>,
+}
+
+impl Drop for ArkJSContextInner {
+    fn drop(&mut self) {
+        if self.raw.is_null() {
+            return;
+        }
+
+        CONTEXT_REGISTRY.with(|registry| {
+            registry.borrow_mut().remove(&(self.raw as usize));
+        });
+
+        unsafe {
+            crate::class::cleanup_class_cache(self.raw);
+            crate::runtime::clear_unhandled_rejections(self.raw);
+            if !self.handle_scope.is_null() {
+                arkjs::OH_JSVM_CloseHandleScope(self.raw, self.handle_scope);
+            }
+            if !self.env_scope.is_null() {
+                arkjs::OH_JSVM_CloseEnvScope(self.raw, self.env_scope);
+            }
+            arkjs::OH_JSVM_DestroyEnv(self.raw);
+        }
+    }
+}
+
+pub(crate) fn context_guard_from_env(env: arkjs::JSVM_Env) -> Option<Rc<ArkJSContextInner>> {
+    if env.is_null() {
+        return None;
+    }
+    CONTEXT_REGISTRY.with(|registry| {
+        registry
+            .borrow()
+            .get(&(env as usize))
+            .and_then(Weak::upgrade)
+    })
+}
+
 pub struct ArkJSContext {
     raw: arkjs::JSVM_Env,
     vm: arkjs::JSVM_VM,
-    env_scope: arkjs::JSVM_EnvScope,
-    handle_scope: arkjs::JSVM_HandleScope,
-    owned: bool,
+    context_guard: Option<Rc<ArkJSContextInner>>,
 }
 
 impl JSContextImpl for ArkJSContext {
@@ -55,12 +105,22 @@ impl JSContextImpl for ArkJSContext {
             let vm = runtime.to_raw();
             arkjs::OH_JSVM_SetInstanceData(env, vm as *mut std::ffi::c_void, None, ptr::null_mut());
 
+            let inner = Rc::new(ArkJSContextInner {
+                raw: env,
+                env_scope,
+                handle_scope,
+                runtime: runtime.inner.clone(),
+            });
+            CONTEXT_REGISTRY.with(|registry| {
+                registry
+                    .borrow_mut()
+                    .insert(env as usize, Rc::downgrade(&inner));
+            });
+
             Self {
                 raw: env,
                 vm,
-                env_scope,
-                handle_scope,
-                owned: true,
+                context_guard: Some(inner),
             }
         }
     }
@@ -75,18 +135,21 @@ impl JSContextImpl for ArkJSContext {
 
     #[allow(clippy::not_unsafe_ptr_arg_deref)]
     fn from_borrowed_raw(ctx: Self::RawContext) -> Self {
-        // Recover the VM pointer from the env's instance data
-        let vm = unsafe {
-            let mut data: *mut std::ffi::c_void = ptr::null_mut();
-            arkjs::OH_JSVM_GetInstanceData(ctx, &mut data);
-            data as arkjs::JSVM_VM
-        };
+        let context_guard = context_guard_from_env(ctx);
+        let vm = context_guard.as_ref().map_or_else(
+            || unsafe {
+                // Support externally-created environments that are not in the
+                // registry by recovering the VM pointer from instance data.
+                let mut data: *mut std::ffi::c_void = ptr::null_mut();
+                arkjs::OH_JSVM_GetInstanceData(ctx, &mut data);
+                data as arkjs::JSVM_VM
+            },
+            |guard| guard.runtime.raw,
+        );
         Self {
             raw: ctx,
             vm,
-            env_scope: ptr::null_mut(),
-            handle_scope: ptr::null_mut(),
-            owned: false,
+            context_guard,
         }
     }
 
@@ -451,34 +514,12 @@ impl ArkJSContext {
     }
 }
 
-impl Drop for ArkJSContext {
-    fn drop(&mut self) {
-        if !self.owned || self.raw.is_null() {
-            return;
-        }
-
-        unsafe {
-            crate::class::cleanup_class_cache(self.raw);
-            crate::runtime::clear_unhandled_rejections(self.raw);
-            if !self.handle_scope.is_null() {
-                arkjs::OH_JSVM_CloseHandleScope(self.raw, self.handle_scope);
-            }
-            if !self.env_scope.is_null() {
-                arkjs::OH_JSVM_CloseEnvScope(self.raw, self.env_scope);
-            }
-            arkjs::OH_JSVM_DestroyEnv(self.raw);
-        }
-    }
-}
-
 impl Clone for ArkJSContext {
     fn clone(&self) -> Self {
         Self {
             raw: self.raw,
             vm: self.vm,
-            env_scope: ptr::null_mut(),
-            handle_scope: ptr::null_mut(),
-            owned: false,
+            context_guard: self.context_guard.clone(),
         }
     }
 }

@@ -9,6 +9,9 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 ### Engine updates
 
 - Upgraded the bundled QuickJS-NG runtime from v0.13.0 to v0.15.1.
+- Kept engine resources alive until retained JavaScript values release their
+  native handles, so values can be dropped safely after their originating
+  context and runtime handles are released.
 
 ### Runtime interruption
 

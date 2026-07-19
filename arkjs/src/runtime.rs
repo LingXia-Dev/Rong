@@ -5,6 +5,7 @@ use rong_core::{JSEngine, JSRuntimeImpl};
 use std::cell::RefCell;
 use std::ffi::CStr;
 use std::ptr;
+use std::rc::Rc;
 use std::sync::Once;
 
 /// Stored info about an unhandled promise rejection.
@@ -238,9 +239,27 @@ fn ensure_jsvm_initialized() {
     });
 }
 
-pub struct ArkJSRuntime {
-    raw: arkjs::JSVM_VM,
+pub(crate) struct ArkJSRuntimeInner {
+    pub(crate) raw: arkjs::JSVM_VM,
     vm_scope: arkjs::JSVM_VMScope,
+}
+
+impl Drop for ArkJSRuntimeInner {
+    fn drop(&mut self) {
+        if !self.raw.is_null() {
+            unsafe {
+                if !self.vm_scope.is_null() {
+                    arkjs::OH_JSVM_CloseVMScope(self.raw, self.vm_scope);
+                }
+                arkjs::OH_JSVM_DestroyVM(self.raw);
+            }
+        }
+    }
+}
+
+#[derive(Clone)]
+pub struct ArkJSRuntime {
+    pub(crate) inner: Rc<ArkJSRuntimeInner>,
 }
 
 impl JSRuntimeImpl for ArkJSRuntime {
@@ -281,16 +300,18 @@ impl JSRuntimeImpl for ArkJSRuntime {
             arkjs::OH_JSVM_SetHandlerForPromiseReject(vm, Some(promise_reject_handler));
         }
 
-        Self { raw: vm, vm_scope }
+        Self {
+            inner: Rc::new(ArkJSRuntimeInner { raw: vm, vm_scope }),
+        }
     }
 
     fn to_raw(&self) -> Self::RawRuntime {
-        self.raw
+        self.inner.raw
     }
 
     fn run_pending_jobs(&self) -> i32 {
         unsafe {
-            let _ = arkjs::OH_JSVM_PerformMicrotaskCheckpoint(self.raw);
+            let _ = arkjs::OH_JSVM_PerformMicrotaskCheckpoint(self.inner.raw);
         }
         0
     }
@@ -307,19 +328,6 @@ impl JSRuntimeImpl for ArkJSRuntime {
     // layer: new evaluations are rejected while interrupted, but a
     // non-yielding loop cannot be broken. Revisit when the SDK exposes a
     // terminate API.
-}
-
-impl Drop for ArkJSRuntime {
-    fn drop(&mut self) {
-        if !self.raw.is_null() {
-            unsafe {
-                if !self.vm_scope.is_null() {
-                    arkjs::OH_JSVM_CloseVMScope(self.raw, self.vm_scope);
-                }
-                arkjs::OH_JSVM_DestroyVM(self.raw);
-            }
-        }
-    }
 }
 
 pub struct HarmonyArkJS;
