@@ -1,12 +1,12 @@
 describe("Worker", () => {
   describe("Basic functionality", () => {
-    it("should create a worker", () => {
+    test("should create a worker", () => {
       const worker = new Worker("tests/unit/worker-echo.js");
       assert.ok(worker instanceof Worker, "Should create a Worker instance");
       worker.terminate();
     });
 
-    it("should send and receive messages", async () => {
+    test("should send and receive messages", async () => {
       const worker = new Worker("tests/unit/worker-echo.js");
 
       const messagePromise = new Promise((resolve) => {
@@ -21,7 +21,7 @@ describe("Worker", () => {
       await messagePromise;
     });
 
-    it("should handle multiple messages", async () => {
+    test("should handle multiple messages", async () => {
       const worker = new Worker("tests/unit/worker-echo.js");
       const received = [];
 
@@ -45,7 +45,7 @@ describe("Worker", () => {
       await messagesPromise;
     });
 
-    it("should terminate worker", async () => {
+    test("should terminate worker", async () => {
       const worker = new Worker("tests/unit/worker-echo.js");
       let messageCount = 0;
 
@@ -69,7 +69,7 @@ describe("Worker", () => {
   });
 
   describe("Worker computations", () => {
-    it("should perform calculations in worker", async () => {
+    test("should perform calculations in worker", async () => {
       const worker = new Worker("tests/unit/worker-compute.js");
 
       const resultPromise = new Promise((resolve) => {
@@ -86,7 +86,7 @@ describe("Worker", () => {
   });
 
   describe("Data types support", () => {
-    it("should handle number", async () => {
+    test("should handle number", async () => {
       const worker = new Worker("tests/unit/worker-echo.js");
 
       const resultPromise = new Promise((resolve) => {
@@ -101,7 +101,7 @@ describe("Worker", () => {
       await resultPromise;
     });
 
-    it("should handle boolean", async () => {
+    test("should handle boolean", async () => {
       const worker = new Worker("tests/unit/worker-echo.js");
 
       const resultPromise = new Promise((resolve) => {
@@ -116,7 +116,7 @@ describe("Worker", () => {
       await resultPromise;
     });
 
-    it("should handle array", async () => {
+    test("should handle array", async () => {
       const worker = new Worker("tests/unit/worker-echo.js");
 
       const resultPromise = new Promise((resolve) => {
@@ -131,7 +131,7 @@ describe("Worker", () => {
       await resultPromise;
     });
 
-    it("should handle null", async () => {
+    test("should handle null", async () => {
       const worker = new Worker("tests/unit/worker-echo.js");
 
       const resultPromise = new Promise((resolve) => {
@@ -146,7 +146,7 @@ describe("Worker", () => {
       await resultPromise;
     });
 
-    it("should handle undefined", async () => {
+    test("should handle undefined", async () => {
       const worker = new Worker("tests/unit/worker-echo.js");
       const resultPromise = new Promise((resolve) => {
         worker.onmessage = (event) => {
@@ -167,7 +167,7 @@ describe("Worker", () => {
       ]);
     });
 
-    it("should handle bigint", async () => {
+    test("should handle bigint", async () => {
       const worker = new Worker("tests/unit/worker-echo.js");
       const resultPromise = new Promise((resolve) => {
         worker.onmessage = (event) => {
@@ -188,7 +188,7 @@ describe("Worker", () => {
       ]);
     });
 
-    it("should handle non-finite numbers", async () => {
+    test("should handle non-finite numbers", async () => {
       const worker = new Worker("tests/unit/worker-echo.js");
       const resultPromise = new Promise((resolve) => {
         worker.onmessage = (event) => {
@@ -211,7 +211,7 @@ describe("Worker", () => {
   });
 
   describe("Error handling", () => {
-    it("should report worker script errors to onerror", async () => {
+    test("should report worker script errors to onerror", async () => {
       const worker = new Worker("tests/unit/worker-fail.js");
 
       await new Promise((resolve, reject) => {

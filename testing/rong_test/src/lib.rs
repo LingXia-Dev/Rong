@@ -77,18 +77,29 @@ pub struct UnitJSRunner<'a> {
     ctx: &'a JSContext,
 }
 
+const TEST_RUNTIME_JS: &str = include_str!("../../../packages/test/src/runtime.js");
+
 impl<'a> UnitJSRunner<'a> {
-    /// Load and execute the specified JavaScript test script, returning a UnitJSRunner instance
+    async fn load_runtime(ctx: &JSContext) -> JSResult<()> {
+        ctx.eval_async::<()>(Source::from_bytes(TEST_RUNTIME_JS))
+            .await
+    }
+
+    /// Load the shared test runtime and evaluate JavaScript test source.
+    pub async fn load_source(ctx: &'a JSContext, source: &str) -> JSResult<Self> {
+        Self::load_runtime(ctx).await?;
+        ctx.eval_async::<()>(Source::from_bytes(source)).await?;
+        Ok(Self { ctx })
+    }
+
+    /// Load the shared test runtime and a script from `tests/unit`.
     pub async fn load_script(ctx: &'a JSContext, unit: &str) -> JSResult<Self> {
-        // Use CARGO_MANIFEST_DIR to find the test files relative to the crate root
         let manifest_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
         let base_path = manifest_dir.join("../../tests/unit");
 
-        // Canonicalize the path to resolve any potential issues (like '..')
         let test_base_dir = match std::fs::canonicalize(&base_path) {
             Ok(path) => path,
             Err(e) => {
-                // Provide more context in case of error
                 return Err(HostError::new(
                     rong::error::E_INTERNAL,
                     format!(
@@ -101,12 +112,7 @@ impl<'a> UnitJSRunner<'a> {
             }
         };
 
-        // First, load the test runner
-        let runner_path = test_base_dir.join("test-runner.js");
-        let source = Source::from_path(ctx, runner_path).await?;
-        ctx.eval_async::<()>(source).await?;
-
-        // Then, load the test file
+        Self::load_runtime(ctx).await?;
         let test_path = test_base_dir.join(unit);
         let source = Source::from_path(ctx, test_path).await?;
         ctx.eval_async::<()>(source).await?;
@@ -116,34 +122,25 @@ impl<'a> UnitJSRunner<'a> {
 
     /// Run all tests and return true if all tests passed
     pub async fn run(&self) -> JSResult<bool> {
-        // Optional debugging controls:
-        // - RONG_TEST_LIMIT: run only the first N tests (by global test number)
-        // - RONG_TEST_FILTER: regex matched against "suite test"
-        if let Ok(limit) = std::env::var("RONG_TEST_LIMIT")
-            && let Ok(n) = limit.parse::<u32>()
-        {
-            self.ctx.global().set("__RONG_TEST_LIMIT__", n).ok();
-        }
-        if let Ok(filter) = std::env::var("RONG_TEST_FILTER")
-            && !filter.is_empty()
-        {
-            self.ctx.global().set("__RONG_TEST_FILTER__", filter).ok();
-        }
-
-        // Execute the test and wait for completion
         let result: bool = self
             .ctx
-            .eval_async(Source::from_bytes("runner.runTests()"))
+            .eval_async(Source::from_bytes(
+                r#"(async () => {
+                    const report = await globalThis.__RONG_TEST__.run();
+                    globalThis.__RONG_TEST_REPORT__ = report;
+                    return report.failed === 0;
+                })()"#,
+            ))
             .await?;
 
         if !result {
             let details: String = self
                 .ctx
                 .eval_async(Source::from_bytes(
-                    "JSON.stringify({ passed: runner.passed, failed: runner.failed, failures: runner.failures })",
+                    "JSON.stringify(globalThis.__RONG_TEST_REPORT__)",
                 ))
                 .await
-                .unwrap_or_else(|_| "<failed to read runner.failures>".to_string());
+                .unwrap_or_else(|_| "<failed to serialize test report>".to_string());
             eprintln!("JS unit tests failed: {}", details);
         }
 

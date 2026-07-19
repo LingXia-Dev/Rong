@@ -18,7 +18,7 @@ describe("S3 namespace prefix", () => {
     }
   });
 
-  it("write and read through namespaced client", async () => {
+  test("write and read through namespaced client", async () => {
     const n = await s3.write(KEY, CONTENT);
     assert.equal(n, CONTENT.length);
 
@@ -27,12 +27,12 @@ describe("S3 namespace prefix", () => {
     assert.equal(text, CONTENT);
   });
 
-  it("file() keeps the namespace transparent", () => {
+  test("file() keeps the namespace transparent", () => {
     const file = s3.file(KEY);
     assert.equal(file.name, KEY);
   });
 
-  it("file() rejects config override on namespaced client", () => {
+  test("file() rejects config override on namespaced client", () => {
     let threw = false;
     try {
       s3.file(KEY, { bucket: "other-bucket" });
@@ -44,7 +44,7 @@ describe("S3 namespace prefix", () => {
     assert(threw, "file() config override should be blocked");
   });
 
-  it("rejects unknown options on a namespaced client", () => {
+  test("rejects unknown options on a namespaced client", () => {
     let threw = false;
     try {
       s3.file(KEY, { typo: true });
@@ -56,20 +56,20 @@ describe("S3 namespace prefix", () => {
     assert(threw, "unknown namespaced options should be rejected");
   });
 
-  it("exists returns true for namespaced key", async () => {
+  test("exists returns true for namespaced key", async () => {
     assert.equal(await s3.exists(KEY), true);
   });
 
-  it("size returns correct byte count", async () => {
+  test("size returns correct byte count", async () => {
     assert.equal(await s3.size(KEY), CONTENT.length);
   });
 
-  it("stat returns metadata", async () => {
+  test("stat returns metadata", async () => {
     const st = await s3.stat(KEY);
     assert(st.size > 0, "stat.size > 0");
   });
 
-  it("list with prefix returns namespaced keys (prefix stripped)", async () => {
+  test("list with prefix returns namespaced keys (prefix stripped)", async () => {
     const result = await s3.list({ prefix: "ns-test-" });
     assert(result.contents.length > 0, "found objects");
     // Keys should NOT contain the namespace prefix — it's transparent
@@ -77,7 +77,7 @@ describe("S3 namespace prefix", () => {
     assert(found, "found key without namespace prefix");
   });
 
-  it("write() allows content type but rejects config override", async () => {
+  test("write() allows content type but rejects config override", async () => {
     const n = await s3.write(KEY, CONTENT, { type: "text/plain" });
     assert.equal(n, CONTENT.length);
 
@@ -92,7 +92,7 @@ describe("S3 namespace prefix", () => {
     assert(threw, "write() config override should be blocked");
   });
 
-  it("presign() rejects config override", async () => {
+  test("presign() rejects config override", async () => {
     const url = await s3.presign(KEY, { method: "GET", expiresIn: 60 });
     assert(typeof url === "string", "presign still works with safe options");
 
@@ -107,7 +107,7 @@ describe("S3 namespace prefix", () => {
     assert(threw, "presign() config override should be blocked");
   });
 
-  it("list() rejects config override", async () => {
+  test("list() rejects config override", async () => {
     let threw = false;
     try {
       await s3.list({ bucket: "other-bucket" });
@@ -119,7 +119,7 @@ describe("S3 namespace prefix", () => {
     assert(threw, "list() config override should be blocked");
   });
 
-  it("file operations are isolated from non-prefixed keys", async () => {
+  test("file operations are isolated from non-prefixed keys", async () => {
     // Write directly via Rong.S3Client (no namespace prefix) to verify isolation
     const raw = new Rong.S3Client({
       accessKeyId: TEST_S3_ACCESS_KEY,
@@ -138,7 +138,7 @@ describe("S3 namespace prefix", () => {
     assert.equal(prefixedExists, true, "raw client sees full prefixed key");
   });
 
-  it("delete removes namespaced key", async () => {
+  test("delete removes namespaced key", async () => {
     await s3.delete(KEY);
     assert.equal(await s3.exists(KEY), false);
   });

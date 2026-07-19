@@ -12,7 +12,7 @@ describe("S3 dynamic namespace prefix", () => {
     await s3.delete(KEY);
   });
 
-  it("resolves the namespace independently for every client operation", async () => {
+  test("resolves the namespace independently for every client operation", async () => {
     Rong.__setTestS3Namespace("scope-a");
     await s3.write(KEY, "value-a");
 
@@ -24,7 +24,7 @@ describe("S3 dynamic namespace prefix", () => {
     assert.equal(await s3.file(KEY).text(), "value-a");
   });
 
-  it("re-resolves the namespace when a lazy S3File is used", async () => {
+  test("re-resolves the namespace when a lazy S3File is used", async () => {
     const file = s3.file(KEY);
 
     Rong.__setTestS3Namespace("scope-a");
@@ -42,7 +42,7 @@ describe("S3 dynamic namespace prefix", () => {
     assert.equal(await slice.text(), "a");
   });
 
-  it("uses one resolved namespace throughout list", async () => {
+  test("uses one resolved namespace throughout list", async () => {
     Rong.__setTestS3Namespace("scope-a");
     await s3.write(KEY, "listed-a");
 
@@ -54,7 +54,7 @@ describe("S3 dynamic namespace prefix", () => {
     assert(result.contents.every((entry) => !entry.key.startsWith("scope-")));
   });
 
-  it("rejects an empty namespace instead of using raw object keys", async () => {
+  test("rejects an empty namespace instead of using raw object keys", async () => {
     let threw = false;
     try {
       await emptyNamespaceS3.exists(KEY);
@@ -77,7 +77,7 @@ describe("S3 dynamic namespace prefix", () => {
     assert(threw, "a lazy file should reject an empty namespace when used");
   });
 
-  it("propagates resolver errors before bucket construction or network I/O", async () => {
+  test("propagates resolver errors before bucket construction or network I/O", async () => {
     let threw = false;
     try {
       await resolverErrorS3.exists(KEY);

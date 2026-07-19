@@ -1,13 +1,13 @@
 describe("Request", () => {
   describe("constructor", () => {
-    it("should create a request with minimum required parameters", () => {
+    test("should create a request with minimum required parameters", () => {
       const request = new Request("https://example.com");
       expect(request.url).toBe("https://example.com/");
       expect(request.method).toBe("GET");
       expect(request.headers instanceof Headers).toBe(true);
     });
 
-    it("should create a request with all parameters", () => {
+    test("should create a request with all parameters", () => {
       const init = {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -23,7 +23,7 @@ describe("Request", () => {
       expect(request.redirect).toBe("follow");
     });
 
-    it("should create a request from URL object", () => {
+    test("should create a request from URL object", () => {
       const url = new URL("https://example.com/path?query=value");
       const request = new Request(url);
       expect(request.url).toBe("https://example.com/path?query=value");
@@ -31,7 +31,7 @@ describe("Request", () => {
       expect(request.headers instanceof Headers).toBe(true);
     });
 
-    it("should throw TypeError for invalid URL", () => {
+    test("should throw TypeError for invalid URL", () => {
       let error;
       try {
         new Request("not-a-url");
@@ -41,7 +41,7 @@ describe("Request", () => {
       expect(error instanceof TypeError).toBe(true);
     });
 
-    it("should create a request from another Request", () => {
+    test("should create a request from another Request", () => {
       const original = new Request("https://example.com/path", {
         method: "POST",
         body: "payload",
@@ -53,7 +53,7 @@ describe("Request", () => {
   });
 
   describe("method validation", () => {
-    it("should allow standard HTTP methods", () => {
+    test("should allow standard HTTP methods", () => {
       const methods = [
         "GET",
         "POST",
@@ -69,12 +69,12 @@ describe("Request", () => {
       });
     });
 
-    it("should normalize standard HTTP methods", () => {
+    test("should normalize standard HTTP methods", () => {
       const request = new Request("https://example.com", { method: "post" });
       expect(request.method).toBe("POST");
     });
 
-    it("should reject forbidden HTTP methods", () => {
+    test("should reject forbidden HTTP methods", () => {
       for (const method of ["CONNECT", "TRACE", "TRACK"]) {
         let error;
         try {
@@ -86,7 +86,7 @@ describe("Request", () => {
       }
     });
 
-    it("should throw TypeError for invalid HTTP methods", () => {
+    test("should throw TypeError for invalid HTTP methods", () => {
       let error;
       try {
         new Request("https://example.com", { method: "BAD METHOD" });
@@ -96,7 +96,7 @@ describe("Request", () => {
       expect(error instanceof TypeError).toBe(true);
     });
 
-    it("should reject a signal that is not an AbortSignal", () => {
+    test("should reject a signal that is not an AbortSignal", () => {
       let error;
       try {
         new Request("https://example.com", { signal: {} });
@@ -108,7 +108,7 @@ describe("Request", () => {
   });
 
   describe("body handling", () => {
-    it("should not allow body for GET/HEAD requests", () => {
+    test("should not allow body for GET/HEAD requests", () => {
       for (const method of ["GET", "HEAD"]) {
         let error;
         try {
@@ -120,7 +120,7 @@ describe("Request", () => {
       }
     });
 
-    it("should allow body for POST requests", () => {
+    test("should allow body for POST requests", () => {
       const bodies = [
         JSON.stringify({ test: "data" }),
         new URLSearchParams("key=value"),
@@ -137,7 +137,7 @@ describe("Request", () => {
     });
 
     describe("text()", () => {
-      it("should handle string body", async () => {
+      test("should handle string body", async () => {
         const body = "Hello, World!";
         const request = new Request("https://example.com", {
           method: "POST",
@@ -147,7 +147,7 @@ describe("Request", () => {
         expect(text).toBe(body);
       });
 
-      it("should handle URLSearchParams body", async () => {
+      test("should handle URLSearchParams body", async () => {
         const params = new URLSearchParams();
         params.append("key1", "value1");
         params.append("key2", "value2");
@@ -159,7 +159,7 @@ describe("Request", () => {
         expect(text).toBe("key1=value1&key2=value2");
       });
 
-      it("should handle ArrayBuffer body", async () => {
+      test("should handle ArrayBuffer body", async () => {
         const text = "Hello, ArrayBuffer!";
         const encoder = new TextEncoder();
         const buffer = encoder.encode(text).buffer;
@@ -171,7 +171,7 @@ describe("Request", () => {
         expect(result).toBe(text);
       });
 
-      it("should convert other body values to strings", async () => {
+      test("should convert other body values to strings", async () => {
         const request = new Request("https://example.com", {
           method: "POST",
           body: {
@@ -183,7 +183,7 @@ describe("Request", () => {
         expect(await request.text()).toBe("custom body");
       });
 
-      it("should return empty string for null body", async () => {
+      test("should return empty string for null body", async () => {
         const request = new Request("https://example.com");
         const text = await request.text();
         expect(text).toBe("");
@@ -191,7 +191,7 @@ describe("Request", () => {
     });
 
     describe("arrayBuffer()", () => {
-      it("should handle string body", async () => {
+      test("should handle string body", async () => {
         const body = "Hello, World!";
         const request = new Request("https://example.com", {
           method: "POST",
@@ -202,7 +202,7 @@ describe("Request", () => {
         expect(text).toBe(body);
       });
 
-      it("should handle URLSearchParams body", async () => {
+      test("should handle URLSearchParams body", async () => {
         const params = new URLSearchParams();
         params.append("key1", "value1");
         params.append("key2", "value2");
@@ -215,7 +215,7 @@ describe("Request", () => {
         expect(text).toBe("key1=value1&key2=value2");
       });
 
-      it("should handle ArrayBuffer body", async () => {
+      test("should handle ArrayBuffer body", async () => {
         const text = "Hello, ArrayBuffer!";
         const encoder = new TextEncoder();
         const originalBuffer = encoder.encode(text).buffer;
@@ -228,7 +228,7 @@ describe("Request", () => {
         expect(result).toBe(text);
       });
 
-      it("should return empty ArrayBuffer for null body", async () => {
+      test("should return empty ArrayBuffer for null body", async () => {
         const request = new Request("https://example.com");
         const buffer = await request.arrayBuffer();
         expect(buffer.byteLength).toBe(0);
@@ -237,7 +237,7 @@ describe("Request", () => {
   });
 
   describe("clone", () => {
-    it("should create an identical copy of the request", () => {
+    test("should create an identical copy of the request", () => {
       const original = new Request("https://example.com", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -254,7 +254,7 @@ describe("Request", () => {
       expect(clone).not.toBe(original);
     });
 
-    it("should reject cloning after the body is consumed", async () => {
+    test("should reject cloning after the body is consumed", async () => {
       const request = new Request("https://example.com", {
         method: "POST",
         body: "payload",

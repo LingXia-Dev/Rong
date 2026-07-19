@@ -13,12 +13,12 @@ describe("Redis namespace prefix", () => {
     await redis.del("mylist");
   });
 
-  it("set and get through namespaced client", async () => {
+  test("set and get through namespaced client", async () => {
     await redis.set("mykey", "hello");
     assert.equal(await redis.get("mykey"), "hello");
   });
 
-  it("keys are isolated from non-prefixed access", async () => {
+  test("keys are isolated from non-prefixed access", async () => {
     await redis.set("mykey", "namespaced");
 
     // Create a raw client (no namespace) to verify isolation
@@ -33,37 +33,37 @@ describe("Redis namespace prefix", () => {
     }
   });
 
-  it("del works on namespaced key", async () => {
+  test("del works on namespaced key", async () => {
     await redis.set("mykey", "val");
     assert.equal(await redis.del("mykey"), 1);
     assert.equal(await redis.get("mykey"), null);
   });
 
-  it("exists works on namespaced key", async () => {
+  test("exists works on namespaced key", async () => {
     assert.equal(await redis.exists("mykey"), false);
     await redis.set("mykey", "val");
     assert.equal(await redis.exists("mykey"), true);
   });
 
-  it("incr/decr work on namespaced key", async () => {
+  test("incr/decr work on namespaced key", async () => {
     assert.equal(await redis.incr("counter"), 1);
     assert.equal(await redis.incr("counter"), 2);
     assert.equal(await redis.decr("counter"), 1);
   });
 
-  it("hash operations work on namespaced key", async () => {
+  test("hash operations work on namespaced key", async () => {
     await redis.hset("myhash", "name", "Alice");
     assert.equal(await redis.hget("myhash", "name"), "Alice");
   });
 
-  it("set operations work on namespaced key", async () => {
+  test("set operations work on namespaced key", async () => {
     await redis.sadd("myset", "a");
     await redis.sadd("myset", "b");
     const members = await redis.smembers("myset");
     assert.equal(members.length, 2);
   });
 
-  it("list operations work on namespaced key", async () => {
+  test("list operations work on namespaced key", async () => {
     await redis.rpush("mylist", "first");
     await redis.rpush("mylist", "second");
     assert.equal(await redis.llen("mylist"), 2);
@@ -72,7 +72,7 @@ describe("Redis namespace prefix", () => {
     assert.equal(items[1], "second");
   });
 
-  it("send is disabled on namespaced injected clients", async () => {
+  test("send is disabled on namespaced injected clients", async () => {
     let threw = false;
     try {
       await redis.send("SET", ["unsafe", "value"]);

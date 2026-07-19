@@ -17,61 +17,61 @@ describe("Buffer", () => {
   }
 
   describe("Blob", () => {
-    it("should create a blob with content and type", () => {
+    test("should create a blob with content and type", () => {
       const blob = new Blob(["Hello, World!"], { type: "text/plain" });
       assert(blob instanceof Blob);
       assert.equal(blob.size, 13);
       assert.equal(blob.type, "text/plain");
     });
 
-    it("should create an empty blob", () => {
+    test("should create an empty blob", () => {
       const emptyBlob = new Blob();
       assert.equal(emptyBlob.size, 0);
       assert.equal(emptyBlob.type, "");
     });
 
-    it("should normalize type to lowercase", () => {
+    test("should normalize type to lowercase", () => {
       const blob = new Blob([], { type: "TEXT/PLAIN" });
       assert.equal(blob.type, "text/plain");
     });
 
-    it("should handle invalid type", () => {
+    test("should handle invalid type", () => {
       const blob = new Blob([], { type: "text/plain\0" });
       assert.equal(blob.type, "");
     });
 
-    it("should slice blob content", () => {
+    test("should slice blob content", () => {
       const blob = new Blob(["Hello, World!"]);
       const slice = blob.slice(0, 5);
       assert.equal(slice.size, 5);
     });
 
-    it("should handle negative slice indices", () => {
+    test("should handle negative slice indices", () => {
       const blob = new Blob(["Hello, World!"]);
       const slice = blob.slice(-5);
       assert.equal(slice.size, 5);
     });
 
-    it("should return text content", async () => {
+    test("should return text content", async () => {
       const blob = new Blob(["Hello, World!"]);
       const text = await blob.text();
       assert.equal(text, "Hello, World!");
     });
 
-    it("should handle unicode text", async () => {
+    test("should handle unicode text", async () => {
       const blob = new Blob(["Hello, 世界!"]);
       const text = await blob.text();
       assert.equal(text, "Hello, 世界!");
     });
 
-    it("should return array buffer", async () => {
+    test("should return array buffer", async () => {
       const blob = new Blob(["Hello"]);
       const buffer = await blob.arrayBuffer();
       assert(buffer instanceof ArrayBuffer);
       assert.equal(buffer.byteLength, 5);
     });
 
-    it("should handle typed array input", async () => {
+    test("should handle typed array input", async () => {
       const data = new Uint8Array([72, 101, 108, 108, 111]); // "Hello"
       const blob = new Blob([data]);
       const buffer = await blob.arrayBuffer();
@@ -82,7 +82,7 @@ describe("Buffer", () => {
       );
     });
 
-    it("should handle multiple parts", async () => {
+    test("should handle multiple parts", async () => {
       const blob = new Blob(["Hello", " ", "World"]);
       const text = await blob.text();
       assert.equal(text, "Hello World");
@@ -90,7 +90,7 @@ describe("Buffer", () => {
   });
 
   describe("File", () => {
-    it("should create a file with content and metadata", () => {
+    test("should create a file with content and metadata", () => {
       const now = Date.now();
       const file = new File(["Hello, World!"], "test.txt", {
         type: "text/plain",
@@ -132,33 +132,33 @@ describe("Buffer", () => {
       );
     });
 
-    it("should create an empty file with defaults", () => {
+    test("should create an empty file with defaults", () => {
       const file = new File([], "empty.txt");
       assert.equal(file.size, 0);
       assert.equal(file.type, "");
       assert(file.lastModified > 0);
     });
 
-    it("should inherit blob methods", async () => {
+    test("should inherit blob methods", async () => {
       const file = new File(["Hello"], "test.txt");
       const text = await file.text();
       assert.equal(text, "Hello");
     });
 
-    it("should handle multiple parts", async () => {
+    test("should handle multiple parts", async () => {
       const file = new File(["Hello", " ", "World"], "test.txt");
       const text = await file.text();
       assert.equal(text, "Hello World");
     });
 
-    it("should handle typed arrays", async () => {
+    test("should handle typed arrays", async () => {
       const data = new Uint8Array([72, 101, 108, 108, 111]); // "Hello"
       const file = new File([data], "test.txt");
       const text = await file.text();
       assert.equal(text, "Hello");
     });
 
-    it("should reject empty filenames", () => {
+    test("should reject empty filenames", () => {
       let threw = false;
       try {
         new File([], "");
@@ -169,7 +169,7 @@ describe("Buffer", () => {
       assert(threw, "Should throw TypeError for empty filename");
     });
 
-    it("should handle unicode filenames", () => {
+    test("should handle unicode filenames", () => {
       console.log("Creating file with unicode filename");
       const file = new File([], "测试.txt");
       console.log("Created file:", {

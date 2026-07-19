@@ -1,5 +1,5 @@
 describe("ReadableStream (constructor + reader)", () => {
-  it("hides internal stream helper classes from global scope", () => {
+  test("hides internal stream helper classes from global scope", () => {
     assert.equal(typeof ReadableStreamDefaultReader, "undefined");
     assert.equal(typeof ReadableStreamDefaultController, "undefined");
     assert.equal(typeof WritableStreamDefaultWriter, "undefined");
@@ -25,7 +25,7 @@ describe("ReadableStream (constructor + reader)", () => {
     writer.releaseLock();
   });
 
-  it("new ReadableStream(start) enqueues and closes", async () => {
+  test("new ReadableStream(start) enqueues and closes", async () => {
     const rs = new ReadableStream({
       start(controller) {
         controller.enqueue(new TextEncoder().encode("a"));
@@ -47,7 +47,7 @@ describe("ReadableStream (constructor + reader)", () => {
     expect(r3.done).toBe(true);
   });
 
-  it("getReader locking + releaseLock", async () => {
+  test("getReader locking + releaseLock", async () => {
     const rs = new ReadableStream({
       start(controller) {
         controller.enqueue(new TextEncoder().encode("x"));
@@ -74,7 +74,7 @@ describe("ReadableStream (constructor + reader)", () => {
 });
 
 describe("WritableStream (sink + writer)", () => {
-  it("collects chunks via sink.write and close", async () => {
+  test("collects chunks via sink.write and close", async () => {
     const collected = [];
     const ws = new WritableStream({
       write(chunk) {
@@ -96,7 +96,7 @@ describe("WritableStream (sink + writer)", () => {
     expect(text).toBe("helloworld");
   });
 
-  it("supports async sink.write/close (promises)", async () => {
+  test("supports async sink.write/close (promises)", async () => {
     const collected = [];
     const ws = new WritableStream({
       async write(chunk) {
@@ -121,7 +121,7 @@ describe("WritableStream (sink + writer)", () => {
 });
 
 describe("ReadableStream pipeTo", () => {
-  it("pipes readable to writable (sink)", async () => {
+  test("pipes readable to writable (sink)", async () => {
     const enc = new TextEncoder();
     const dec = new TextDecoder();
 
@@ -147,7 +147,7 @@ describe("ReadableStream pipeTo", () => {
     expect(out).toBe("helloworld");
   });
 
-  it("respects preventClose option", async () => {
+  test("respects preventClose option", async () => {
     const enc = new TextEncoder();
     let closed = false;
     const rs = new ReadableStream({
@@ -166,7 +166,7 @@ describe("ReadableStream pipeTo", () => {
     expect(closed).toBe(false);
   });
 
-  it("aborts the destination when write fails", async () => {
+  test("aborts the destination when write fails", async () => {
     const rs = new ReadableStream({
       start(controller) {
         controller.enqueue(new TextEncoder().encode("boom"));
@@ -196,7 +196,7 @@ describe("ReadableStream pipeTo", () => {
     expect(aborted).toBe(true);
   });
 
-  it("respects preventAbort when write fails", async () => {
+  test("respects preventAbort when write fails", async () => {
     const rs = new ReadableStream({
       start(controller) {
         controller.enqueue(new TextEncoder().encode("boom"));
@@ -226,7 +226,7 @@ describe("ReadableStream pipeTo", () => {
     expect(aborted).toBe(false);
   });
 
-  it("releases locks when the abort signal is already aborted", async () => {
+  test("releases locks when the abort signal is already aborted", async () => {
     const controller = new AbortController();
     controller.abort("stop");
 
@@ -251,7 +251,7 @@ describe("ReadableStream pipeTo", () => {
 });
 
 describe("ReadableStream pipeThrough", () => {
-  it("pipes through a transform pair and returns the readable side", async () => {
+  test("pipes through a transform pair and returns the readable side", async () => {
     const enc = new TextEncoder();
     const dec = new TextDecoder();
 
@@ -296,7 +296,7 @@ describe("ReadableStream pipeThrough", () => {
     expect(finalRead.done).toBe(true);
   });
 
-  it("validates transform.readable", () => {
+  test("validates transform.readable", () => {
     const rs = new ReadableStream({});
 
     expect(() =>
@@ -307,7 +307,7 @@ describe("ReadableStream pipeThrough", () => {
     ).toThrow(TypeError);
   });
 
-  it("throws when the source stream is already locked", () => {
+  test("throws when the source stream is already locked", () => {
     const rs = new ReadableStream({});
     rs.getReader();
 
@@ -316,7 +316,7 @@ describe("ReadableStream pipeThrough", () => {
     ).toThrow(TypeError);
   });
 
-  it("throws when transform.writable is already locked", () => {
+  test("throws when transform.writable is already locked", () => {
     const source = new ReadableStream({
       start(controller) {
         controller.enqueue(new TextEncoder().encode("hello"));
@@ -329,7 +329,7 @@ describe("ReadableStream pipeThrough", () => {
     expect(() => source.pipeThrough(transform)).toThrow(TypeError);
   });
 
-  it("respects preventClose for the transform writable side", async () => {
+  test("respects preventClose for the transform writable side", async () => {
     const source = new ReadableStream({
       start(controller) {
         controller.enqueue(new TextEncoder().encode("x"));
@@ -353,7 +353,7 @@ describe("ReadableStream pipeThrough", () => {
     expect(closed).toBe(false);
   });
 
-  it("aborts transform.writable when piping fails", async () => {
+  test("aborts transform.writable when piping fails", async () => {
     const source = new ReadableStream({
       start(controller) {
         controller.enqueue(new TextEncoder().encode("boom"));
@@ -379,7 +379,7 @@ describe("ReadableStream pipeThrough", () => {
     expect(aborted).toBe(true);
   });
 
-  it("respects preventAbort when transform.writable fails", async () => {
+  test("respects preventAbort when transform.writable fails", async () => {
     const source = new ReadableStream({
       start(controller) {
         controller.enqueue(new TextEncoder().encode("boom"));
@@ -405,7 +405,7 @@ describe("ReadableStream pipeThrough", () => {
     expect(aborted).toBe(false);
   });
 
-  it("does not leak locks when the abort signal is already aborted", async () => {
+  test("does not leak locks when the abort signal is already aborted", async () => {
     const controller = new AbortController();
     controller.abort("stop");
 
@@ -426,7 +426,7 @@ describe("ReadableStream pipeThrough", () => {
 });
 
 describe("ReadableStream async iterator", () => {
-  it("iterates chunks with for await...of", async () => {
+  test("iterates chunks with for await...of", async () => {
     const enc = new TextEncoder();
     const rs = new ReadableStream({
       start(controller) {
@@ -447,7 +447,7 @@ describe("ReadableStream async iterator", () => {
 });
 
 describe("ReadableStream tee", () => {
-  it("duplicates chunks to both branches", async () => {
+  test("duplicates chunks to both branches", async () => {
     const enc = new TextEncoder();
     const dec = new TextDecoder();
 
@@ -484,7 +484,7 @@ describe("ReadableStream tee", () => {
     expect(s2).toBe("hi!");
   });
 
-  it("locks the original stream after tee", async () => {
+  test("locks the original stream after tee", async () => {
     const enc = new TextEncoder();
     const rs = new ReadableStream({
       start(controller) {

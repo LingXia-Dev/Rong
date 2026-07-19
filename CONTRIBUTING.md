@@ -50,13 +50,14 @@ Run the default CI engine set locally:
 cargo make ci-verify-all
 ```
 
-Validate npm packages when changing `packages/rong_types`, `packages/skill`, `docs/api`, or
-`docs/skills`:
+Validate npm packages when changing `packages/rong_types`, `packages/skill`,
+`packages/test`, `docs/api`, or `docs/skills`:
 
 ```bash
 npm --prefix packages/rong_types install --no-package-lock
 npm --prefix packages/rong_types run build
 npm --prefix packages/skill run check
+npm --prefix packages/test run check
 ```
 
 What these tasks do:
@@ -66,6 +67,8 @@ What these tasks do:
 - `ci-verify-all`: runs `ci-verify` sequentially for `quickjs` and `jscore`
 - `npm --prefix packages/skill run check`: syntax-checks the skill CLI/packer and verifies
   `docs/skills` plus `docs/api` can be packed into self-contained skills
+- `npm --prefix packages/test run check`: syntax-checks and exercises the
+  engine-neutral JavaScript test framework without Rong or Node runtime APIs
 
 The shared tasks exclude `rong_arkjs`, `rong_arkjs_sys`, and the device-only
 `rong_test_device` crate from the default host CI gate. ArkJS/OHOS is validated
@@ -128,8 +131,10 @@ The main `CI` workflow starts with a lightweight `scope` job:
 
 - Docs, Markdown, and GitHub metadata changes do not run the Rust/JSC host
   matrix unless they touch workflow behavior.
-- Changes under `docs/api`, `docs/skills`, `packages/rong_types`, `packages/skill`, or npm
-  release scripts run the npm package validation job.
+- Changes under `docs/api`, `docs/skills`, `packages/rong_types`,
+  `packages/skill`, or npm release scripts run the npm package validation job.
+  `packages/test` changes also run the Rust host-engine matrix because its
+  runtime is embedded by `UnitJSRunner`.
 - Rust/source changes run format, host engine checks, clippy, tests, and the
   `jscore-source-*` prebuilt-consumer jobs.
 - Manual `workflow_dispatch` runs all scopes.
@@ -148,7 +153,8 @@ job for consuming the pinned artifact.
   not source documentation.
 - The repo-maintained npm packages are published under the `@rongjs` scope:
   `@rongjs/rong` from [`packages/rong_types`](packages/rong_types) and
-  `@rongjs/rong-skill` from [`packages/skill`](packages/skill).
+  `@rongjs/rong-skill` from [`packages/skill`](packages/skill), and
+  `@rongjs/test` from [`packages/test`](packages/test).
 
 ## Release Flow
 

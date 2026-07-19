@@ -35,7 +35,7 @@ async function decompressBytes(format, input) {
 }
 
 describe("Compression Streams", () => {
-  it("constructors expose readable and writable sides", () => {
+  test("constructors expose readable and writable sides", () => {
     const compression = new CompressionStream("gzip");
     const decompression = new DecompressionStream("gzip");
 
@@ -45,7 +45,7 @@ describe("Compression Streams", () => {
     expect(decompression.writable instanceof WritableStream).toBe(true);
   });
 
-  it("rejects unsupported formats", () => {
+  test("rejects unsupported formats", () => {
     let compressionFailed = false;
     try {
       new CompressionStream("brotli");
@@ -66,7 +66,7 @@ describe("Compression Streams", () => {
   });
 
   for (const format of ["gzip", "deflate", "deflate-raw"]) {
-    it(`round-trips ${format} data`, async () => {
+    test(`round-trips ${format} data`, async () => {
       const input = new TextEncoder().encode(
         "Rong compression stream test payload repeated twice Rong compression stream test payload repeated twice",
       );
@@ -80,7 +80,7 @@ describe("Compression Streams", () => {
       );
     });
 
-    it(`supports pipeThrough() with ${format}`, async () => {
+    test(`supports pipeThrough() with ${format}`, async () => {
       const input = new TextEncoder().encode(
         `pipeThrough-${format}-payload-pipeThrough-${format}-payload`,
       );
@@ -105,7 +105,7 @@ describe("Compression Streams", () => {
     });
   }
 
-  it("supports chunked writes across multiple writer.write() calls", async () => {
+  test("supports chunked writes across multiple writer.write() calls", async () => {
     const encoder = new TextEncoder();
     const compression = new CompressionStream("gzip");
     const writer = compression.writable.getWriter();
@@ -118,7 +118,7 @@ describe("Compression Streams", () => {
     expect(new TextDecoder().decode(decompressed)).toBe("hello world");
   });
 
-  it("errors on invalid compressed input", async () => {
+  test("errors on invalid compressed input", async () => {
     const stream = new DecompressionStream("gzip");
     const writer = stream.writable.getWriter();
     await writer.write(new Uint8Array([1, 2, 3, 4, 5]));

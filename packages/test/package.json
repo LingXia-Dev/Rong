@@ -1,0 +1,45 @@
+{
+  "name": "@rongjs/test",
+  "version": "0.5.0",
+  "description": "A lightweight, engine-neutral JavaScript test framework for Rong",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./src/index.d.ts",
+      "import": "./src/index.js"
+    },
+    "./runtime": "./src/runtime.js",
+    "./package.json": "./package.json"
+  },
+  "types": "./src/index.d.ts",
+  "scripts": {
+    "test": "node --test",
+    "check": "node --check src/runtime.js && node --check src/index.js && npm test",
+    "prepublishOnly": "npm run check"
+  },
+  "files": [
+    "src",
+    "README.md"
+  ],
+  "keywords": [
+    "rong",
+    "rongjs",
+    "test",
+    "testing",
+    "javascript-engine",
+    "embedding"
+  ],
+  "homepage": "https://github.com/LingXia-Dev/Rong#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/LingXia-Dev/Rong.git",
+    "directory": "packages/test"
+  },
+  "bugs": {
+    "url": "https://github.com/LingXia-Dev/Rong/issues"
+  },
+  "license": "MIT OR Apache-2.0",
+  "publishConfig": {
+    "access": "public"
+  }
+}

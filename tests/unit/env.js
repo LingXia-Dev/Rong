@@ -1,5 +1,5 @@
 describe("Rong Environment", () => {
-  it("only exposes runtime env through Rong", () => {
+  test("only exposes runtime env through Rong", () => {
     assert.equal(typeof globalThis.process, "undefined");
     assert.equal(typeof globalThis.child_process, "undefined");
     assert.ok(typeof Rong.env === "object");
@@ -10,12 +10,12 @@ describe("Rong Environment", () => {
     assert.ok(Rong.revision.length > 0);
   });
 
-  it("exposes runtime version and git revision", () => {
+  test("exposes runtime version and git revision", () => {
     assert.ok(/^\d+\.\d+\.\d+/.test(Rong.version));
     assert.ok(/^[0-9a-f]{7,40}$|^unknown$/.test(Rong.revision));
   });
 
-  it("Rong.env is a stable mutable object", () => {
+  test("Rong.env is a stable mutable object", () => {
     const original = Rong.env;
     Rong.env.RONG_ENV_ALIAS_CHECK = "ok";
     assert.equal(Rong.env.RONG_ENV_ALIAS_CHECK, "ok");
@@ -23,7 +23,7 @@ describe("Rong Environment", () => {
     delete Rong.env.RONG_ENV_ALIAS_CHECK;
   });
 
-  it("Rong.argv and Rong.args are available", () => {
+  test("Rong.argv and Rong.args are available", () => {
     const argv = Rong.argv;
     const args = Rong.args;
     assert.ok(Array.isArray(argv));

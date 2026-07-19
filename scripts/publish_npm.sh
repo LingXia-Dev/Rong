@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-PACKAGE_DIRS=("packages/rong_types" "packages/skill")
+PACKAGE_DIRS=("packages/rong_types" "packages/skill" "packages/test")
 CREATE_PACKAGE_TAGS=false
 
 usage() {

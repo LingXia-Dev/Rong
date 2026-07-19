@@ -7,12 +7,12 @@ async function waitForQuiet(ms = 75) {
 describe("RedisClient — connection", () => {
   let client;
 
-  it("hides RedisSubscription from global scope", () => {
+  test("hides RedisSubscription from global scope", () => {
     assert.equal(typeof RedisSubscription, "undefined");
     assert.equal(globalThis.RedisSubscription, undefined);
   });
 
-  it("does not expose RedisClient on globalThis", () => {
+  test("does not expose RedisClient on globalThis", () => {
     assert.equal(typeof RedisClient, "undefined");
     assert.equal(globalThis.RedisClient, undefined);
     assert.equal(typeof Rong.RedisClient, "function");
@@ -23,7 +23,7 @@ describe("RedisClient — connection", () => {
   });
   afterEach(() => client.close());
 
-  it("requires an explicit URL", () => {
+  test("requires an explicit URL", () => {
     let threw = false;
     try {
       new Rong.RedisClient();
@@ -35,18 +35,18 @@ describe("RedisClient — connection", () => {
     assert(threw, "constructor should require an explicit url");
   });
 
-  it("connect explicitly", async () => {
+  test("connect explicitly", async () => {
     await client.connect();
     assert.equal(client.connected, true);
   });
 
-  it("close connection", async () => {
+  test("close connection", async () => {
     await client.connect();
     client.close();
     assert.equal(client.connected, false);
   });
 
-  it("reconnects after close", async () => {
+  test("reconnects after close", async () => {
     await client.set("test:rc", "val");
     client.close();
     const val = await client.get("test:rc");
@@ -54,13 +54,13 @@ describe("RedisClient — connection", () => {
     assert.equal(client.connected, true);
   });
 
-  it("close is idempotent", () => {
+  test("close is idempotent", () => {
     client.close();
     client.close();
     assert.equal(client.connected, false);
   });
 
-  it("throws a TypeError for invalid URL", async () => {
+  test("throws a TypeError for invalid URL", async () => {
     const broken = new Rong.RedisClient("not a redis url");
     let threw = false;
     try {
@@ -85,22 +85,22 @@ describe("RedisClient — strings", () => {
   });
   afterEach(() => client.close());
 
-  it("set and get", async () => {
+  test("set and get", async () => {
     await client.set("test:key", "hello");
     assert.equal(await client.get("test:key"), "hello");
   });
 
-  it("get returns null for missing key", async () => {
+  test("get returns null for missing key", async () => {
     assert.equal(await client.get("test:missing"), null);
   });
 
-  it("del removes a key", async () => {
+  test("del removes a key", async () => {
     await client.set("test:key", "v");
     assert.equal(await client.del("test:key"), 1);
     assert.equal(await client.get("test:key"), null);
   });
 
-  it("exists checks key presence", async () => {
+  test("exists checks key presence", async () => {
     assert.equal(await client.exists("test:key"), false);
     await client.set("test:key", "v");
     assert.equal(await client.exists("test:key"), true);
@@ -116,19 +116,19 @@ describe("RedisClient — TTL", () => {
   });
   afterEach(() => client.close());
 
-  it("expire and ttl", async () => {
+  test("expire and ttl", async () => {
     await client.set("test:ttl", "data");
     await client.expire("test:ttl", 100);
     const ttl = await client.ttl("test:ttl");
     assert(ttl > 0 && ttl <= 100, `TTL should be 1-100, got ${ttl}`);
   });
 
-  it("ttl -1 for no expiry", async () => {
+  test("ttl -1 for no expiry", async () => {
     await client.set("test:ttl", "data");
     assert.equal(await client.ttl("test:ttl"), -1);
   });
 
-  it("ttl -2 for nonexistent key", async () => {
+  test("ttl -2 for nonexistent key", async () => {
     assert.equal(await client.ttl("test:missing"), -2);
   });
 });
@@ -142,12 +142,12 @@ describe("RedisClient — numeric", () => {
   });
   afterEach(() => client.close());
 
-  it("incr", async () => {
+  test("incr", async () => {
     assert.equal(await client.incr("test:counter"), 1);
     assert.equal(await client.incr("test:counter"), 2);
   });
 
-  it("decr", async () => {
+  test("decr", async () => {
     await client.set("test:counter", "10");
     assert.equal(await client.decr("test:counter"), 9);
   });
@@ -162,31 +162,31 @@ describe("RedisClient — hashes", () => {
   });
   afterEach(() => client.close());
 
-  it("hset and hget", async () => {
+  test("hset and hget", async () => {
     await client.hset("test:hash", "name", "Alice");
     assert.equal(await client.hget("test:hash", "name"), "Alice");
   });
 
-  it("hget null for missing field", async () => {
+  test("hget null for missing field", async () => {
     await client.hset("test:hash", "a", "1");
     assert.equal(await client.hget("test:hash", "nope"), null);
   });
 
-  it("hmset and hmget", async () => {
+  test("hmset and hmget", async () => {
     await client.hmset("test:hash", ["name", "Alice", "email", "a@b.c"]);
     const r = await client.hmget("test:hash", ["name", "email"]);
     assert.equal(r[0], "Alice");
     assert.equal(r[1], "a@b.c");
   });
 
-  it("hmget null for missing fields", async () => {
+  test("hmget null for missing fields", async () => {
     await client.hmset("test:hash", ["name", "Alice"]);
     const r = await client.hmget("test:hash", ["name", "missing"]);
     assert.equal(r[0], "Alice");
     assert.equal(r[1], null);
   });
 
-  it("hmset rejects odd-length field lists", async () => {
+  test("hmset rejects odd-length field lists", async () => {
     let threw = false;
     try {
       await client.hmset("test:hash", ["name", "Alice", "orphan"]);
@@ -198,12 +198,12 @@ describe("RedisClient — hashes", () => {
     assert(threw, "hmset should reject odd-length field arrays");
   });
 
-  it("hincrby", async () => {
+  test("hincrby", async () => {
     await client.hset("test:hash", "visits", "10");
     assert.equal(await client.hincrby("test:hash", "visits", 5), 15);
   });
 
-  it("hincrbyfloat", async () => {
+  test("hincrbyfloat", async () => {
     await client.hset("test:hash", "score", "10.5");
     assert.equal(await client.hincrbyfloat("test:hash", "score", 1.5), 12);
   });
@@ -218,7 +218,7 @@ describe("RedisClient — sets", () => {
   });
   afterEach(() => client.close());
 
-  it("sadd and smembers", async () => {
+  test("sadd and smembers", async () => {
     await client.sadd("test:set", "a");
     await client.sadd("test:set", "b");
     await client.sadd("test:set", "c");
@@ -227,7 +227,7 @@ describe("RedisClient — sets", () => {
     assert(m.includes("a") && m.includes("b") && m.includes("c"));
   });
 
-  it("srem", async () => {
+  test("srem", async () => {
     await client.sadd("test:set", "x");
     await client.sadd("test:set", "y");
     await client.srem("test:set", "x");
@@ -236,18 +236,18 @@ describe("RedisClient — sets", () => {
     assert(m.includes("y"));
   });
 
-  it("sismember", async () => {
+  test("sismember", async () => {
     await client.sadd("test:set", "m");
     assert.equal(await client.sismember("test:set", "m"), true);
     assert.equal(await client.sismember("test:set", "x"), false);
   });
 
-  it("srandmember", async () => {
+  test("srandmember", async () => {
     await client.sadd("test:set", "only");
     assert.equal(await client.srandmember("test:set"), "only");
   });
 
-  it("spop", async () => {
+  test("spop", async () => {
     await client.sadd("test:set", "pop");
     assert.equal(await client.spop("test:set"), "pop");
     assert.equal((await client.smembers("test:set")).length, 0);
@@ -263,7 +263,7 @@ describe("RedisClient — lists", () => {
   });
   afterEach(() => client.close());
 
-  it("lpush, rpush, lrange", async () => {
+  test("lpush, rpush, lrange", async () => {
     await client.rpush("test:list", "a");
     await client.rpush("test:list", "b");
     await client.lpush("test:list", "z");
@@ -273,7 +273,7 @@ describe("RedisClient — lists", () => {
     assert.equal(list[2], "b");
   });
 
-  it("lpop and rpop", async () => {
+  test("lpop and rpop", async () => {
     await client.rpush("test:list", "1");
     await client.rpush("test:list", "2");
     await client.rpush("test:list", "3");
@@ -281,12 +281,12 @@ describe("RedisClient — lists", () => {
     assert.equal(await client.rpop("test:list"), "3");
   });
 
-  it("lpop/rpop null on empty", async () => {
+  test("lpop/rpop null on empty", async () => {
     assert.equal(await client.lpop("test:list"), null);
     assert.equal(await client.rpop("test:list"), null);
   });
 
-  it("llen", async () => {
+  test("llen", async () => {
     assert.equal(await client.llen("test:list"), 0);
     await client.rpush("test:list", "a");
     await client.rpush("test:list", "b");
@@ -304,18 +304,18 @@ describe("RedisClient — raw send", () => {
   });
   afterEach(() => client.close());
 
-  it("send GET", async () => {
+  test("send GET", async () => {
     await client.set("test:key", "hello");
     assert.equal(await client.send("GET", ["test:key"]), "hello");
   });
 
-  it("send MSET", async () => {
+  test("send MSET", async () => {
     await client.send("MSET", ["test:key", "a", "test:counter", "b"]);
     assert.equal(await client.get("test:key"), "a");
     assert.equal(await client.get("test:counter"), "b");
   });
 
-  it("send maps arrays, integers, and nulls", async () => {
+  test("send maps arrays, integers, and nulls", async () => {
     await client.send("MSET", ["test:key", "a", "test:counter", "b"]);
 
     const values = await client.send("MGET", ["test:key", "test:counter", "test:missing"]);
@@ -328,7 +328,7 @@ describe("RedisClient — raw send", () => {
     assert.equal(await client.send("GET", ["test:missing"]), null);
   });
 
-  it("send preserves large integer replies as bigint", async () => {
+  test("send preserves large integer replies as bigint", async () => {
     await client.del("test:big-counter");
     const result = await client.send("INCRBY", ["test:big-counter", "9007199254740993"]);
     assert.equal(typeof result, "bigint");
@@ -361,7 +361,7 @@ describe("RedisClient — pub/sub", () => {
     return sub;
   }
 
-  it("subscribe returns an async-iterable subscription", async () => {
+  test("subscribe returns an async-iterable subscription", async () => {
     const sub = await subscribe("test:ch");
     assert.equal(sub.channel, "test:ch");
     assert.equal(sub[Symbol.asyncIterator](), sub);
@@ -375,7 +375,7 @@ describe("RedisClient — pub/sub", () => {
     assert.equal(received.value.channel, "test:ch");
   });
 
-  it("subscribe to multiple channels", async () => {
+  test("subscribe to multiple channels", async () => {
     const subA = await subscribe("ch:a");
     const subB = await subscribe("ch:b");
 
@@ -392,7 +392,7 @@ describe("RedisClient — pub/sub", () => {
     assert.equal(receivedB.value.message, "two");
   });
 
-  it("multiple subscriptions on the same channel each receive messages", async () => {
+  test("multiple subscriptions on the same channel each receive messages", async () => {
     const first = await subscribe("test:shared");
     const second = await subscribe("test:shared");
 
@@ -406,7 +406,7 @@ describe("RedisClient — pub/sub", () => {
     assert.equal(secondMessage.value.message, "message");
   });
 
-  it("close stops receiving and is idempotent", async () => {
+  test("close stops receiving and is idempotent", async () => {
     const sub = await subscribe("test:close");
 
     const first = sub.next();
@@ -425,7 +425,7 @@ describe("RedisClient — pub/sub", () => {
     assert.equal(done.done, true);
   });
 
-  it("break in for-await closes the subscription", async () => {
+  test("break in for-await closes the subscription", async () => {
     const sub = await subscribe("test:break");
     const messages = [];
 
@@ -450,7 +450,7 @@ describe("RedisClient — pub/sub", () => {
     assert.equal(done.done, true);
   });
 
-  it("client.close closes active subscriptions", async () => {
+  test("client.close closes active subscriptions", async () => {
     const sub = await subscribe("test:client-close");
     sub_client.close();
     await waitForQuiet();
@@ -459,7 +459,7 @@ describe("RedisClient — pub/sub", () => {
     assert.equal(done.done, true);
   });
 
-  it("AbortSignal closes the subscription", async () => {
+  test("AbortSignal closes the subscription", async () => {
     const controller = new AbortController();
     const sub = await subscribe("test:abort", { signal: controller.signal });
 
@@ -470,7 +470,7 @@ describe("RedisClient — pub/sub", () => {
     assert.equal(done.done, true);
   });
 
-  it("already-aborted signals reject subscribe", async () => {
+  test("already-aborted signals reject subscribe", async () => {
     const controller = new AbortController();
     controller.abort(new Error("stop now"));
 

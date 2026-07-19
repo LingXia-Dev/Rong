@@ -3,7 +3,7 @@ function bytesToString(bytes) {
 }
 
 describe("Rong Compression", () => {
-  it("exposes zstd APIs on Rong", () => {
+  test("exposes zstd APIs on Rong", () => {
     expect(typeof Rong.zstdCompress).toBe("function");
     expect(typeof Rong.zstdCompressSync).toBe("function");
     expect(typeof Rong.zstdDecompress).toBe("function");
@@ -14,7 +14,7 @@ describe("Rong Compression", () => {
     expect(typeof Rong.gunzipSync).toBe("function");
   });
 
-  it("does not expose compression helpers on globalThis", () => {
+  test("does not expose compression helpers on globalThis", () => {
     expect(globalThis.zstdCompress).toBe(undefined);
     expect(globalThis.zstdCompressSync).toBe(undefined);
     expect(globalThis.zstdDecompress).toBe(undefined);
@@ -25,7 +25,7 @@ describe("Rong Compression", () => {
     expect(globalThis.gunzipSync).toBe(undefined);
   });
 
-  it("round-trips data synchronously", () => {
+  test("round-trips data synchronously", () => {
     const input = new TextEncoder().encode(
       "rong compression sync payload rong compression sync payload",
     );
@@ -38,7 +38,7 @@ describe("Rong Compression", () => {
     expect(bytesToString(decompressed)).toBe(bytesToString(input));
   });
 
-  it("round-trips data asynchronously", async () => {
+  test("round-trips data asynchronously", async () => {
     const input = new TextEncoder().encode(
       "rong compression async payload rong compression async payload",
     );
@@ -50,7 +50,7 @@ describe("Rong Compression", () => {
     expect(bytesToString(decompressed)).toBe(bytesToString(input));
   });
 
-  it("accepts ArrayBuffer and typed array views with offsets", () => {
+  test("accepts ArrayBuffer and typed array views with offsets", () => {
     const source = new Uint8Array(
       new TextEncoder().encode("__prefix__payload-with-offset__suffix__"),
     );
@@ -65,14 +65,14 @@ describe("Rong Compression", () => {
     expect(bytesToString(bufferDecompressed)).toBe(bytesToString(source));
   });
 
-  it("supports empty payloads", async () => {
+  test("supports empty payloads", async () => {
     const input = new Uint8Array();
     const compressed = await Rong.zstdCompress(input);
     const decompressed = await Rong.zstdDecompress(compressed);
     expect(decompressed.byteLength).toBe(0);
   });
 
-  it("validates compression level", () => {
+  test("validates compression level", () => {
     expect(() => Rong.zstdCompressSync(new Uint8Array([1, 2, 3]), { level: 0 })).toThrow(
       TypeError,
     );
@@ -85,12 +85,12 @@ describe("Rong Compression", () => {
     expect(() => Rong.zstdCompressSync(new Uint8Array([1, 2, 3]), null)).toThrow(TypeError);
   });
 
-  it("rejects invalid input types", () => {
+  test("rejects invalid input types", () => {
     expect(() => Rong.zstdCompressSync("hello")).toThrow(TypeError);
     expect(() => Rong.zstdDecompressSync("hello")).toThrow(TypeError);
   });
 
-  it("surfaces decompression errors for invalid payloads", async () => {
+  test("surfaces decompression errors for invalid payloads", async () => {
     let syncFailed = false;
     try {
       Rong.zstdDecompressSync(new Uint8Array([1, 2, 3, 4]));
@@ -110,7 +110,7 @@ describe("Rong Compression", () => {
     expect(asyncFailed).toBe(true);
   });
 
-  it("supports gzip round-trips synchronously", () => {
+  test("supports gzip round-trips synchronously", () => {
     const input = new TextEncoder().encode(
       "rong gzip payload rong gzip payload rong gzip payload",
     );
@@ -123,7 +123,7 @@ describe("Rong Compression", () => {
     expect(bytesToString(decompressed)).toBe(bytesToString(input));
   });
 
-  it("supports gzip round-trips asynchronously", async () => {
+  test("supports gzip round-trips asynchronously", async () => {
     const input = new TextEncoder().encode(
       "rong gzip async payload rong gzip async payload rong gzip async payload",
     );
@@ -136,7 +136,7 @@ describe("Rong Compression", () => {
     expect(bytesToString(decompressed)).toBe(bytesToString(input));
   });
 
-  it("supports gzip levels and view inputs", () => {
+  test("supports gzip levels and view inputs", () => {
     const bytes = new Uint8Array(
       new TextEncoder().encode("aa__gzip-view-payload__zz"),
     );
@@ -146,7 +146,7 @@ describe("Rong Compression", () => {
     expect(bytesToString(decompressed)).toBe(bytesToString(view));
   });
 
-  it("validates gzip options and invalid payloads", () => {
+  test("validates gzip options and invalid payloads", () => {
     expect(() => Rong.gzipSync(new Uint8Array([1, 2, 3]), { level: -2 })).toThrow(TypeError);
     expect(() => Rong.gzipSync(new Uint8Array([1, 2, 3]), { level: 10 })).toThrow(TypeError);
     expect(() => Rong.gzipSync(new Uint8Array([1, 2, 3]), { level: 1.2 })).toThrow(TypeError);
@@ -163,7 +163,7 @@ describe("Rong Compression", () => {
     expect(failed).toBe(true);
   });
 
-  it("surfaces async gzip decompression errors for invalid payloads", async () => {
+  test("surfaces async gzip decompression errors for invalid payloads", async () => {
     let failed = false;
     try {
       await Rong.gunzip(new Uint8Array([1, 2, 3, 4]));
@@ -174,7 +174,7 @@ describe("Rong Compression", () => {
     expect(failed).toBe(true);
   });
 
-  it("accepts gzip ArrayBuffer inputs asynchronously", async () => {
+  test("accepts gzip ArrayBuffer inputs asynchronously", async () => {
     const input = new TextEncoder().encode("gzip-array-buffer-async");
     const compressed = await Rong.gzip(input.buffer);
     const restored = await Rong.gunzip(compressed.buffer);

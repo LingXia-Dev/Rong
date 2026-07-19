@@ -1,41 +1,6 @@
 use rong_test::*;
 
-const TEST_RUNNER_JS: &str = include_str!("unit/test-runner.js");
-
 const PROXY_UNIT_JS: &str = include_str!("unit/proxy.js");
-
-async fn run_embedded_unit_js(ctx: &JSContext, source: &str) -> JSResult<bool> {
-    ctx.eval_async::<()>(Source::from_bytes(TEST_RUNNER_JS))
-        .await?;
-    ctx.eval_async::<()>(Source::from_bytes(source)).await?;
-
-    if let Ok(limit) = std::env::var("RONG_TEST_LIMIT")
-        && let Ok(n) = limit.parse::<u32>()
-    {
-        ctx.global().set("__RONG_TEST_LIMIT__", n).ok();
-    }
-    if let Ok(filter) = std::env::var("RONG_TEST_FILTER")
-        && !filter.is_empty()
-    {
-        ctx.global().set("__RONG_TEST_FILTER__", filter).ok();
-    }
-
-    let passed: bool = ctx
-        .eval_async(Source::from_bytes("runner.runTests()"))
-        .await?;
-
-    if !passed {
-        let details: String = ctx
-            .eval_async(Source::from_bytes(
-                "JSON.stringify({ passed: runner.passed, failed: runner.failed, failures: runner.failures })",
-            ))
-            .await
-            .unwrap_or_else(|_| "<failed to read runner.failures>".to_string());
-        eprintln!("JS unit tests failed: {}", details);
-    }
-
-    Ok(passed)
-}
 
 #[test]
 fn proxy_create_is_proxy_and_target() {
@@ -183,7 +148,12 @@ fn proxy_js_unit_tests() {
             )?,
         )?;
 
-        let passed = match run_embedded_unit_js(&ctx, PROXY_UNIT_JS).await {
+        let passed = match async {
+            let runner = UnitJSRunner::load_source(&ctx, PROXY_UNIT_JS).await?;
+            runner.run().await
+        }
+        .await
+        {
             Ok(passed) => passed,
             Err(err) => panic!(
                 "proxy.js threw: {}",

@@ -1,6 +1,6 @@
 describe("AbortSignal", () => {
   describe("Basic functionality", () => {
-    it("should throw error when trying to create AbortSignal with new", () => {
+    test("should throw error when trying to create AbortSignal with new", () => {
       try {
         new AbortSignal();
       } catch (error) {
@@ -8,33 +8,35 @@ describe("AbortSignal", () => {
       }
     });
 
-    it("should create a new AbortSignal instance via AbortController", () => {
+    test("should create a new AbortSignal instance via AbortController", () => {
       const controller = new AbortController();
       const signal = controller.signal;
       expect(signal.aborted).toBeFalsy();
       expect(signal.reason).toBeUndefined();
     });
 
-    it("should handle abort event", (done) => {
+    test("should handle abort event", () => {
       const controller = new AbortController();
       const signal = controller.signal;
+      let called = false;
       signal.onabort = () => {
+        called = true;
         expect(signal.aborted).toBeTruthy();
-        done();
       };
       controller.abort();
+      expect(called).toBeTruthy();
     });
   });
 
   describe("Static methods", () => {
-    it("should create aborted signal with abort()", () => {
+    test("should create aborted signal with abort()", () => {
       const reason = new Error("Aborted");
       const signal = AbortSignal.abort(reason);
       expect(signal.aborted).toBeTruthy();
       expect(signal.reason).toBe(reason);
     });
 
-    it("should create signal from multiple signals with any()", () => {
+    test("should create signal from multiple signals with any()", () => {
       const controller1 = new AbortController();
       const controller2 = new AbortController();
       const controller3 = new AbortController();
@@ -53,7 +55,7 @@ describe("AbortSignal", () => {
       expect(combinedSignal.reason).toBe(reason);
     });
 
-    it("should abort immediately if any input signal is already aborted", () => {
+    test("should abort immediately if any input signal is already aborted", () => {
       const controller1 = new AbortController();
       const signal2 = AbortSignal.abort("Already aborted");
       const controller3 = new AbortController();
@@ -68,7 +70,7 @@ describe("AbortSignal", () => {
     });
 
     describe("timeout", () => {
-      it("should create an AbortSignal that aborts after the specified time", async () => {
+      test("should create an AbortSignal that aborts after the specified time", async () => {
         const timeoutDuration = 100; // 100ms
         const signal = AbortSignal.timeout(timeoutDuration);
 
@@ -103,23 +105,23 @@ describe("AbortSignal", () => {
   });
 
   describe("Error handling", () => {
-    it("should throw if aborted with string reason", () => {
+    test("should throw if aborted with string reason", () => {
       const signal = AbortSignal.abort("Test reason");
       expect(() => signal.throwIfAborted()).toThrow("Test reason");
     });
 
-    it("should throw if aborted with object reason", () => {
+    test("should throw if aborted with object reason", () => {
       const reason = { message: "Test reason" };
       const signal = AbortSignal.abort(reason);
       expect(() => signal.throwIfAborted()).toThrow(reason);
     });
 
-    it("should throw TypeError if aborted with TypeError", () => {
+    test("should throw TypeError if aborted with TypeError", () => {
       const signal = AbortSignal.abort(new TypeError("Type error"));
       expect(() => signal.throwIfAborted()).toThrow(TypeError);
     });
 
-    it("should not throw if not aborted", () => {
+    test("should not throw if not aborted", () => {
       const controller = new AbortController();
       const signal = controller.signal;
       assert.doesNotThrow(() => signal.throwIfAborted());

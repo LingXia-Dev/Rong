@@ -1,10 +1,10 @@
 describe("FormData", () => {
-  it("constructor", () => {
+  test("constructor", () => {
     const formData = new FormData();
     assert(formData instanceof FormData);
   });
 
-  it("append and get with string values", () => {
+  test("append and get with string values", () => {
     const formData = new FormData();
     formData.append("name", "John");
     formData.append("name", "Jane");
@@ -22,7 +22,7 @@ describe("FormData", () => {
     assert.equal(allNames[1], "Jane");
   });
 
-  it("append and get with file values", () => {
+  test("append and get with file values", () => {
     const formData = new FormData();
     const file1 = new File(["content1"], "file1.txt", { type: "text/plain" });
     const file2 = new File(["content2"], "file2.txt", { type: "text/plain" });
@@ -42,7 +42,7 @@ describe("FormData", () => {
     assert.equal(allFiles[1].name, "file2.txt");
   });
 
-  it("set", () => {
+  test("set", () => {
     const formData = new FormData();
     formData.append("name", "John");
     formData.append("name", "Jane");
@@ -60,7 +60,7 @@ describe("FormData", () => {
     assert.equal(fileValue.name, "test.txt");
   });
 
-  it("set preserves the position of the first matching entry", () => {
+  test("set preserves the position of the first matching entry", () => {
     const formData = new FormData();
     formData.append("first", "old");
     formData.append("second", "kept");
@@ -75,7 +75,7 @@ describe("FormData", () => {
     assert.equal(entries[1][0], "second");
   });
 
-  it("has and delete", () => {
+  test("has and delete", () => {
     const formData = new FormData();
     formData.append("name", "John");
     formData.append("file", new File(["content"], "test.txt"));
@@ -93,7 +93,7 @@ describe("FormData", () => {
     assert.equal(formData.get("file"), null);
   });
 
-  it("entries", async () => {
+  test("entries", async () => {
     const formData = new FormData();
     formData.append("name", "John");
     formData.append("name", "Jane");
@@ -123,7 +123,7 @@ describe("FormData", () => {
     assert.equal(entries[2][1].name, "test.txt");
   });
 
-  it("forEach", () => {
+  test("forEach", () => {
     const formData = new FormData();
     formData.append("name", "John");
     formData.append("file", new File(["content"], "test.txt"));
@@ -140,7 +140,7 @@ describe("FormData", () => {
     assert(seen[1][1] instanceof File);
   });
 
-  it("keys", async () => {
+  test("keys", async () => {
     const formData = new FormData();
     formData.append("name", "John");
     formData.append("name", "Jane");
@@ -157,7 +157,7 @@ describe("FormData", () => {
     assert.equal(keys[2], "file");
   });
 
-  it("values", async () => {
+  test("values", async () => {
     const formData = new FormData();
     formData.append("name", "John");
     formData.append("name", "Jane");
@@ -184,14 +184,14 @@ describe("FormData", () => {
     assert.equal(values[2].name, "test.txt");
   });
 
-  it("should handle empty values", () => {
+  test("should handle empty values", () => {
     const formData = new FormData();
     formData.append("empty", "");
     assert.equal(formData.get("empty"), "");
     assert(formData.has("empty"));
   });
 
-  it("should handle non-string values", () => {
+  test("should handle non-string values", () => {
     const formData = new FormData();
     formData.append("number", 42);
     formData.append("boolean", true);
@@ -201,7 +201,7 @@ describe("FormData", () => {
     assert.equal(formData.get("object"), "[object Object]");
   });
 
-  it("should handle special characters in field names and values", () => {
+  test("should handle special characters in field names and values", () => {
     const formData = new FormData();
     formData.append("field#name", "value#1");
     formData.append("field/name", "value/2");
@@ -209,7 +209,7 @@ describe("FormData", () => {
     assert.equal(formData.get("field/name"), "value/2");
   });
 
-  it("should handle large files", () => {
+  test("should handle large files", () => {
     const largeContent = new Array(1024 * 1024).fill("a").join(""); // 1MB
     const largeFile = new File([largeContent], "large.txt");
     const formData = new FormData();
@@ -219,7 +219,7 @@ describe("FormData", () => {
     assert.equal(retrievedFile.size, 1024 * 1024);
   });
 
-  it("should handle multiple files with same field name", () => {
+  test("should handle multiple files with same field name", () => {
     const formData = new FormData();
     const files = [
       new File(["content1"], "file1.txt"),
@@ -235,7 +235,7 @@ describe("FormData", () => {
     });
   });
 
-  it("should handle formData iteration with mixed types", async () => {
+  test("should handle formData iteration with mixed types", async () => {
     const formData = new FormData();
     formData.append("text", "value");
     formData.append("file", new File(["content"], "test.txt"));

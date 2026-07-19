@@ -90,6 +90,7 @@ git config --local core.hooksPath .githooks
 - Publishes all repo-maintained npm packages:
   - `@rongjs/rong` from `packages/rong_types`
   - `@rongjs/rong-skill` from `packages/skill`
+  - `@rongjs/test` from `packages/test`
 - Runs only in GitHub Actions with npm Trusted Publishing through OIDC
 - Skips the publish if the same npm version already exists
 - Optional `--package-tag` creates package-level tags such as
