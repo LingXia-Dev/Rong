@@ -1,5 +1,5 @@
 describe("Rong stdio", () => {
-  it("exposes runtime stdio on Rong without leaking globals", async () => {
+  test("exposes runtime stdio on Rong without leaking globals", async () => {
     assert.equal(typeof globalThis.stdin, "undefined");
     assert.equal(typeof globalThis.stdout, "undefined");
     assert.equal(typeof globalThis.stderr, "undefined");

@@ -6,6 +6,13 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 
 ## [Unreleased]
 
+### JavaScript testing
+
+- Added the zero-dependency `@rongjs/test` package with sequential async cases,
+  nested hooks, strict matchers, structured reports, and a generic host event
+  handshake. Rong's JavaScript unit suites now use the same framework across
+  QuickJS, JavaScriptCore, and the ArkJS device path.
+
 ### Engine updates
 
 - Upgraded the bundled QuickJS-NG runtime from v0.13.0 to v0.15.1.

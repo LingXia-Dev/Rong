@@ -1,6 +1,6 @@
 describe("Response", () => {
   describe("constructor", () => {
-    it("should create an empty response", () => {
+    test("should create an empty response", () => {
       const response = new Response();
       expect(response.ok).toBe(true);
       expect(response.status).toBe(200);
@@ -8,7 +8,7 @@ describe("Response", () => {
       expect(response.headers instanceof Headers).toBe(true);
     });
 
-    it("should create a response with body and init parameters", () => {
+    test("should create a response with body and init parameters", () => {
       const init = {
         status: 201,
         statusText: "Created",
@@ -25,7 +25,7 @@ describe("Response", () => {
   });
 
   describe("status validation", () => {
-    it("should reject informational status codes", () => {
+    test("should reject informational status codes", () => {
       let error;
       try {
         new Response(null, { status: 199 });
@@ -35,7 +35,7 @@ describe("Response", () => {
       expect(error instanceof RangeError).toBe(true);
     });
 
-    it("should set ok to true for successful status codes", () => {
+    test("should set ok to true for successful status codes", () => {
       const successCodes = [200, 201, 202, 203, 204, 206, 207, 299];
       successCodes.forEach((status) => {
         const response = new Response(null, { status });
@@ -43,7 +43,7 @@ describe("Response", () => {
       });
     });
 
-    it("should set ok to false for error status codes", () => {
+    test("should set ok to false for error status codes", () => {
       const errorCodes = [400, 404, 500, 503];
       errorCodes.forEach((status) => {
         const response = new Response(null, { status });
@@ -51,14 +51,14 @@ describe("Response", () => {
       });
     });
 
-    it("should throw TypeError for invalid status codes", () => {
-      expect(() => new Response(null, { status: 99 })).toThrow(TypeError);
-      expect(() => new Response(null, { status: 600 })).toThrow(TypeError);
+    test("should throw RangeError for invalid status codes", () => {
+      expect(() => new Response(null, { status: 99 })).toThrow(RangeError);
+      expect(() => new Response(null, { status: 600 })).toThrow(RangeError);
     });
   });
 
   describe("body handling", () => {
-    it("should reject a body for a null-body status", () => {
+    test("should reject a body for a null-body status", () => {
       let error;
       try {
         new Response("body", { status: 204 });
@@ -68,7 +68,7 @@ describe("Response", () => {
       expect(error instanceof TypeError).toBe(true);
     });
 
-    it("should handle different body types", async () => {
+    test("should handle different body types", async () => {
       const testCases = [
         {
           body: JSON.stringify({ test: "data" }),
@@ -116,14 +116,14 @@ describe("Response", () => {
       }
     });
 
-    it("should return the same body stream object across getter calls (buffered)", () => {
+    test("should return the same body stream object across getter calls (buffered)", () => {
       const response = new Response("hello world");
       const b1 = response.body;
       const b2 = response.body;
       expect(b1 === b2).toBe(true);
     });
 
-    it("should return the same body stream object across getter calls (JS body)", () => {
+    test("should return the same body stream object across getter calls (JS body)", () => {
       const buf = new Uint8Array([1, 2, 3]);
       const response = new Response(buf);
       const b1 = response.body;
@@ -131,7 +131,7 @@ describe("Response", () => {
       expect(b1 === b2).toBe(true);
     });
 
-    it("should not allow multiple body reads", async () => {
+    test("should not allow multiple body reads", async () => {
       const response = new Response(JSON.stringify({ ok: true }), {
         headers: { "Content-Type": "application/json" },
       });
@@ -153,7 +153,7 @@ describe("Response", () => {
       }
     });
 
-    it("should parse formData from urlencoded body", async () => {
+    test("should parse formData from urlencoded body", async () => {
       const params = new URLSearchParams();
       params.append("name", "Alice");
       params.append("age", "30");
@@ -167,7 +167,7 @@ describe("Response", () => {
       expect(form.get("age")).toBe("30");
     });
 
-    it("should parse formData from multipart body", async () => {
+    test("should parse formData from multipart body", async () => {
       const boundary = "----RongBoundaryTest";
       const body =
         `--${boundary}\r\n` +
@@ -195,7 +195,7 @@ describe("Response", () => {
   });
 
   describe("clone", () => {
-    it("should create an identical copy of the response", async () => {
+    test("should create an identical copy of the response", async () => {
       const original = new Response("test data", {
         status: 200,
         headers: { "Content-Type": "text/plain" },
@@ -214,7 +214,7 @@ describe("Response", () => {
       expect(cloneText).toBe(originalText);
     });
 
-    it("should reject cloning after the body is consumed", async () => {
+    test("should reject cloning after the body is consumed", async () => {
       const response = new Response("payload");
       await response.text();
       let error;
@@ -228,7 +228,7 @@ describe("Response", () => {
   });
 
   describe("error handling", () => {
-    it("should reject line breaks in statusText", () => {
+    test("should reject line breaks in statusText", () => {
       let error;
       try {
         new Response(null, { statusText: "bad\ntext" });
@@ -238,27 +238,27 @@ describe("Response", () => {
       expect(error instanceof TypeError).toBe(true);
     });
 
-    it("should create error responses", () => {
+    test("should create error responses", () => {
       const response = Response.error();
       expect(response.status).toBe(0);
       expect(response.statusText).toBe("");
       expect(response.ok).toBe(false);
     });
 
-    it("should create redirect responses", () => {
+    test("should create redirect responses", () => {
       const url = "https://example.com/new-location";
       const response = Response.redirect(url, 301);
       expect(response.status).toBe(301);
       expect(response.headers.get("Location")).toBe(url);
     });
 
-    it("should throw TypeError for invalid redirect status", () => {
+    test("should throw TypeError for invalid redirect status", () => {
       expect(() => Response.redirect("https://example.com", 200)).toThrow(
         TypeError,
       );
     });
 
-    it("should reject a relative redirect URL", () => {
+    test("should reject a relative redirect URL", () => {
       let error;
       try {
         Response.redirect("/relative", 302);

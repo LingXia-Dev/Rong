@@ -77,6 +77,10 @@ jobs:
                   rust=true
                   npm=true
                   ;;
+                packages/test/*)
+                  rust=true
+                  npm=true
+                  ;;
                 docs/api/*|docs/skills/*|packages/*|rong_typegen/profiles/*|scripts/bump_version.sh|scripts/publish_npm.sh)
                   npm=true
                   ;;
@@ -250,6 +254,11 @@ jobs:
           node packages/skill/bin/cli.mjs install --dir /tmp/rong-skills-ci --force
           test -f /tmp/rong-skills-ci/rong-module-author/references/module-structure.md
           test -f /tmp/rong-skills-ci/rong-runtime-developer/references/api-http.md
+
+      - name: Check Rong test package
+        run: |
+          npm --prefix packages/test run check
+          npm pack ./packages/test --dry-run
 
   host-verify:
     needs: [scope, fmt]

@@ -10,7 +10,7 @@ describe("Redis dynamic namespace prefix", () => {
     await redis.del("shared-key");
   });
 
-  it("resolves the namespace independently for every operation", async () => {
+  test("resolves the namespace independently for every operation", async () => {
     Rong.__setTestNamespace("scope-a");
     await redis.set("shared-key", "value-a");
 
@@ -22,7 +22,7 @@ describe("Redis dynamic namespace prefix", () => {
     assert.equal(await redis.get("shared-key"), "value-a");
   });
 
-  it("disables raw commands", async () => {
+  test("disables raw commands", async () => {
     let threw = false;
     try {
       await redis.send("GET", ["shared-key"]);
@@ -34,7 +34,7 @@ describe("Redis dynamic namespace prefix", () => {
     assert(threw, "send should be blocked");
   });
 
-  it("rejects an empty namespace instead of falling back to raw keys", async () => {
+  test("rejects an empty namespace instead of falling back to raw keys", async () => {
     let threw = false;
     try {
       await emptyNamespaceRedis.get("shared-key");
@@ -46,7 +46,7 @@ describe("Redis dynamic namespace prefix", () => {
     assert(threw, "an empty namespace should be rejected");
   });
 
-  it("resolves the namespace before opening a connection", async () => {
+  test("resolves the namespace before opening a connection", async () => {
     let threw = false;
     try {
       await resolverErrorRedis.get("shared-key");

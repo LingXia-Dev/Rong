@@ -1,5 +1,5 @@
 describe("fetch", () => {
-  it("should fetch IP from test server", async () => {
+  test("should fetch IP from test server", async () => {
     const url = new URL("/ip", TEST_SERVER_URL);
     const response = await fetch(url);
     expect(response instanceof Response).toBe(true);
@@ -12,7 +12,7 @@ describe("fetch", () => {
     expect(data.origin).toBe("127.0.0.1");
   });
 
-  it("should send and receive custom headers", async () => {
+  test("should send and receive custom headers", async () => {
     const url = new URL("/headers", TEST_SERVER_URL);
     const customHeaders = {
       "X-Custom-Header": "custom value",
@@ -37,7 +37,7 @@ describe("fetch", () => {
     }
   });
 
-  it("should handle gzipped response", async () => {
+  test("should handle gzipped response", async () => {
     const url = new URL("/gzip", TEST_SERVER_URL);
     const response = await fetch(url);
     expect(response instanceof Response).toBe(true);
@@ -52,7 +52,7 @@ describe("fetch", () => {
     expect(data.method).toBe("GET");
   });
 
-  it("should handle network errors", async () => {
+  test("should handle network errors", async () => {
     try {
       await fetch("https://invalid.example.com");
     } catch (error) {
@@ -61,7 +61,7 @@ describe("fetch", () => {
     }
   });
 
-  it("should not allow multiple body reads", async () => {
+  test("should not allow multiple body reads", async () => {
     const url = new URL("/ip", TEST_SERVER_URL);
     const response = await fetch(url);
     const a = await response.json();
@@ -81,7 +81,7 @@ describe("fetch", () => {
     }
   });
 
-  it("should stream upload with ReadableStream body", async () => {
+  test("should stream upload with ReadableStream body", async () => {
     const url = new URL("/upload", TEST_SERVER_URL);
     const total = 100 * 1024 + 5;
     const chunk = new Uint8Array(4096).fill(0x61); // 'a'
@@ -108,7 +108,7 @@ describe("fetch", () => {
     expect(data.received).toBe(total);
   });
 
-  it("should reject when request body conversion throws", async () => {
+  test("should reject when request body conversion throws", async () => {
     const url = new URL("/upload", TEST_SERVER_URL);
     const reason = new Error("body conversion failed");
     let caught;
@@ -127,7 +127,7 @@ describe("fetch", () => {
     expect(caught).toBe(reason);
   });
 
-  it("should read streaming response via Response.body", async () => {
+  test("should read streaming response via Response.body", async () => {
     const url = new URL("/large", TEST_SERVER_URL);
     const response = await fetch(url);
     expect(response instanceof Response).toBe(true);
@@ -149,7 +149,7 @@ describe("fetch", () => {
     expect(seenEnd).toBe(true);
   });
 
-  it("should download to file via WritableStream", async () => {
+  test("should download to file via WritableStream", async () => {
     // Prepare temp dir and file path
     const tmpDir = `${WORKSPACE_ROOT}/target/test-tmp`;
     try {
@@ -191,7 +191,7 @@ describe("fetch", () => {
     await Rong.remove(outPath);
   });
 
-  it("should pipeTo file.writable (download)", async () => {
+  test("should pipeTo file.writable (download)", async () => {
     const tmpDir = `${WORKSPACE_ROOT}/target/test-tmp`;
     try {
       await Rong.mkdir(tmpDir, { recursive: true });
@@ -220,7 +220,7 @@ describe("fetch", () => {
   });
 
   describe("redirect", () => {
-    it("should follow redirects by default", async () => {
+    test("should follow redirects by default", async () => {
       const url = new URL("/redirect?n=2", TEST_SERVER_URL);
       const response = await fetch(url);
       expect(response.ok).toBe(true);
@@ -230,7 +230,7 @@ describe("fetch", () => {
       expect(data.origin).toBe("127.0.0.1");
     });
 
-    it("should handle redirect: manual", async () => {
+    test("should handle redirect: manual", async () => {
       const url = new URL("/redirect?n=1", TEST_SERVER_URL);
       const response = await fetch(url, { redirect: "manual" });
       expect(response.type).toBe("basic");
@@ -238,7 +238,7 @@ describe("fetch", () => {
       expect(response.headers.has("location")).toBe(true);
     });
 
-    it("should handle redirect: error", async () => {
+    test("should handle redirect: error", async () => {
       const url = new URL("/redirect?n=1", TEST_SERVER_URL);
       try {
         await fetch(url, { redirect: "error" });
@@ -248,7 +248,7 @@ describe("fetch", () => {
       }
     });
 
-    it("should change POST/PUT to GET on 303 redirect", async () => {
+    test("should change POST/PUT to GET on 303 redirect", async () => {
       const url = new URL("/303", TEST_SERVER_URL);
       // PUT /303 -> 303 Location: /ip -> GET /ip
       const response = await fetch(url, { method: "PUT" });
@@ -258,7 +258,7 @@ describe("fetch", () => {
       expect(data.origin).toBe("127.0.0.1");
     });
 
-    it("should limit redirects", async () => {
+    test("should limit redirects", async () => {
       const url = new URL("/redirect?n=25", TEST_SERVER_URL);
       try {
         await fetch(url);
@@ -280,7 +280,7 @@ describe("Abort to fetch", () => {
     signal = controller.signal;
   });
 
-  it("should abort fetch request", async () => {
+  test("should abort fetch request", async () => {
     const fetchPromise = (async () => {
       return await fetch(`${TEST_SERVER_URL}/delay`, { signal });
     })();
@@ -300,7 +300,7 @@ describe("Abort to fetch", () => {
     }
   });
 
-  it("should abort during response body read", async () => {
+  test("should abort during response body read", async () => {
     const response = await fetch(`${TEST_SERVER_URL}/large`, { signal });
 
     // Start reading the body first
@@ -329,7 +329,7 @@ describe("Abort to fetch", () => {
     }
   });
 
-  it("should abort with custom reason", async () => {
+  test("should abort with custom reason", async () => {
     const reason = new Error("Custom abort reason");
     assert.equal(signal.aborted, false);
     assert.equal(signal.reason, undefined);
@@ -353,7 +353,7 @@ describe("Abort to fetch", () => {
     }
   });
 
-  it("should abort immediately if signal is already aborted", async () => {
+  test("should abort immediately if signal is already aborted", async () => {
     assert.equal(signal.aborted, false);
     assert.equal(signal.reason, undefined);
 

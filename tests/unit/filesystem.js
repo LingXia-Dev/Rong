@@ -41,13 +41,13 @@ describe("Filesystem", () => {
 
   // ==================== Rong.file() basics ====================
 
-  it("Rong.file() returns lazy RongFile with name", () => {
+  test("Rong.file() returns lazy RongFile with name", () => {
     const f = Rong.file("/some/path.txt");
     assert(f !== null && f !== undefined, "file() should return an object");
     assert.equal(f.name, "/some/path.txt", "name getter should return path");
   });
 
-  it("RongFile is hidden from global scope", () => {
+  test("RongFile is hidden from global scope", () => {
     assert.equal(typeof RongFile, "undefined");
     assert.equal(globalThis.RongFile, undefined);
 
@@ -63,7 +63,7 @@ describe("Filesystem", () => {
 
   // ==================== Rong.write() + RongFile.text() ====================
 
-  it("Rong.write(path, string) and file.text()", async () => {
+  test("Rong.write(path, string) and file.text()", async () => {
     await ensureTempDir();
     const testFile = getTempPath("write_text.txt");
     const content = "Hello, World!";
@@ -77,7 +77,7 @@ describe("Filesystem", () => {
     await cleanupTempDir();
   });
 
-  it("Rong.write(path, Uint8Array) and file.arrayBuffer()", async () => {
+  test("Rong.write(path, Uint8Array) and file.arrayBuffer()", async () => {
     await ensureTempDir();
     const testFile = getTempPath("write_bin.bin");
     const data = new Uint8Array([1, 2, 3, 4, 5, 255, 0, 128]);
@@ -95,7 +95,7 @@ describe("Filesystem", () => {
     await cleanupTempDir();
   });
 
-  it("Rong.write(path, ArrayBuffer)", async () => {
+  test("Rong.write(path, ArrayBuffer)", async () => {
     await ensureTempDir();
     const testFile = getTempPath("write_ab.bin");
     const data = new Uint8Array([10, 20, 30]).buffer;
@@ -111,7 +111,7 @@ describe("Filesystem", () => {
     await cleanupTempDir();
   });
 
-  it("Rong.write(dest, RongFile) copies file", async () => {
+  test("Rong.write(dest, RongFile) copies file", async () => {
     await ensureTempDir();
     const src = getTempPath("copy_src.txt");
     const dst = getTempPath("copy_dst.txt");
@@ -127,7 +127,7 @@ describe("Filesystem", () => {
     await cleanupTempDir();
   });
 
-  it("Rong.write(RongFile, data) accepts RongFile as dest", async () => {
+  test("Rong.write(RongFile, data) accepts RongFile as dest", async () => {
     await ensureTempDir();
     const testFile = getTempPath("write_rf_dest.txt");
     const f = Rong.file(testFile);
@@ -139,7 +139,7 @@ describe("Filesystem", () => {
     await cleanupTempDir();
   });
 
-  it("Rong.write() overwrites by default", async () => {
+  test("Rong.write() overwrites by default", async () => {
     await ensureTempDir();
     const testFile = getTempPath("overwrite.txt");
 
@@ -151,7 +151,7 @@ describe("Filesystem", () => {
     await cleanupTempDir();
   });
 
-  it("Rong.write() rejects invalid data types", async () => {
+  test("Rong.write() rejects invalid data types", async () => {
     await ensureTempDir();
     const testFile = getTempPath("invalid_data.txt");
     let failed = false;
@@ -166,7 +166,7 @@ describe("Filesystem", () => {
 
   // ==================== RongFile.json() ====================
 
-  it("RongFile.json() parses JSON file", async () => {
+  test("RongFile.json() parses JSON file", async () => {
     await ensureTempDir();
     const testFile = getTempPath("data.json");
     const obj = { name: "test", value: 42, nested: { arr: [1, 2, 3] } };
@@ -182,7 +182,7 @@ describe("Filesystem", () => {
     await cleanupTempDir();
   });
 
-  it("RongFile.json() throws on invalid JSON", async () => {
+  test("RongFile.json() throws on invalid JSON", async () => {
     await ensureTempDir();
     const testFile = getTempPath("bad.json");
     await Rong.write(testFile, "not valid json {{{");
@@ -200,7 +200,7 @@ describe("Filesystem", () => {
 
   // ==================== RongFile.bytes() ====================
 
-  it("RongFile.bytes() returns Uint8Array", async () => {
+  test("RongFile.bytes() returns Uint8Array", async () => {
     await ensureTempDir();
     const testFile = getTempPath("bytes.bin");
     const data = new Uint8Array([10, 20, 30, 40, 50]);
@@ -218,7 +218,7 @@ describe("Filesystem", () => {
 
   // ==================== RongFile.exists() ====================
 
-  it("RongFile.exists() checks file existence", async () => {
+  test("RongFile.exists() checks file existence", async () => {
     await ensureTempDir();
     const testFile = getTempPath("exists_test.txt");
 
@@ -240,7 +240,7 @@ describe("Filesystem", () => {
 
   // ==================== RongFile.delete() ====================
 
-  it("RongFile.delete() removes file", async () => {
+  test("RongFile.delete() removes file", async () => {
     await ensureTempDir();
     const testFile = getTempPath("delete_test.txt");
     await Rong.write(testFile, "to be deleted");
@@ -255,7 +255,7 @@ describe("Filesystem", () => {
     await cleanupTempDir();
   });
 
-  it("RongFile.delete() throws for non-existent file", async () => {
+  test("RongFile.delete() throws for non-existent file", async () => {
     let failed = false;
     try {
       await Rong.file(getTempPath("no_such_file.txt")).delete();
@@ -267,7 +267,7 @@ describe("Filesystem", () => {
 
   // ==================== RongFile.stat() / lstat() ====================
 
-  it("RongFile.stat() returns file metadata", async () => {
+  test("RongFile.stat() returns file metadata", async () => {
     await ensureTempDir();
     const testFile = getTempPath("stat.txt");
     const content = "Test content";
@@ -287,7 +287,7 @@ describe("Filesystem", () => {
     await cleanupTempDir();
   });
 
-  it("RongFile.lstat() returns symlink metadata", async () => {
+  test("RongFile.lstat() returns symlink metadata", async () => {
     await ensureTempDir();
     const testFile = getTempPath("lstat.txt");
     await Rong.write(testFile, "Test content");
@@ -302,7 +302,7 @@ describe("Filesystem", () => {
 
   // ==================== RongFile.stream() ====================
 
-  it("RongFile.stream() returns ReadableStream", async () => {
+  test("RongFile.stream() returns ReadableStream", async () => {
     await ensureTempDir();
     const testFile = getTempPath("stream_test.txt");
 
@@ -340,7 +340,7 @@ describe("Filesystem", () => {
 
   // ==================== RongFile.open() → FileHandle ====================
 
-  it("FileHandle - basic operations (stat, truncate, sync, close)", async () => {
+  test("FileHandle - basic operations (stat, truncate, sync, close)", async () => {
     await ensureTempDir();
     const testFile = getTempPath("handle_basic.txt");
     await Rong.write(testFile, "Hello from FileHandle!");
@@ -361,7 +361,7 @@ describe("Filesystem", () => {
     await cleanupTempDir();
   });
 
-  it("FileHandle - read/write operations", async () => {
+  test("FileHandle - read/write operations", async () => {
     await ensureTempDir();
     const testFile = getTempPath("handle_rw.dat");
     const testData = new Uint8Array([1, 2, 3, 4, 5, 255, 0, 128]);
@@ -416,7 +416,7 @@ describe("Filesystem", () => {
     await cleanupTempDir();
   });
 
-  it("FileHandle - seek operations", async () => {
+  test("FileHandle - seek operations", async () => {
     await ensureTempDir();
     const testFile = getTempPath("handle_seek.txt");
     const testData = "Hello, World! This is a test file for seeking.";
@@ -483,7 +483,7 @@ describe("Filesystem", () => {
     await cleanupTempDir();
   });
 
-  it("FileHandle - OpenOptions (createNew, truncate)", async () => {
+  test("FileHandle - OpenOptions (createNew, truncate)", async () => {
     await ensureTempDir();
     const testFile = getTempPath("handle_opts.dat");
 
@@ -518,12 +518,12 @@ describe("Filesystem", () => {
     await cleanupTempDir();
   });
 
-  it("FileHandle is hidden from global scope", () => {
+  test("FileHandle is hidden from global scope", () => {
     assert.equal(typeof FileHandle, "undefined");
     assert.equal(globalThis.FileHandle, undefined);
   });
 
-  it("FileHandle cannot be constructed via instance.constructor", async () => {
+  test("FileHandle cannot be constructed via instance.constructor", async () => {
     await ensureTempDir();
     const testFile = getTempPath("handle_indirect_ctor.txt");
     await Rong.write(testFile, "hello");
@@ -540,7 +540,7 @@ describe("Filesystem", () => {
     await cleanupTempDir();
   });
 
-  it("FileHandle - opening non-existent file fails", async () => {
+  test("FileHandle - opening non-existent file fails", async () => {
     let failed = false;
     try {
       await Rong.file(getTempPath("nonexistent.txt")).open({ read: true });
@@ -550,7 +550,7 @@ describe("Filesystem", () => {
     assert(failed, "Opening non-existent file should fail");
   });
 
-  it("FileHandle.close() invalidates the handle", async () => {
+  test("FileHandle.close() invalidates the handle", async () => {
     await ensureTempDir();
     const testFile = getTempPath("handle_close_invalidates.txt");
     await Rong.write(testFile, "hello");
@@ -571,7 +571,7 @@ describe("Filesystem", () => {
 
   // ==================== FileHandle streams ====================
 
-  it("FileHandle.readable returns ReadableStream", async () => {
+  test("FileHandle.readable returns ReadableStream", async () => {
     await ensureTempDir();
     const testFile = getTempPath("handle_readable.bin");
 
@@ -612,7 +612,7 @@ describe("Filesystem", () => {
     await cleanupTempDir();
   });
 
-  it("FileHandle.readable.pipeTo WritableStream (copy)", async () => {
+  test("FileHandle.readable.pipeTo WritableStream (copy)", async () => {
     await ensureTempDir();
     const srcPath = getTempPath("handle_pipe_src.txt");
     const dstPath = getTempPath("handle_pipe_dst.txt");
@@ -638,7 +638,7 @@ describe("Filesystem", () => {
     await cleanupTempDir();
   });
 
-  it("FileHandle.readable supports async iteration (for-await)", async () => {
+  test("FileHandle.readable supports async iteration (for-await)", async () => {
     await ensureTempDir();
     const srcPath = getTempPath("handle_for_await.txt");
 
@@ -673,7 +673,7 @@ describe("Filesystem", () => {
     await cleanupTempDir();
   });
 
-  it("FileHandle.writable returns WritableStream", async () => {
+  test("FileHandle.writable returns WritableStream", async () => {
     await ensureTempDir();
     const testFile = getTempPath("handle_writable.txt");
 
@@ -700,7 +700,7 @@ describe("Filesystem", () => {
 
   // ==================== RongFile.writer() / FileSink ====================
 
-  it("FileSink - basic write and end", async () => {
+  test("FileSink - basic write and end", async () => {
     await ensureTempDir();
     const testFile = getTempPath("sink_basic.txt");
 
@@ -716,7 +716,7 @@ describe("Filesystem", () => {
     await cleanupTempDir();
   });
 
-  it("FileSink - write with string", async () => {
+  test("FileSink - write with string", async () => {
     await ensureTempDir();
     const testFile = getTempPath("sink_writestr.txt");
 
@@ -734,7 +734,7 @@ describe("Filesystem", () => {
     await cleanupTempDir();
   });
 
-  it("FileSink - append mode", async () => {
+  test("FileSink - append mode", async () => {
     await ensureTempDir();
     const testFile = getTempPath("sink_append.txt");
 
@@ -752,7 +752,7 @@ describe("Filesystem", () => {
     await cleanupTempDir();
   });
 
-  it("FileSink - default truncates existing content", async () => {
+  test("FileSink - default truncates existing content", async () => {
     await ensureTempDir();
     const testFile = getTempPath("sink_truncate.txt");
 
@@ -768,7 +768,7 @@ describe("Filesystem", () => {
     await cleanupTempDir();
   });
 
-  it("FileSink - flush without end", async () => {
+  test("FileSink - flush without end", async () => {
     await ensureTempDir();
     const testFile = getTempPath("sink_flush.txt");
 
@@ -784,12 +784,12 @@ describe("Filesystem", () => {
     await cleanupTempDir();
   });
 
-  it("FileSink is hidden from global scope", () => {
+  test("FileSink is hidden from global scope", () => {
     assert.equal(typeof FileSink, "undefined");
     assert.equal(globalThis.FileSink, undefined);
   });
 
-  it("FileSink cannot be constructed via instance.constructor", async () => {
+  test("FileSink cannot be constructed via instance.constructor", async () => {
     await ensureTempDir();
     const testFile = getTempPath("sink_indirect_ctor.txt");
     const sink = await Rong.file(testFile).writer();
@@ -805,7 +805,7 @@ describe("Filesystem", () => {
     await cleanupTempDir();
   });
 
-  it("FileSink.end() invalidates the writer", async () => {
+  test("FileSink.end() invalidates the writer", async () => {
     await ensureTempDir();
     const testFile = getTempPath("sink_closed.txt");
 
@@ -826,7 +826,7 @@ describe("Filesystem", () => {
 
   // ==================== Edge cases & error paths ====================
 
-  it("RongFile.text() throws for non-existent file", async () => {
+  test("RongFile.text() throws for non-existent file", async () => {
     let failed = false;
     try {
       await Rong.file(getTempPath("no_such.txt")).text();
@@ -836,7 +836,7 @@ describe("Filesystem", () => {
     assert(failed, "text() on non-existent file should throw");
   });
 
-  it("RongFile.json() with various JSON types", async () => {
+  test("RongFile.json() with various JSON types", async () => {
     await ensureTempDir();
     const testFile = getTempPath("json_types.json");
 
@@ -869,7 +869,7 @@ describe("Filesystem", () => {
     await cleanupTempDir();
   });
 
-  it("RongFile.bytes() on empty file returns empty Uint8Array", async () => {
+  test("RongFile.bytes() on empty file returns empty Uint8Array", async () => {
     await ensureTempDir();
     const testFile = getTempPath("empty.bin");
     await Rong.write(testFile, "");
@@ -881,7 +881,7 @@ describe("Filesystem", () => {
     await cleanupTempDir();
   });
 
-  it("RongFile.text() with UTF-8 content", async () => {
+  test("RongFile.text() with UTF-8 content", async () => {
     await ensureTempDir();
     const testFile = getTempPath("utf8.txt");
     const content = "你好世界 🌍 café résumé";
@@ -893,7 +893,7 @@ describe("Filesystem", () => {
     await cleanupTempDir();
   });
 
-  it("RongFile.stat() on directory", async () => {
+  test("RongFile.stat() on directory", async () => {
     await ensureTempDir();
     const testDir = getTempPath("stat_dir");
     await Rong.mkdir(testDir);
@@ -906,7 +906,7 @@ describe("Filesystem", () => {
     await cleanupTempDir();
   });
 
-  it("Rong.write() with large data", async () => {
+  test("Rong.write() with large data", async () => {
     await ensureTempDir();
     const testFile = getTempPath("large.bin");
 
@@ -931,7 +931,7 @@ describe("Filesystem", () => {
     await cleanupTempDir();
   });
 
-  it("Rong.write() rejects invalid dest types", async () => {
+  test("Rong.write() rejects invalid dest types", async () => {
     let failed = false;
     try {
       await Rong.write(12345, "data");
@@ -941,7 +941,7 @@ describe("Filesystem", () => {
     assert(failed, "Should reject non-string/RongFile dest");
   });
 
-  it("FileSink - multiple append sessions", async () => {
+  test("FileSink - multiple append sessions", async () => {
     await ensureTempDir();
     const testFile = getTempPath("multi_append.txt");
     await Rong.write(testFile, "start");
@@ -962,7 +962,7 @@ describe("Filesystem", () => {
     await cleanupTempDir();
   });
 
-  it("FileSink.write() returns bytes written", async () => {
+  test("FileSink.write() returns bytes written", async () => {
     await ensureTempDir();
     const testFile = getTempPath("sink_return.txt");
 
@@ -975,7 +975,7 @@ describe("Filesystem", () => {
     await cleanupTempDir();
   });
 
-  it("RongFile.stream() on empty file", async () => {
+  test("RongFile.stream() on empty file", async () => {
     await ensureTempDir();
     const testFile = getTempPath("stream_empty.txt");
     await Rong.write(testFile, "");
@@ -988,7 +988,7 @@ describe("Filesystem", () => {
     await cleanupTempDir();
   });
 
-  it("FileHandle.truncate() to 0 clears file", async () => {
+  test("FileHandle.truncate() to 0 clears file", async () => {
     await ensureTempDir();
     const testFile = getTempPath("truncate_zero.txt");
     await Rong.write(testFile, "1234567890");
@@ -1005,7 +1005,7 @@ describe("Filesystem", () => {
     await cleanupTempDir();
   });
 
-  it("FileHandle.truncate() to specific length", async () => {
+  test("FileHandle.truncate() to specific length", async () => {
     await ensureTempDir();
     const testFile = getTempPath("truncate_len.txt");
     await Rong.write(testFile, "1234567890");
@@ -1022,7 +1022,7 @@ describe("Filesystem", () => {
 
   // ==================== Directory operations (unchanged) ====================
 
-  it("mkdir and readDir", async () => {
+  test("mkdir and readDir", async () => {
     await ensureTempDir();
     const testDir = getTempPath("test_dir");
     const nestedDir = getTempPath("test_dir/nested");
@@ -1055,7 +1055,7 @@ describe("Filesystem", () => {
     await cleanupTempDir();
   });
 
-  it("remove", async () => {
+  test("remove", async () => {
     await ensureTempDir();
     const testFile = getTempPath("remove.txt");
     await Rong.write(testFile, "To be removed");
@@ -1094,7 +1094,7 @@ describe("Filesystem", () => {
     await cleanupTempDir();
   });
 
-  it("rename", async () => {
+  test("rename", async () => {
     await ensureTempDir();
     const oldPath = getTempPath("old.txt");
     const newPath = getTempPath("new.txt");
@@ -1111,7 +1111,7 @@ describe("Filesystem", () => {
     await cleanupTempDir();
   });
 
-  it("realPath", async () => {
+  test("realPath", async () => {
     await ensureTempDir();
     const testFile = getTempPath("real.txt");
     await Rong.write(testFile, "");
@@ -1122,7 +1122,7 @@ describe("Filesystem", () => {
     await cleanupTempDir();
   });
 
-  it("symlink and readlink", async () => {
+  test("symlink and readlink", async () => {
     await ensureTempDir();
     const targetFile = getTempPath("target.txt");
     const linkFile = getTempPath("link.txt");
@@ -1155,7 +1155,7 @@ describe("Filesystem", () => {
     await cleanupTempDir();
   });
 
-  it("chmod", async () => {
+  test("chmod", async () => {
     await ensureTempDir();
     const testFile = getTempPath("chmod.txt");
     await Rong.write(testFile, "Test content");
@@ -1169,7 +1169,7 @@ describe("Filesystem", () => {
     await cleanupTempDir();
   });
 
-  it("chown", async () => {
+  test("chown", async () => {
     await ensureTempDir();
     const testFile = getTempPath("chown.txt");
     await Rong.write(testFile, "Test content");
@@ -1185,7 +1185,7 @@ describe("Filesystem", () => {
     await cleanupTempDir();
   });
 
-  it("chdir", async () => {
+  test("chdir", async () => {
     await ensureTempDir();
     const testDir = getTempPath("chdir_test");
     await Rong.mkdir(testDir);
@@ -1202,7 +1202,7 @@ describe("Filesystem", () => {
     await cleanupTempDir();
   });
 
-  it("utime", async () => {
+  test("utime", async () => {
     await ensureTempDir();
     const testFile = getTempPath("utime.txt");
     await Rong.write(testFile, "Test content");
@@ -1217,7 +1217,7 @@ describe("Filesystem", () => {
     await cleanupTempDir();
   });
 
-  it("utime preserves timestamps before the Unix epoch", async () => {
+  test("utime preserves timestamps before the Unix epoch", async () => {
     await ensureTempDir();
     const testFile = getTempPath("utime_pre_epoch.txt");
     await Rong.write(testFile, "Test content");
@@ -1230,7 +1230,7 @@ describe("Filesystem", () => {
     await cleanupTempDir();
   });
 
-  it("utime preserves millisecond precision", async () => {
+  test("utime preserves millisecond precision", async () => {
     await ensureTempDir();
     const testFile = getTempPath("utime_milliseconds.txt");
     await Rong.write(testFile, "Test content");

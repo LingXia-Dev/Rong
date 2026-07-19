@@ -30,11 +30,11 @@ function pwdCmd() {
 }
 
 describe("Rong Spawn", () => {
-  it("does not expose child_process global", () => {
+  test("does not expose child_process global", () => {
     assert.equal(typeof globalThis.child_process, "undefined");
   });
 
-  it("Rong.spawn() exposes exited promise and decorated stdout", async () => {
+  test("Rong.spawn() exposes exited promise and decorated stdout", async () => {
     const proc = Rong.spawn(echoCmd("hello-from-rong"));
     const text = await proc.stdout.text();
     const code = await proc.exited;
@@ -44,7 +44,7 @@ describe("Rong Spawn", () => {
     assert.equal(proc.success, true);
   });
 
-  it("Rong.spawn() supports piped stdin writes", async () => {
+  test("Rong.spawn() supports piped stdin writes", async () => {
     const proc = Rong.spawn(stdinEchoCmd(), { stdin: "pipe" });
 
     await proc.stdin.write("hello through stdin");
@@ -54,7 +54,7 @@ describe("Rong Spawn", () => {
     assert.equal(text, "hello through stdin");
   });
 
-  it("Rong.spawn() supports cwd and onExit", async () => {
+  test("Rong.spawn() supports cwd and onExit", async () => {
     let observed = null;
     const proc = Rong.spawn(pwdCmd(), {
       cwd: tempDir,
@@ -70,14 +70,14 @@ describe("Rong Spawn", () => {
     assert.equal(observed, 0);
   });
 
-  it("Rong.spawn() supports one-shot stdin payloads", async () => {
+  test("Rong.spawn() supports one-shot stdin payloads", async () => {
     const proc = Rong.spawn(stdinEchoCmd(), { stdin: "payload-once" });
     const text = await proc.stdout.text();
     assert.equal(text, "payload-once");
     assert.equal(await proc.exited, 0);
   });
 
-  it("Rong.env changes propagate into child processes", async () => {
+  test("Rong.env changes propagate into child processes", async () => {
     Rong.env.RONG_ENV_CHILD = "child-visible";
     const proc = Rong.spawn(
       isWindows
@@ -89,7 +89,7 @@ describe("Rong Spawn", () => {
     delete Rong.env.RONG_ENV_CHILD;
   });
 
-  it("Rong.spawnSync() returns captured stdout/stderr buffers", () => {
+  test("Rong.spawnSync() returns captured stdout/stderr buffers", () => {
     const result = Rong.spawnSync(echoCmd("sync-rong"));
     const text = new TextDecoder().decode(result.stdout);
 
@@ -98,7 +98,7 @@ describe("Rong Spawn", () => {
     assert.equal(result.exitCode, 0);
   });
 
-  it("Rong.spawn() accepts object-form options", async () => {
+  test("Rong.spawn() accepts object-form options", async () => {
     const proc = Rong.spawn({
       cmd: echoCmd("object-form"),
     });
@@ -106,13 +106,13 @@ describe("Rong Spawn", () => {
     assert.equal(await proc.exited, 0);
   });
 
-  it("Rong.spawn() supports stdout: ignore", async () => {
+  test("Rong.spawn() supports stdout: ignore", async () => {
     const proc = Rong.spawn(echoCmd("ignored-output"), { stdout: "ignore" });
     assert.equal(proc.stdout, null);
     assert.equal(await proc.exited, 0);
   });
 
-  it("Rong.spawn() can be killed", async () => {
+  test("Rong.spawn() can be killed", async () => {
     const proc = Rong.spawn(
       isWindows
         ? ["powershell", "-NoProfile", "-Command", "Start-Sleep -Seconds 5"]
@@ -125,7 +125,7 @@ describe("Rong Spawn", () => {
     assert.ok(code !== 0);
   });
 
-  it("Rong.spawn() supports timeout", async () => {
+  test("Rong.spawn() supports timeout", async () => {
     const started = Date.now();
     const proc = Rong.spawn(
       isWindows
@@ -141,7 +141,7 @@ describe("Rong Spawn", () => {
     assert.ok(proc.killed || code !== 0);
   });
 
-  it("Rong.spawnSync() supports cwd and stdin payload", () => {
+  test("Rong.spawnSync() supports cwd and stdin payload", () => {
     const result = Rong.spawnSync({
       cmd: stdinEchoCmd(),
       cwd: tempDir,
@@ -151,7 +151,7 @@ describe("Rong Spawn", () => {
     assert.equal(result.exitCode, 0);
   });
 
-  it("Rong.spawnSync() supports ignored output", () => {
+  test("Rong.spawnSync() supports ignored output", () => {
     const result = Rong.spawnSync(echoCmd("sync-ignore"), { stdout: "ignore" });
     assert.equal(result.stdout.byteLength, 0);
     assert.equal(result.exitCode, 0);

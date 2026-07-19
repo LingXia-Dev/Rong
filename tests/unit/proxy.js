@@ -1,6 +1,6 @@
 describe("Proxy", () => {
   describe("host-created object proxies", () => {
-    it("intercepts property reads and preserves object semantics", () => {
+    test("intercepts property reads and preserves object semantics", () => {
       const target = {
         value: 41,
         label: "kept",
@@ -23,7 +23,7 @@ describe("Proxy", () => {
       expect(getHostProxyTarget(proxy)).toBe(target);
     });
 
-    it("returns the original target identity", () => {
+    test("returns the original target identity", () => {
       const target = { id: "target" };
       const proxy = createHostProxy(target, {});
 
@@ -32,7 +32,7 @@ describe("Proxy", () => {
       expect(observedTarget.id).toBe("target");
     });
 
-    it("throws when getting target from a non-proxy value", () => {
+    test("throws when getting target from a non-proxy value", () => {
       let message = "";
 
       try {
@@ -44,7 +44,7 @@ describe("Proxy", () => {
       expect(message).toContain("Not JS Proxy");
     });
 
-    it("supports set traps and writes through to the backing target", () => {
+    test("supports set traps and writes through to the backing target", () => {
       const writes = [];
       const target = { count: 1 };
       const proxy = createHostProxy(target, {
@@ -62,7 +62,7 @@ describe("Proxy", () => {
       expect(writes).toEqual(["count:4"]);
     });
 
-    it("supports has, ownKeys and deleteProperty traps", () => {
+    test("supports has, ownKeys and deleteProperty traps", () => {
       const target = {
         visible: 1,
         secret: 2,
@@ -105,7 +105,7 @@ describe("Proxy", () => {
       expect(target.removable).toBeUndefined();
     });
 
-    it("propagates handler-thrown errors", () => {
+    test("propagates handler-thrown errors", () => {
       const proxy = createHostProxy({}, {
         get() {
           throw new Error("boom:get");
@@ -124,7 +124,7 @@ describe("Proxy", () => {
   });
 
   describe("host-created function proxies", () => {
-    it("supports apply traps and preserves function typeof", () => {
+    test("supports apply traps and preserves function typeof", () => {
       function target(prefix, value) {
         return `${prefix}:${value}`;
       }
@@ -145,7 +145,7 @@ describe("Proxy", () => {
       expect(getHostProxyTarget(proxy)("raw", 3)).toBe("raw:3");
     });
 
-    it("can gate method calls through get and nested apply traps", () => {
+    test("can gate method calls through get and nested apply traps", () => {
       const allow = {
         xx: true,
         yy: false,
@@ -190,7 +190,7 @@ describe("Proxy", () => {
       expect(message).toBe("blocked:yy");
     });
 
-    it("supports construct traps for constructor functions", () => {
+    test("supports construct traps for constructor functions", () => {
       function Person(name) {
         this.name = name;
       }
@@ -216,7 +216,7 @@ describe("Proxy", () => {
   });
 
   describe("plain JavaScript proxies", () => {
-    it("still behave normally in engine-level JS semantics", () => {
+    test("still behave normally in engine-level JS semantics", () => {
       const target = { count: 1 };
       const proxy = new Proxy(target, {
         get(innerTarget, key, receiver) {

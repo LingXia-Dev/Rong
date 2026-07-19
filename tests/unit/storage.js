@@ -14,14 +14,14 @@ describe("Storage API", () => {
     await storage.clear();
   });
 
-  it("should allow direct class construction with path", async () => {
+  test("should allow direct class construction with path", async () => {
     const direct = new Storage(`${STORAGE_DB_PATH}.direct`);
     await direct.clear();
     await direct.set("direct_key", "direct_value");
     assert.equal(await direct.get("direct_key"), "direct_value");
   });
 
-  it("should honor custom limit options", async () => {
+  test("should honor custom limit options", async () => {
     const strict = new Storage(`${STORAGE_DB_PATH}.strict`, {
       maxKeySize: 4,
     });
@@ -41,7 +41,7 @@ describe("Storage API", () => {
     assert(errorThrown, "Setting oversized key should throw");
   });
 
-  it("should allow immediate info() call without table creation error", async () => {
+  test("should allow immediate info() call without table creation error", async () => {
     let errorThrown = false;
     try {
       const info = await storage.info();
@@ -58,13 +58,13 @@ describe("Storage API", () => {
     );
   });
 
-  it("should set and get string values", async () => {
+  test("should set and get string values", async () => {
     await storage.set("test_string", "hello world");
     const value = await storage.get("test_string");
     assert.equal(value, "hello world");
   });
 
-  it("should handle comprehensive number types", async () => {
+  test("should handle comprehensive number types", async () => {
     // Test i32 range
     await storage.set("i32_min", -2147483648); // i32::MIN
     await storage.set("i32_max", 2147483647); // i32::MAX
@@ -96,7 +96,7 @@ describe("Storage API", () => {
     assert.equal(await storage.get("i64_min"), -9223372036854775808n);
   });
 
-  it("should preserve BigInt type and magnitude", async () => {
+  test("should preserve BigInt type and magnitude", async () => {
     const small = 42n;
     const huge = 1n << 100n;
     await storage.set("small_bigint", small);
@@ -110,7 +110,7 @@ describe("Storage API", () => {
     assert.equal(storedHuge, huge);
   });
 
-  it("should preserve non-finite numbers", async () => {
+  test("should preserve non-finite numbers", async () => {
     await storage.set("nan", NaN);
     await storage.set("positive_infinity", Infinity);
     await storage.set("negative_infinity", -Infinity);
@@ -120,7 +120,7 @@ describe("Storage API", () => {
     assert.equal(await storage.get("negative_infinity"), -Infinity);
   });
 
-  it("should set and get boolean values", async () => {
+  test("should set and get boolean values", async () => {
     await storage.set("test_true", true);
     await storage.set("test_false", false);
 
@@ -128,13 +128,13 @@ describe("Storage API", () => {
     assert.equal(await storage.get("test_false"), false);
   });
 
-  it("should handle null values", async () => {
+  test("should handle null values", async () => {
     await storage.set("test_null", null);
     const value = await storage.get("test_null");
     assert.equal(value, null);
   });
 
-  it("should handle object values", async () => {
+  test("should handle object values", async () => {
     const testObj = {
       name: "test",
       value: 42,
@@ -161,7 +161,7 @@ describe("Storage API", () => {
     assert.equal(retrieved.nullValue, null);
   });
 
-  it("should handle array values", async () => {
+  test("should handle array values", async () => {
     const testArray = [
       1,
       "hello",
@@ -186,12 +186,12 @@ describe("Storage API", () => {
     assert.equal(retrieved[6], 3.14159);
   });
 
-  it("should return undefined for non-existent keys", async () => {
+  test("should return undefined for non-existent keys", async () => {
     const value = await storage.get("non_existent_key");
     assert.equal(value, undefined);
   });
 
-  it("should delete values", async () => {
+  test("should delete values", async () => {
     await storage.set("test_delete", "to be deleted");
     assert.equal(await storage.get("test_delete"), "to be deleted");
 
@@ -199,7 +199,7 @@ describe("Storage API", () => {
     assert.equal(await storage.get("test_delete"), undefined);
   });
 
-  it("should list all keys with for...of", async () => {
+  test("should list all keys with for...of", async () => {
     await storage.set("key1", "value1");
     await storage.set("key2", "value2");
     await storage.set("key3", "value3");
@@ -216,7 +216,7 @@ describe("Storage API", () => {
     assert(keys.includes("key3"));
   });
 
-  it("should list keys with prefix", async () => {
+  test("should list keys with prefix", async () => {
     await storage.set("user:1", "alice");
     await storage.set("user:2", "bob");
     await storage.set("config:theme", "dark");
@@ -229,7 +229,7 @@ describe("Storage API", () => {
     assert(!userKeys.includes("config:theme"));
   });
 
-  it("should clear all data", async () => {
+  test("should clear all data", async () => {
     await storage.set("key1", "value1");
     await storage.set("key2", { test: true });
 
@@ -242,7 +242,7 @@ describe("Storage API", () => {
     assert.equal(keysAfter.length, 0);
   });
 
-  it("should provide storage info", async () => {
+  test("should provide storage info", async () => {
     // Clear storage first to get accurate counts
     await storage.clear();
 
@@ -260,7 +260,7 @@ describe("Storage API", () => {
     assert.equal(info.keyCount, 3, "Should have 3 keys");
   });
 
-  it("should reject undefined values", async () => {
+  test("should reject undefined values", async () => {
     let errorThrown = false;
     try {
       await storage.set("test_undefined", undefined);
@@ -271,7 +271,7 @@ describe("Storage API", () => {
     assert(errorThrown, "Should throw error for undefined values");
   });
 
-  it("should handle Date values", async () => {
+  test("should handle Date values", async () => {
     // Test storing and retrieving Date objects
     const testDate = new Date("2023-12-25T10:30:00.000Z");
     await storage.set("test_date", testDate);

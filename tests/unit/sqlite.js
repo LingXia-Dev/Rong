@@ -4,7 +4,7 @@ function tempDbPath(prefix = "rong_sqlite") {
 }
 
 describe("SQLite — construction", () => {
-  it("hides Statement from global scope", () => {
+  test("hides Statement from global scope", () => {
     assert.equal(typeof Statement, "undefined");
     assert.equal(globalThis.Statement, undefined);
 
@@ -20,32 +20,32 @@ describe("SQLite — construction", () => {
     db.close();
   });
 
-  it("does not expose SQLite on globalThis", () => {
+  test("does not expose SQLite on globalThis", () => {
     assert.equal(typeof SQLite, "undefined");
     assert.equal(globalThis.SQLite, undefined);
     assert.equal(typeof Rong.SQLite, "function");
   });
 
-  it("opens in-memory database by default", () => {
+  test("opens in-memory database by default", () => {
     const db = new Rong.SQLite();
     assert.equal(db.filename, ":memory:");
     assert.equal(db.inTransaction, false);
     db.close();
   });
 
-  it("opens in-memory database with explicit :memory:", () => {
+  test("opens in-memory database with explicit :memory:", () => {
     const db = new Rong.SQLite(":memory:");
     assert.equal(db.filename, ":memory:");
     db.close();
   });
 
-  it("is instance of SQLite", () => {
+  test("is instance of SQLite", () => {
     const db = new Rong.SQLite();
     assert(db instanceof Rong.SQLite);
     db.close();
   });
 
-  it("close is idempotent", () => {
+  test("close is idempotent", () => {
     const db = new Rong.SQLite();
     db.close();
     db.close();
@@ -53,7 +53,7 @@ describe("SQLite — construction", () => {
 });
 
 describe("SQLite — file-backed", () => {
-  it("persists data across reopen", () => {
+  test("persists data across reopen", () => {
     const filename = tempDbPath();
 
     let db = new Rong.SQLite(filename);
@@ -74,7 +74,7 @@ describe("SQLite — exec", () => {
   beforeEach(() => { db = new Rong.SQLite(); });
   afterEach(() => db.close());
 
-  it("creates tables", () => {
+  test("creates tables", () => {
     db.exec(`
       CREATE TABLE users (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, age INTEGER, score REAL);
       CREATE TABLE logs (id INTEGER PRIMARY KEY AUTOINCREMENT, msg TEXT);
@@ -86,13 +86,13 @@ describe("SQLite — exec", () => {
     assert.equal(rows[1].name, "users");
   });
 
-  it("throws on invalid SQL", () => {
+  test("throws on invalid SQL", () => {
     let threw = false;
     try { db.exec("NOT VALID SQL"); } catch (e) { threw = true; }
     assert(threw, "should throw on invalid SQL");
   });
 
-  it("prepare throws on invalid SQL", () => {
+  test("prepare throws on invalid SQL", () => {
     let threw = false;
     try { db.prepare("SELECT FROM"); } catch (e) { threw = true; }
     assert(threw, "prepare should throw on invalid SQL");
@@ -107,13 +107,13 @@ describe("SQLite — run & query", () => {
   });
   afterEach(() => db.close());
 
-  it("inserts and returns changes", () => {
+  test("inserts and returns changes", () => {
     const r = db.run("INSERT INTO users (name, age, score) VALUES (?, ?, ?)", ["Alice", 30, 95.5]);
     assert.equal(r.changes, 1);
     assert.equal(r.lastInsertRowid, 1);
   });
 
-  it("queries all rows as objects", () => {
+  test("queries all rows as objects", () => {
     db.run("INSERT INTO users (name, age, score) VALUES (?, ?, ?)", ["Alice", 30, 95.5]);
     db.run("INSERT INTO users (name, age, score) VALUES (?, ?, ?)", ["Bob", 25, 88.0]);
     db.run("INSERT INTO users (name, age, score) VALUES (?, ?, ?)", ["Charlie", 35, 72.3]);
@@ -127,7 +127,7 @@ describe("SQLite — run & query", () => {
     assert.equal(rows[2].name, "Charlie");
   });
 
-  it("queries with parameters", () => {
+  test("queries with parameters", () => {
     db.run("INSERT INTO users (name, age, score) VALUES (?, ?, ?)", ["Alice", 30, 95.5]);
     db.run("INSERT INTO users (name, age, score) VALUES (?, ?, ?)", ["Bob", 25, 88.0]);
     db.run("INSERT INTO users (name, age, score) VALUES (?, ?, ?)", ["Charlie", 35, 72.3]);
@@ -138,7 +138,7 @@ describe("SQLite — run & query", () => {
     assert.equal(filtered[1].name, "Charlie");
   });
 
-  it("returns empty array for no results", () => {
+  test("returns empty array for no results", () => {
     const rows = db.query("SELECT * FROM users WHERE age > ?", [100]);
     assert.equal(rows.length, 0);
   });
@@ -155,7 +155,7 @@ describe("SQLite — prepared statements", () => {
   });
   afterEach(() => db.close());
 
-  it("stmt.all returns all matching rows", () => {
+  test("stmt.all returns all matching rows", () => {
     const stmt = db.prepare("SELECT * FROM users WHERE age >= ?");
     assert.equal(stmt.sql, "SELECT * FROM users WHERE age >= ?");
     const rows = stmt.all([30]);
@@ -164,7 +164,7 @@ describe("SQLite — prepared statements", () => {
     assert.equal(rows[1].name, "Charlie");
   });
 
-  it("stmt.get returns first row or null", () => {
+  test("stmt.get returns first row or null", () => {
     const stmt = db.prepare("SELECT * FROM users WHERE age >= ?");
     const one = stmt.get([25]);
     assert.equal(one.name, "Alice");
@@ -173,7 +173,7 @@ describe("SQLite — prepared statements", () => {
     assert.equal(none, null);
   });
 
-  it("stmt.values returns arrays of values", () => {
+  test("stmt.values returns arrays of values", () => {
     const stmt = db.prepare("SELECT id, name FROM users ORDER BY id");
     const vals = stmt.values();
     assert.equal(vals.length, 3);
@@ -183,14 +183,14 @@ describe("SQLite — prepared statements", () => {
     assert.equal(vals[1][1], "Bob");
   });
 
-  it("stmt.run executes and returns changes", () => {
+  test("stmt.run executes and returns changes", () => {
     const stmt = db.prepare("INSERT INTO users (name, age) VALUES (?, ?)");
     const r = stmt.run(["Dave", 28]);
     assert.equal(r.changes, 1);
     assert.equal(db.query("SELECT * FROM users").length, 4);
   });
 
-  it("throws after finalize", () => {
+  test("throws after finalize", () => {
     const stmt = db.prepare("SELECT 1");
     stmt.finalize();
     let threw = false;
@@ -210,7 +210,7 @@ describe("SQLite — transactions", () => {
   });
   afterEach(() => db.close());
 
-  it("commits on success", () => {
+  test("commits on success", () => {
     db.transaction(() => {
       db.run("INSERT INTO users (name) VALUES (?)", ["Alice"]);
       db.run("INSERT INTO users (name) VALUES (?)", ["Bob"]);
@@ -218,7 +218,7 @@ describe("SQLite — transactions", () => {
     assert.equal(db.query("SELECT * FROM users").length, 2);
   });
 
-  it("rolls back on error", () => {
+  test("rolls back on error", () => {
     let threw = false;
     try {
       db.transaction(() => {
@@ -230,11 +230,11 @@ describe("SQLite — transactions", () => {
     assert.equal(db.query("SELECT * FROM users").length, 0, "rolled-back insert should not persist");
   });
 
-  it("inTransaction reflects state", () => {
+  test("inTransaction reflects state", () => {
     assert.equal(db.inTransaction, false);
   });
 
-  it("inTransaction is true inside the callback and resets after commit", () => {
+  test("inTransaction is true inside the callback and resets after commit", () => {
     let seenInside = false;
     db.transaction(() => {
       seenInside = true;
@@ -246,7 +246,7 @@ describe("SQLite — transactions", () => {
     assert.equal(db.inTransaction, false);
   });
 
-  it("inTransaction resets after rollback", () => {
+  test("inTransaction resets after rollback", () => {
     try {
       db.transaction(() => {
         assert.equal(db.inTransaction, true);
@@ -264,14 +264,14 @@ describe("SQLite — type handling", () => {
   beforeEach(() => { db = new Rong.SQLite(); });
   afterEach(() => db.close());
 
-  it("handles NULL values", () => {
+  test("handles NULL values", () => {
     db.exec("CREATE TABLE t (id INTEGER PRIMARY KEY, val INTEGER)");
     db.run("INSERT INTO t (val) VALUES (?)", [null]);
     const row = db.query("SELECT * FROM t")[0];
     assert.equal(row.val, null);
   });
 
-  it("handles boolean as integer", () => {
+  test("handles boolean as integer", () => {
     db.exec("CREATE TABLE flags (id INTEGER PRIMARY KEY, active INTEGER)");
     db.run("INSERT INTO flags (active) VALUES (?)", [true]);
     db.run("INSERT INTO flags (active) VALUES (?)", [false]);
@@ -280,7 +280,7 @@ describe("SQLite — type handling", () => {
     assert.equal(rows[1].active, 0);
   });
 
-  it("handles BLOB with Uint8Array", () => {
+  test("handles BLOB with Uint8Array", () => {
     db.exec("CREATE TABLE blobs (id INTEGER PRIMARY KEY, data BLOB)");
     const input = new Uint8Array([0xDE, 0xAD, 0xBE, 0xEF]);
     db.run("INSERT INTO blobs (data) VALUES (?)", [input]);
@@ -291,7 +291,7 @@ describe("SQLite — type handling", () => {
     assert.equal(view[3], 0xEF);
   });
 
-  it("handles BLOB with ArrayBuffer", () => {
+  test("handles BLOB with ArrayBuffer", () => {
     db.exec("CREATE TABLE blobs (id INTEGER PRIMARY KEY, data BLOB)");
     const input = new Uint8Array([1, 2, 3, 4]).buffer;
     db.run("INSERT INTO blobs (data) VALUES (?)", [input]);
@@ -301,7 +301,7 @@ describe("SQLite — type handling", () => {
     assert.equal(view[3], 4);
   });
 
-  it("preserves large INTEGER values as bigint", () => {
+  test("preserves large INTEGER values as bigint", () => {
     db.exec("CREATE TABLE ids (id INTEGER PRIMARY KEY, label TEXT)");
     const bigId = 9007199254740993n;
 
@@ -319,7 +319,7 @@ describe("SQLite — type handling", () => {
     assert.equal(selected.id, bigId);
   });
 
-  it("rejects bigint values outside SQLite INTEGER range", () => {
+  test("rejects bigint values outside SQLite INTEGER range", () => {
     db.exec("CREATE TABLE ids (id INTEGER PRIMARY KEY, label TEXT)");
 
     let threw = false;
@@ -333,7 +333,7 @@ describe("SQLite — type handling", () => {
     assert(threw, "should reject bigint values outside SQLite's INTEGER range");
   });
 
-  it("stores numeric values outside INTEGER range as REAL", () => {
+  test("stores numeric values outside INTEGER range as REAL", () => {
     db.exec("CREATE TABLE values_test (value)");
     const value = 2 ** 63;
     db.run("INSERT INTO values_test (value) VALUES (?)", [value]);
@@ -347,7 +347,7 @@ describe("SQLite — type handling", () => {
 });
 
 describe("SQLite — error handling", () => {
-  it("throws on closed database", () => {
+  test("throws on closed database", () => {
     const db = new Rong.SQLite();
     db.close();
     let threw = false;
@@ -358,7 +358,7 @@ describe("SQLite — error handling", () => {
     assert(threw, "should throw on closed db");
   });
 
-  it("throws on unsupported parameter types", () => {
+  test("throws on unsupported parameter types", () => {
     const db = new Rong.SQLite();
     db.exec("CREATE TABLE t (id INTEGER PRIMARY KEY, val TEXT)");
     let threw = false;
@@ -373,7 +373,7 @@ describe("SQLite — error handling", () => {
     assert(threw, "should throw on unsupported param type");
   });
 
-  it("prepared statements throw after database close", () => {
+  test("prepared statements throw after database close", () => {
     const db = new Rong.SQLite();
     const stmt = db.prepare("SELECT 1 AS n");
     db.close();

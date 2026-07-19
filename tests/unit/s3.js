@@ -21,7 +21,7 @@ function makeClient(overrides) {
 describe("S3Client", () => {
   // ─── Construction ──────────────────────────────────────────────
 
-  it("hides S3File from global scope", () => {
+  test("hides S3File from global scope", () => {
     assert.equal(typeof S3File, "undefined");
     assert.equal(globalThis.S3File, undefined);
 
@@ -36,44 +36,44 @@ describe("S3Client", () => {
     assert(failed, "S3File should not be constructible via instance.constructor");
   });
 
-  it("does not expose S3Client on globalThis", () => {
+  test("does not expose S3Client on globalThis", () => {
     assert.equal(typeof S3Client, "undefined");
     assert.equal(globalThis.S3Client, undefined);
     assert.equal(typeof Rong.S3Client, "function");
   });
 
-  it("constructor with explicit options", () => {
+  test("constructor with explicit options", () => {
     const client = makeClient();
     assert(client, "S3Client instance created");
   });
 
-  it("constructor with no arguments", () => {
+  test("constructor with no arguments", () => {
     const client = new Rong.S3Client();
     assert(client, "S3Client created without args");
   });
 
-  it("constructor with custom region", () => {
+  test("constructor with custom region", () => {
     const client = makeClient({ region: "us-west-2" });
     assert(client, "S3Client with custom region");
   });
 
   // ─── file() — lazy reference ──────────────────────────────────
 
-  it("file() returns lazy S3File with correct name", () => {
+  test("file() returns lazy S3File with correct name", () => {
     const client = makeClient();
     const f = client.file("hello.txt");
     assert(f, "file() returned an object");
     assert.equal(f.name, "hello.txt");
   });
 
-  it("file() with options override", () => {
+  test("file() with options override", () => {
     const client = makeClient();
     const f = client.file("data.bin", { bucket: "other-bucket" });
     assert(f, "file() with options returned an object");
     assert.equal(f.name, "data.bin");
   });
 
-  it("S3File.size is always NaN", () => {
+  test("S3File.size is always NaN", () => {
     const client = makeClient();
     const f = client.file("any.bin");
     assert(Number.isNaN(f.size), "size is NaN for remote files");
@@ -81,7 +81,7 @@ describe("S3Client", () => {
 
   // ─── slice() — no network ─────────────────────────────────────
 
-  it("slice() returns a new S3File with range", () => {
+  test("slice() returns a new S3File with range", () => {
     const client = makeClient();
     const f = client.file("large.bin");
     const partial = f.slice(0, 1024);
@@ -92,7 +92,7 @@ describe("S3Client", () => {
 
   // ─── presign() — no data transfer ─────────────────────────────
 
-  it("presign() GET returns a signed URL string", async () => {
+  test("presign() GET returns a signed URL string", async () => {
     const client = makeClient();
     const url = await client.presign("test-key.txt");
     assert(typeof url === "string", "presign returns a string");
@@ -103,7 +103,7 @@ describe("S3Client", () => {
     );
   });
 
-  it("presign() PUT with custom expiry", async () => {
+  test("presign() PUT with custom expiry", async () => {
     const client = makeClient();
     const url = await client.presign("upload.bin", {
       expiresIn: 3600,
@@ -112,20 +112,20 @@ describe("S3Client", () => {
     assert(typeof url === "string", "PUT presign returns a string");
   });
 
-  it("presign() DELETE method", async () => {
+  test("presign() DELETE method", async () => {
     const client = makeClient();
     const url = await client.presign("to-delete.txt", { method: "DELETE" });
     assert(typeof url === "string", "DELETE presign returns a string");
   });
 
-  it("S3File.presign() works on file reference", async () => {
+  test("S3File.presign() works on file reference", async () => {
     const client = makeClient();
     const f = client.file("report.pdf");
     const url = await f.presign({ expiresIn: 7200 });
     assert(url.includes("report.pdf"), "file presign URL contains key");
   });
 
-  it("S3File.presign() PUT on file reference", async () => {
+  test("S3File.presign() PUT on file reference", async () => {
     const client = makeClient();
     const f = client.file("upload.bin");
     const url = await f.presign({ method: "PUT" });
@@ -134,7 +134,7 @@ describe("S3Client", () => {
 
   // ─── Error handling ────────────────────────────────────────────
 
-  it("error on missing credentials for network ops", async () => {
+  test("error on missing credentials for network ops", async () => {
     const client = new Rong.S3Client({
       bucket: "some-bucket",
       endpoint: S3_ENDPOINT,
@@ -150,7 +150,7 @@ describe("S3Client", () => {
     }
   });
 
-  it("error on missing bucket", async () => {
+  test("error on missing bucket", async () => {
     const client = new Rong.S3Client({
       accessKeyId: S3_ACCESS_KEY,
       secretAccessKey: S3_SECRET_KEY,
@@ -167,12 +167,12 @@ describe("S3Client", () => {
     }
   });
 
-  it("S3File constructor is not exposed globally", () => {
+  test("S3File constructor is not exposed globally", () => {
     assert.equal(typeof S3File, "undefined");
     assert.equal(globalThis.S3File, undefined);
   });
 
-  it("presign() rejects invalid method", async () => {
+  test("presign() rejects invalid method", async () => {
     const client = makeClient();
     try {
       await client.presign("key", { method: "PATCH" });
@@ -182,7 +182,7 @@ describe("S3Client", () => {
     }
   });
 
-  it("presign() rejects a negative expiration", async () => {
+  test("presign() rejects a negative expiration", async () => {
     const client = makeClient();
     let error;
     try {
@@ -193,7 +193,7 @@ describe("S3Client", () => {
     assert(error instanceof RangeError, "negative expiresIn should throw RangeError");
   });
 
-  it("S3File.presign() rejects a negative expiration", async () => {
+  test("S3File.presign() rejects a negative expiration", async () => {
     const file = makeClient().file("key");
     let error;
     try {
@@ -204,7 +204,7 @@ describe("S3Client", () => {
     assert(error instanceof RangeError, "negative expiresIn should throw RangeError");
   });
 
-  it("exists() propagates transport errors", async () => {
+  test("exists() propagates transport errors", async () => {
     const client = makeClient({ endpoint: "http://127.0.0.1:1" });
     let error;
     try {
@@ -215,7 +215,7 @@ describe("S3Client", () => {
     assert(error && error.name === "S3Error", "transport error should be preserved");
   });
 
-  it("S3File.exists() propagates transport errors", async () => {
+  test("S3File.exists() propagates transport errors", async () => {
     const file = makeClient({ endpoint: "http://127.0.0.1:1" }).file("key");
     let error;
     try {
@@ -226,7 +226,7 @@ describe("S3Client", () => {
     assert(error && error.name === "S3Error", "transport error should be preserved");
   });
 
-  it("S3 errors have name 'S3Error'", async () => {
+  test("S3 errors have name 'S3Error'", async () => {
     const client = makeClient();
     try {
       // read a non-existent key — should throw S3Error
@@ -237,7 +237,7 @@ describe("S3Client", () => {
     }
   });
 
-  it("write() with invalid data type throws TypeError", async () => {
+  test("write() with invalid data type throws TypeError", async () => {
     const client = makeClient();
     try {
       await client.write("key.txt", 12345);
@@ -260,18 +260,18 @@ describe("S3 operations", () => {
 
   // ─── write + read ──────────────────────────────────────────────
 
-  it("client.write() returns bytes written", async () => {
+  test("client.write() returns bytes written", async () => {
     const n = await client.write(TEST_KEY, TEST_CONTENT);
     assert.equal(n, TEST_CONTENT.length);
   });
 
-  it("file.text() reads back written content", async () => {
+  test("file.text() reads back written content", async () => {
     const file = client.file(TEST_KEY);
     const text = await file.text();
     assert.equal(text, TEST_CONTENT);
   });
 
-  it("write() with content type + json()", async () => {
+  test("write() with content type + json()", async () => {
     await client.write(TEST_JSON_KEY, JSON.stringify(TEST_JSON), {
       type: "application/json",
     });
@@ -281,7 +281,7 @@ describe("S3 operations", () => {
     assert.equal(data.version, "0.3.0");
   });
 
-  it("write() ArrayBuffer + bytes() roundtrip", async () => {
+  test("write() ArrayBuffer + bytes() roundtrip", async () => {
     const src = new Uint8Array([0x00, 0x01, 0x02, 0xff, 0xfe]);
     await client.write(TEST_BIN_KEY, src.buffer);
     const file = client.file(TEST_BIN_KEY);
@@ -293,7 +293,7 @@ describe("S3 operations", () => {
     assert.equal(out[4], 0xfe);
   });
 
-  it("write() Uint8Array", async () => {
+  test("write() Uint8Array", async () => {
     const src = new Uint8Array([10, 20, 30]);
     const n = await client.write(TEST_BIN_KEY, src);
     assert.equal(n, 3);
@@ -301,23 +301,23 @@ describe("S3 operations", () => {
 
   // ─── exists ────────────────────────────────────────────────────
 
-  it("client.exists() returns true for existing key", async () => {
+  test("client.exists() returns true for existing key", async () => {
     const exists = await client.exists(TEST_KEY);
     assert.equal(exists, true);
   });
 
-  it("client.exists() returns false for missing key", async () => {
+  test("client.exists() returns false for missing key", async () => {
     const exists = await client.exists("nonexistent-key-" + Date.now());
     assert.equal(exists, false);
   });
 
-  it("file.exists() returns true for existing key", async () => {
+  test("file.exists() returns true for existing key", async () => {
     const file = client.file(TEST_KEY);
     const exists = await file.exists();
     assert.equal(exists, true);
   });
 
-  it("file.exists() returns false for missing key", async () => {
+  test("file.exists() returns false for missing key", async () => {
     const file = client.file("nonexistent-file-" + Date.now());
     const exists = await file.exists();
     assert.equal(exists, false);
@@ -325,21 +325,21 @@ describe("S3 operations", () => {
 
   // ─── size ──────────────────────────────────────────────────────
 
-  it("client.size() returns byte count", async () => {
+  test("client.size() returns byte count", async () => {
     const sz = await client.size(TEST_KEY);
     assert.equal(sz, TEST_CONTENT.length);
   });
 
   // ─── stat ──────────────────────────────────────────────────────
 
-  it("client.stat() returns metadata object", async () => {
+  test("client.stat() returns metadata object", async () => {
     const st = await client.stat(TEST_KEY);
     assert(typeof st.size === "number", "stat.size is a number");
     assert(st.size > 0, "stat.size > 0");
     assert(typeof st.type === "string", "stat.type is a string");
   });
 
-  it("file.stat() returns metadata object", async () => {
+  test("file.stat() returns metadata object", async () => {
     const file = client.file(TEST_KEY);
     const st = await file.stat();
     assert(typeof st.size === "number", "stat.size is a number");
@@ -348,14 +348,14 @@ describe("S3 operations", () => {
 
   // ─── bytes / arrayBuffer ───────────────────────────────────────
 
-  it("file.bytes() returns ArrayBuffer", async () => {
+  test("file.bytes() returns ArrayBuffer", async () => {
     const file = client.file(TEST_KEY);
     const buf = await file.bytes();
     assert(buf !== null && buf !== undefined, "bytes() returned data");
     assert(buf.byteLength > 0, "has byte length");
   });
 
-  it("file.arrayBuffer() is alias for bytes()", async () => {
+  test("file.arrayBuffer() is alias for bytes()", async () => {
     const file = client.file(TEST_KEY);
     const buf = await file.arrayBuffer();
     assert(buf !== null && buf !== undefined, "arrayBuffer() returned data");
@@ -364,21 +364,21 @@ describe("S3 operations", () => {
 
   // ─── slice ─────────────────────────────────────────────────────
 
-  it("slice() returns partial content", async () => {
+  test("slice() returns partial content", async () => {
     const file = client.file(TEST_KEY);
     const partial = file.slice(0, 5);
     const text = await partial.text();
     assert.equal(text, TEST_CONTENT.slice(0, 5));
   });
 
-  it("slice() with only start", async () => {
+  test("slice() with only start", async () => {
     const file = client.file(TEST_KEY);
     const partial = file.slice(6);
     const text = await partial.text();
     assert.equal(text, TEST_CONTENT.slice(6));
   });
 
-  it("slice() with end before start returns empty content", async () => {
+  test("slice() with end before start returns empty content", async () => {
     const file = client.file(TEST_KEY);
     const partial = file.slice(5, 2);
     assert.equal(await partial.text(), "");
@@ -386,7 +386,7 @@ describe("S3 operations", () => {
 
   // ─── list ──────────────────────────────────────────────────────
 
-  it("list() returns objects", async () => {
+  test("list() returns objects", async () => {
     const result = await client.list({ prefix: "rong-test-" });
     assert(result.contents, "has contents array");
     assert(result.contents.length > 0, "found test objects");
@@ -396,13 +396,13 @@ describe("S3 operations", () => {
     assert(typeof found.lastModified === "string", "has lastModified");
   });
 
-  it("list() with maxKeys limits results + isTruncated", async () => {
+  test("list() with maxKeys limits results + isTruncated", async () => {
     const result = await client.list({ prefix: "rong-test-", maxKeys: 1 });
     assert.equal(result.contents.length, 1);
     assert.equal(result.isTruncated, true);
   });
 
-  it("list() rejects a negative maxKeys", async () => {
+  test("list() rejects a negative maxKeys", async () => {
     let error;
     try {
       await client.list({ prefix: "rong-test-", maxKeys: -1 });
@@ -412,7 +412,7 @@ describe("S3 operations", () => {
     assert(error instanceof RangeError, "negative maxKeys should throw RangeError");
   });
 
-  it("list() with startAfter paginates", async () => {
+  test("list() with startAfter paginates", async () => {
     const all = await client.list({ prefix: "rong-test-" });
     assert(all.contents.length >= 2, "need at least 2 objects for pagination test");
     const firstKey = all.contents[0].key;
@@ -423,7 +423,7 @@ describe("S3 operations", () => {
 
   // ─── presign (live) ────────────────────────────────────────────
 
-  it("client.presign() generates valid URL", async () => {
+  test("client.presign() generates valid URL", async () => {
     const url = await client.presign(TEST_KEY);
     assert(typeof url === "string", "presign returns string");
     assert(url.includes(TEST_KEY), "URL contains key");
@@ -431,7 +431,7 @@ describe("S3 operations", () => {
 
   // ─── file.write ────────────────────────────────────────────────
 
-  it("file.write() on file reference", async () => {
+  test("file.write() on file reference", async () => {
     const file = client.file(TEST_KEY);
     const n = await file.write("updated content");
     assert.equal(n, "updated content".length);
@@ -441,13 +441,13 @@ describe("S3 operations", () => {
 
   // ─── delete / unlink ──────────────────────────────────────────
 
-  it("client.delete() removes the object", async () => {
+  test("client.delete() removes the object", async () => {
     await client.delete(TEST_KEY);
     const exists = await client.exists(TEST_KEY);
     assert.equal(exists, false);
   });
 
-  it("client.unlink() alias works", async () => {
+  test("client.unlink() alias works", async () => {
     const key = `rong-unlink-test-${Date.now()}.txt`;
     await client.write(key, "temp");
     await client.unlink(key);
@@ -455,7 +455,7 @@ describe("S3 operations", () => {
     assert.equal(exists, false);
   });
 
-  it("file.delete() removes the object", async () => {
+  test("file.delete() removes the object", async () => {
     const key = `rong-file-delete-${Date.now()}.txt`;
     await client.write(key, "to-delete");
     const file = client.file(key);
@@ -464,7 +464,7 @@ describe("S3 operations", () => {
     assert.equal(exists, false);
   });
 
-  it("file.unlink() alias works", async () => {
+  test("file.unlink() alias works", async () => {
     const key = `rong-file-unlink-${Date.now()}.txt`;
     await client.write(key, "to-unlink");
     const file = client.file(key);
@@ -475,7 +475,7 @@ describe("S3 operations", () => {
 
   // ─── Cleanup ───────────────────────────────────────────────────
 
-  it("cleanup", async () => {
+  test("cleanup", async () => {
     for (const k of [TEST_JSON_KEY, TEST_BIN_KEY]) {
       try { await client.delete(k); } catch (_) {}
     }

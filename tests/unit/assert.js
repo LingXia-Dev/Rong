@@ -1,6 +1,6 @@
 describe("assert module", () => {
   describe("assert.ok()", () => {
-    it("should pass for truthy values", () => {
+    test("should pass for truthy values", () => {
       assert.ok(true);
       assert.ok(1);
       assert.ok("test");
@@ -8,7 +8,7 @@ describe("assert module", () => {
       assert.ok([]);
     });
 
-    it("should throw for falsy values", () => {
+    test("should throw for falsy values", () => {
       expect(() => assert.ok(false)).toThrow();
       expect(() => assert.ok(0)).toThrow();
       expect(() => assert.ok("")).toThrow();
@@ -16,7 +16,7 @@ describe("assert module", () => {
       expect(() => assert.ok(undefined)).toThrow();
     });
 
-    it("should include custom message in error", () => {
+    test("should include custom message in error", () => {
       const message = "Custom error message";
       try {
         assert.ok(false, message);
@@ -27,25 +27,25 @@ describe("assert module", () => {
   });
 
   describe("assert.equal()", () => {
-    it("should pass for equal values", () => {
+    test("should pass for equal values", () => {
       assert.equal(1, 1);
       assert.equal("test", "test");
       assert.equal(null, null);
       assert.equal(undefined, undefined);
     });
 
-    it("should throw for unequal values", () => {
+    test("should throw for unequal values", () => {
       expect(() => assert.equal(1, 2)).toThrow();
       expect(() => assert.equal("a", "b")).toThrow();
     });
 
-    it("should use loose equality", () => {
+    test("should use loose equality", () => {
       assert.equal(1, "1");
       assert.equal(0, false);
       assert.equal("", false);
     });
 
-    it("should include custom message in error", () => {
+    test("should include custom message in error", () => {
       const message = "Custom equality message";
       try {
         assert.equal(1, 2, message);
@@ -56,11 +56,11 @@ describe("assert module", () => {
   });
 
   describe("assert.fail()", () => {
-    it("should always throw", () => {
+    test("should always throw", () => {
       expect(() => assert.fail()).toThrow();
     });
 
-    it("should include custom message in error", () => {
+    test("should include custom message in error", () => {
       const message = "Custom fail message";
       try {
         assert.fail(message);
@@ -71,20 +71,20 @@ describe("assert module", () => {
   });
 
   describe("assert.doesNotThrow()", () => {
-    it("should pass for functions that don't throw", () => {
+    test("should pass for functions that don't throw", () => {
       assert.doesNotThrow(() => {
         // This function doesn't throw
         return true;
       });
     });
 
-    it("should throw for non-function arguments", () => {
+    test("should throw for non-function arguments", () => {
       expect(() => assert.doesNotThrow("not a function")).toThrow();
       expect(() => assert.doesNotThrow(123)).toThrow();
       expect(() => assert.doesNotThrow({})).toThrow();
     });
 
-    it("should include custom message in error", () => {
+    test("should include custom message in error", () => {
       const message = "Custom doesNotThrow message";
       try {
         assert.doesNotThrow(() => {
@@ -97,11 +97,11 @@ describe("assert module", () => {
   });
 
   describe("assert.fail()", () => {
-    it("should always throw", () => {
+    test("should always throw", () => {
       expect(() => assert.fail()).toThrow();
     });
 
-    it("should include custom message in error", () => {
+    test("should include custom message in error", () => {
       const message = "Custom fail message";
       try {
         assert.fail(message);
@@ -110,7 +110,7 @@ describe("assert module", () => {
       }
     });
 
-    it("should throw with default message when no args", () => {
+    test("should throw with default message when no args", () => {
       try {
         assert.fail();
       } catch (e) {
@@ -118,7 +118,7 @@ describe("assert module", () => {
       }
     });
 
-    it("should throw with provided error object", () => {
+    test("should throw with provided error object", () => {
       const error = new Error("Custom error");
       try {
         assert.fail(error);
@@ -131,7 +131,7 @@ describe("assert module", () => {
 
 describe("Custom message handling", () => {
   describe("assert.ok()", () => {
-    it("should use default message when no custom message provided", () => {
+    test("should use default message when no custom message provided", () => {
       try {
         assert.ok(false);
       } catch (e) {
@@ -141,7 +141,7 @@ describe("Custom message handling", () => {
       }
     });
 
-    it("should use custom string message", () => {
+    test("should use custom string message", () => {
       const message = "Custom ok message";
       try {
         assert.ok(false, message);
@@ -150,7 +150,7 @@ describe("Custom message handling", () => {
       }
     });
 
-    it("should throw custom error object", () => {
+    test("should throw custom error object", () => {
       const error = new Error("Custom error");
       try {
         assert.ok(false, error);
@@ -159,7 +159,7 @@ describe("Custom message handling", () => {
       }
     });
 
-    it("should throw non-string values as-is", () => {
+    test("should throw non-string values as-is", () => {
       const testValues = [123, { key: "value" }];
 
       testValues.forEach((value) => {
@@ -173,7 +173,7 @@ describe("Custom message handling", () => {
   });
 
   describe("assert.equal()", () => {
-    it("should use default message when no custom message provided", () => {
+    test("should use default message when no custom message provided", () => {
       try {
         assert.equal(1, 2);
       } catch (e) {
@@ -181,7 +181,7 @@ describe("Custom message handling", () => {
       }
     });
 
-    it("should use custom string message", () => {
+    test("should use custom string message", () => {
       const message = "Custom equality message";
       try {
         assert.equal(1, 2, message);
@@ -190,7 +190,7 @@ describe("Custom message handling", () => {
       }
     });
 
-    it("should throw custom error object", () => {
+    test("should throw custom error object", () => {
       const error = new Error("Custom equality error");
       try {
         assert.equal(1, 2, error);

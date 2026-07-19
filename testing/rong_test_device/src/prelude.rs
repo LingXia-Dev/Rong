@@ -8,6 +8,7 @@ pub use rong::function::{Constructor, Optional, Rest, This, ThisMut};
 pub use rong::*;
 
 pub use rong_macro;
+pub use rong_test::UnitJSRunner;
 
 pub fn thrown_js_value(ctx: &JSContext, err: &RongJSError) -> JSResult<JSValue> {
     err.thrown_value(ctx)

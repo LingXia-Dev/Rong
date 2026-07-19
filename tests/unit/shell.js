@@ -4,20 +4,20 @@ const tempDir = isWindows
   : "/tmp";
 
 describe("Rong Shell", () => {
-  it("Rong.$ supports text() and escaped interpolation", async () => {
+  test("Rong.$ supports text() and escaped interpolation", async () => {
     const message = "shell hello world";
     const text = await Rong.$`echo ${message}`.text();
     assert.ok(text.includes(message));
   });
 
-  it("Rong.$ supports json()", async () => {
+  test("Rong.$ supports json()", async () => {
     const command = isWindows ? "echo [true,2]" : "echo [true,2]";
     const value = await Rong.$(command).json();
     assert.equal(value[0], true);
     assert.equal(value[1], 2);
   });
 
-  it("Rong.$ supports nothrow()", async () => {
+  test("Rong.$ supports nothrow()", async () => {
     const result = await Rong.$(
       isWindows ? "cmd /C exit 7" : "sh -c 'exit 7'",
     ).nothrow();
@@ -25,19 +25,19 @@ describe("Rong Shell", () => {
     assert.equal(result.success, false);
   });
 
-  it("Rong.$ supports cwd()", async () => {
+  test("Rong.$ supports cwd()", async () => {
     const text = await Rong.$(isWindows ? "cd" : "pwd").cwd(tempDir).text();
     assert.ok(text.toLowerCase().includes(tempDir.toLowerCase()));
   });
 
-  it("Rong.$ supports blob()", async () => {
+  test("Rong.$ supports blob()", async () => {
     const message = "blob-shell-output";
     const blob = await Rong.$`echo ${message}`.blob();
     const text = await blob.text();
     assert.ok(text.includes(message));
   });
 
-  it("Rong.$ throws ShellError with command metadata", async () => {
+  test("Rong.$ throws ShellError with command metadata", async () => {
     let error = null;
     try {
       await Rong.$(isWindows ? "cmd /C exit 9" : "sh -c 'exit 9'");

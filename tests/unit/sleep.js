@@ -1,11 +1,11 @@
 describe("Rong.sleep", () => {
-  it("exposes Bun-aligned sleep APIs on Rong", () => {
+  test("exposes Bun-aligned sleep APIs on Rong", () => {
     assert.ok(typeof Rong.sleep === "function");
     assert.ok(typeof Rong.sleepSync === "function");
     assert.equal(globalThis.timers, undefined);
   });
 
-  it("resolves after the requested delay", async () => {
+  test("resolves after the requested delay", async () => {
     const start = Date.now();
     await Rong.sleep(80);
     const elapsed = Date.now() - start;
@@ -15,7 +15,7 @@ describe("Rong.sleep", () => {
     );
   });
 
-  it("resolves immediately for zero and negative delays", async () => {
+  test("resolves immediately for zero and negative delays", async () => {
     let start = Date.now();
     await Rong.sleep(0);
     let elapsed = Date.now() - start;
@@ -30,7 +30,7 @@ describe("Rong.sleep", () => {
     );
   });
 
-  it("accepts a Date target for async sleep", async () => {
+  test("accepts a Date target for async sleep", async () => {
     const start = Date.now();
     await Rong.sleep(new Date(start + 70));
     const elapsed = Date.now() - start;
@@ -40,14 +40,14 @@ describe("Rong.sleep", () => {
     );
   });
 
-  it("resolves immediately for past Date targets", async () => {
+  test("resolves immediately for past Date targets", async () => {
     const start = Date.now();
     await Rong.sleep(new Date(start - 1000));
     const elapsed = Date.now() - start;
     assert.ok(elapsed >= 0 && elapsed < 50, "past Date should resolve quickly");
   });
 
-  it("throws for invalid async sleep input", async () => {
+  test("throws for invalid async sleep input", async () => {
     try {
       await Rong.sleep("100");
       assert.fail("Rong.sleep should reject non-number, non-Date input");
@@ -56,7 +56,7 @@ describe("Rong.sleep", () => {
     }
   });
 
-  it("throws for invalid async sleep Date input", async () => {
+  test("throws for invalid async sleep Date input", async () => {
     try {
       await Rong.sleep(new Date("invalid"));
       assert.fail("Rong.sleep should reject invalid Date input");
@@ -65,7 +65,7 @@ describe("Rong.sleep", () => {
     }
   });
 
-  it("blocks synchronously for at least the requested delay", () => {
+  test("blocks synchronously for at least the requested delay", () => {
     const start = Date.now();
     Rong.sleepSync(40);
     const elapsed = Date.now() - start;
@@ -75,7 +75,7 @@ describe("Rong.sleep", () => {
     );
   });
 
-  it("treats negative sleepSync delay as immediate", () => {
+  test("treats negative sleepSync delay as immediate", () => {
     const start = Date.now();
     Rong.sleepSync(-10);
     const elapsed = Date.now() - start;
@@ -85,7 +85,7 @@ describe("Rong.sleep", () => {
     );
   });
 
-  it("throws for invalid sleepSync input", () => {
+  test("throws for invalid sleepSync input", () => {
     try {
       Rong.sleepSync(new Date());
       assert.fail("Rong.sleepSync should reject Date input");

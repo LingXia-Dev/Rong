@@ -6,8 +6,10 @@
 - **Concurrency:** PR and branch runs cancel older in-progress runs for the same PR/ref, so the Actions page shows the latest relevant CI instead of stale queued attempts.
 - **Scope:** a lightweight `scope` job classifies changed files. `docs/*`,
   `packages/*`, Markdown, and GitHub metadata changes do not run the Rust/JSC
-  matrix. `docs/api`, `docs/skills`, `packages/rong_types`, `packages/skill`, and npm release
-  script changes run only the npm package validation job. Workflow and local
+  matrix. `docs/api`, `docs/skills`, `packages/rong_types`, `packages/skill`,
+  and npm release script changes run only the npm package validation job.
+  `packages/test` changes run both npm validation and the host-engine matrix
+  because `UnitJSRunner` embeds that runtime. Workflow and local
   action changes run every scope so CI validates changes to itself. Manual
   `workflow_dispatch` also runs all scopes.
 - **Runs:** for Rust/source changes, `cargo fmt` runs once, then each host
@@ -17,11 +19,11 @@
   - `quickjs` on Windows, Linux, and macOS
   - `jscore` on macOS using the system `JavaScriptCore.framework`
   - `jscore-source-*` on currently pinned macOS Intel, macOS arm64, Linux, and Windows targets, gated by pinned prebuilt artifact rows in `javascriptcore/sys/webkit-artifacts.tsv`
-- **npm packaging:** builds the Rong type package and validates `docs/skills` +
+- **npm packaging:** builds the Rong type package, validates `docs/skills` +
   `docs/api` can generate self-contained installable skills through
-  `packages/skill/bin/pack.mjs`. TypeScript is installed reproducibly from the
-  committed lockfile with lifecycle scripts disabled; the workflow runs the
-  intended build exactly once.
+  `packages/skill/bin/pack.mjs`, and tests/dry-packs `@rongjs/test`. TypeScript
+  is installed reproducibly from the committed lockfile with lifecycle scripts
+  disabled; the workflow runs the intended build exactly once.
 - **Source backend behavior:** `jscore-source-*` is the production-style prebuilt consumer path. It downloads and caches the pinned artifact through `rong_jscore_sys/build.rs`; if no row exists for a supported target, CI fails instead of silently skipping.
 - **Steps:** `cargo fmt --check` plus `cargo make clippy-engine` and `cargo make test-engine`. Clippy performs the same complete type-check, so a separate host `cargo check` would duplicate compilation without increasing target coverage.
 - **Hardening:** CI has read-only repository permissions, pins third-party actions by commit, uses the latest stable Rust for the main matrix plus Rust 1.95.0 for the explicit MSRV lane, uses versioned runner images, and applies explicit job/test timeouts. Monthly grouped Dependabot updates keep pinned actions and the type-package lockfile current.

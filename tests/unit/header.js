@@ -12,13 +12,13 @@ describe("Headers", () => {
   });
 
   describe("constructor", () => {
-    it("should initialize with empty headers when no arguments provided", () => {
+    test("should initialize with empty headers when no arguments provided", () => {
       const emptyHeader = new Headers();
       expect(emptyHeader.has("Content-Type")).toBe(false);
       expect(emptyHeader.has("Accept")).toBe(false);
     });
 
-    it("should initialize from another Headers instance", () => {
+    test("should initialize from another Headers instance", () => {
       const original = new Headers();
       original.set("Content-Type", "text/plain");
       original.set("X-Custom", "test");
@@ -28,7 +28,7 @@ describe("Headers", () => {
       expect(newHeader.get("X-Custom")).toBe("test");
     });
 
-    it("should initialize from array of key-value pairs", () => {
+    test("should initialize from array of key-value pairs", () => {
       const pairs = [
         ["Content-Type", "application/json"],
         ["Accept", "text/plain"],
@@ -38,7 +38,7 @@ describe("Headers", () => {
       expect(header.get("Accept")).toBe("text/plain");
     });
 
-    it("should initialize from object literal", () => {
+    test("should initialize from object literal", () => {
       const init = {
         "Content-Type": "application/json",
         Accept: "text/plain",
@@ -48,7 +48,7 @@ describe("Headers", () => {
       expect(header.get("Accept")).toBe("text/plain");
     });
 
-    it("should handle case-insensitive headers during initialization", () => {
+    test("should handle case-insensitive headers during initialization", () => {
       const init = {
         "CONTENT-TYPE": "application/json",
         accept: "text/plain",
@@ -58,32 +58,32 @@ describe("Headers", () => {
       expect(header.get("ACCEPT")).toBe("text/plain");
     });
 
-    it("should throw TypeError for invalid input types", () => {
+    test("should throw TypeError for invalid input types", () => {
       expect(() => new Headers(42)).toThrow(TypeError);
       expect(() => new Headers("invalid")).toThrow(TypeError);
       expect(() => new Headers(true)).toThrow(TypeError);
     });
 
-    it("should throw TypeError for invalid header names in input", () => {
+    test("should throw TypeError for invalid header names in input", () => {
       expect(() => new Headers({ "": "empty" })).toThrow(TypeError);
       expect(() => new Headers({ "Invalid:Name": "value" })).toThrow(TypeError);
       expect(() => new Headers([["", "empty"]])).toThrow(TypeError);
     });
 
-    it("should throw TypeError for invalid header values in input", () => {
-      expect(() => new Headers({ "X-Test": "" })).toThrow(TypeError);
-      expect(() => new Headers({ "X-Test": null })).toThrow(TypeError);
-      expect(() => new Headers([["X-Test", ""]])).toThrow(TypeError);
+    test("should accept empty and coerce null header values in input", () => {
+      expect(new Headers({ "X-Test": "" }).get("X-Test")).toBe("");
+      expect(new Headers({ "X-Test": null }).get("X-Test")).toBe("null");
+      expect(new Headers([["X-Test", ""]]).get("X-Test")).toBe("");
     });
   });
 
   describe("set", () => {
-    it("should set a single header", () => {
+    test("should set a single header", () => {
       header.set("Content-Type", "application/json");
       expect(header.get("Content-Type")).toBe("application/json");
     });
 
-    it("should set multiple headers", () => {
+    test("should set multiple headers", () => {
       header.set("Content-Type", "application/json");
       header.set("Accept", "text/plain");
 
@@ -91,31 +91,33 @@ describe("Headers", () => {
       expect(header.get("Accept")).toBe("text/plain");
     });
 
-    it("should override existing headers", () => {
+    test("should override existing headers", () => {
       header.set("Content-Type", "text/plain");
       header.set("Content-Type", "application/json");
       expect(header.get("Content-Type")).toBe("application/json");
     });
 
-    it("should handle case-insensitive header names", () => {
+    test("should handle case-insensitive header names", () => {
       header.set("content-type", "application/json");
       expect(header.get("Content-Type")).toBe("application/json");
       expect(header.get("content-TYPE")).toBe("application/json");
     });
 
-    it("should throw TypeError for invalid header name", () => {
+    test("should throw TypeError for invalid header name", () => {
       expect(() => header.set("", "value")).toThrow(TypeError);
       expect(() => header.set("Invalid:Name", "value")).toThrow(TypeError);
     });
 
-    it("should throw TypeError for invalid header value", () => {
-      expect(() => header.set("Content-Type", "")).toThrow(TypeError);
-      expect(() => header.set("Content-Type", null)).toThrow(TypeError);
+    test("should accept empty and coerce null header values", () => {
+      header.set("Content-Type", "");
+      expect(header.get("Content-Type")).toBe("");
+      header.set("Content-Type", null);
+      expect(header.get("Content-Type")).toBe("null");
     });
   });
 
   describe("append", () => {
-    it("should throw TypeError for an invalid header name", () => {
+    test("should throw TypeError for an invalid header name", () => {
       let error;
       try {
         header.append("Invalid:Name", "value");
@@ -125,7 +127,7 @@ describe("Headers", () => {
       expect(error instanceof TypeError).toBe(true);
     });
 
-    it("should throw TypeError for an invalid header value", () => {
+    test("should throw TypeError for an invalid header value", () => {
       let error;
       try {
         header.append("X-Test", "bad\nvalue");
@@ -142,26 +144,26 @@ describe("Headers", () => {
       header.set("Accept", "text/plain");
     });
 
-    it("should throw TypeError when called without arguments", () => {
+    test("should throw TypeError when called without arguments", () => {
       expect(() => header.get()).toThrow(TypeError);
     });
 
-    it("should get a specific header value as string", () => {
+    test("should get a specific header value as string", () => {
       const value = header.get("Content-Type");
       expect(typeof value).toBe("string");
       expect(value).toBe("application/json");
     });
 
-    it("should return null for non-existent headers", () => {
+    test("should return null for non-existent headers", () => {
       expect(header.get("X-Custom")).toBe(null);
     });
 
-    it("should be case-insensitive when getting headers", () => {
+    test("should be case-insensitive when getting headers", () => {
       expect(header.get("content-type")).toBe("application/json");
       expect(header.get("ACCEPT")).toBe("text/plain");
     });
 
-    it("should throw TypeError for invalid header name", () => {
+    test("should throw TypeError for invalid header name", () => {
       expect(() => header.get("")).toThrow(TypeError);
       expect(() => header.get("Invalid:Name")).toThrow(TypeError);
     });
@@ -172,24 +174,24 @@ describe("Headers", () => {
       header.set("Content-Type", "application/json");
     });
 
-    it("should return true for existing headers", () => {
+    test("should return true for existing headers", () => {
       expect(header.has("Content-Type")).toBe(true);
     });
 
-    it("should return false for non-existent headers", () => {
+    test("should return false for non-existent headers", () => {
       expect(header.has("X-Custom")).toBe(false);
     });
 
-    it("should be case-insensitive", () => {
+    test("should be case-insensitive", () => {
       expect(header.has("content-type")).toBe(true);
       expect(header.has("CONTENT-TYPE")).toBe(true);
     });
 
-    it("should throw TypeError when called without arguments", () => {
+    test("should throw TypeError when called without arguments", () => {
       expect(() => header.has()).toThrow(TypeError);
     });
 
-    it("should throw TypeError for invalid header name", () => {
+    test("should throw TypeError for invalid header name", () => {
       expect(() => header.has("")).toThrow(TypeError);
       expect(() => header.has("Invalid:Name")).toThrow(TypeError);
     });
@@ -201,18 +203,18 @@ describe("Headers", () => {
       header.set("Accept", "text/plain");
     });
 
-    it("should delete a specific header", () => {
+    test("should delete a specific header", () => {
       header.delete("Content-Type");
       expect(header.has("Content-Type")).toBe(false);
       expect(header.get("Accept")).toBe("text/plain");
     });
 
-    it("should be case-insensitive when deleting", () => {
+    test("should be case-insensitive when deleting", () => {
       header.delete("content-type");
       expect(header.has("Content-Type")).toBe(false);
     });
 
-    it("should silently ignore deleting non-existent headers", () => {
+    test("should silently ignore deleting non-existent headers", () => {
       const beforeDelete = new Headers(header);
       header.delete("X-Custom");
 
@@ -221,11 +223,11 @@ describe("Headers", () => {
       expect(header.get("Content-Type")).toBe(beforeDelete.get("Content-Type"));
     });
 
-    it("should throw TypeError when called without arguments", () => {
+    test("should throw TypeError when called without arguments", () => {
       expect(() => header.delete()).toThrow(TypeError);
     });
 
-    it("should throw TypeError for an invalid header name", () => {
+    test("should throw TypeError for an invalid header name", () => {
       let error;
       try {
         header.delete("Invalid:Name");
@@ -244,7 +246,7 @@ describe("Headers", () => {
     });
 
     describe("keys", () => {
-      it("should return an iterator of all header names", () => {
+      test("should return an iterator of all header names", () => {
         const expectedKeys = new Set(["content-type", "accept", "x-custom"]);
         const foundKeys = new Set();
 
@@ -257,13 +259,13 @@ describe("Headers", () => {
         expect(foundKeys.size).toBe(expectedKeys.size);
       });
 
-      it("should return header names in lower case", () => {
+      test("should return header names in lower case", () => {
         for (const key of header.keys()) {
           expect(key).toBe(key.toLowerCase());
         }
       });
 
-      it("should support multiple iterations", () => {
+      test("should support multiple iterations", () => {
         const iter1 = [...header.keys()];
         const iter2 = [...header.keys()];
         expect(iter1).toEqual(iter2);
@@ -271,7 +273,7 @@ describe("Headers", () => {
     });
 
     describe("values", () => {
-      it("should return an iterator of all header values", () => {
+      test("should return an iterator of all header values", () => {
         const expectedValues = new Set([
           "application/json",
           "text/plain",
@@ -288,7 +290,7 @@ describe("Headers", () => {
         expect(foundValues.size).toBe(expectedValues.size);
       });
 
-      it("should support multiple iterations", () => {
+      test("should support multiple iterations", () => {
         const iter1 = [...header.values()];
         const iter2 = [...header.values()];
         expect(iter1).toEqual(iter2);
@@ -296,7 +298,7 @@ describe("Headers", () => {
     });
 
     describe("entries", () => {
-      it("should return an iterator of header [name, value] pairs", () => {
+      test("should return an iterator of header [name, value] pairs", () => {
         const expectedEntries = new Map([
           ["content-type", "application/json"],
           ["accept", "text/plain"],
@@ -314,13 +316,13 @@ describe("Headers", () => {
         expect(foundEntries.size).toBe(expectedEntries.size);
       });
 
-      it("should return header names in lower case", () => {
+      test("should return header names in lower case", () => {
         for (const [key] of header.entries()) {
           expect(key).toBe(key.toLowerCase());
         }
       });
 
-      it("should support multiple iterations", () => {
+      test("should support multiple iterations", () => {
         const iter1 = [...header.entries()];
         const iter2 = [...header.entries()];
         expect(iter1.length).toBe(iter2.length);
@@ -332,7 +334,7 @@ describe("Headers", () => {
     });
 
     describe("forEach", () => {
-      it("should iterate over all headers", () => {
+      test("should iterate over all headers", () => {
         const collected = new Map();
         header.forEach((value, key) => {
           collected.set(key, value);
@@ -343,20 +345,20 @@ describe("Headers", () => {
         expect(collected.get("x-custom")).toBe("test");
       });
 
-      it("should call callback with correct this context when thisArg provided", () => {
+      test("should call callback with correct this context when thisArg provided", () => {
         const thisArg = { test: true };
         header.forEach(function () {
           expect(this).toBe(thisArg);
         }, thisArg);
       });
 
-      it("should use undefined as this when thisArg not provided", () => {
+      test("should use undefined as this when thisArg not provided", () => {
         header.forEach(function () {
           expect(this).toBeUndefined();
         });
       });
 
-      it("should provide value, key, and headers object to callback", () => {
+      test("should provide value, key, and headers object to callback", () => {
         header.forEach((value, key, hdrs) => {
           expect(typeof value).toBe("string");
           expect(typeof key).toBe("string");
@@ -371,11 +373,11 @@ describe("Headers", () => {
       header = new Headers();
     });
 
-    it("should return empty array when no Set-Cookie headers present", () => {
+    test("should return empty array when no Set-Cookie headers present", () => {
       expect(header.getSetCookie()).toEqual([]);
     });
 
-    it("should return array of Set-Cookie header values", () => {
+    test("should return array of Set-Cookie header values", () => {
       header.append("Set-Cookie", "cookie1=value1; Path=/");
       header.append("Set-Cookie", "cookie2=value2; Secure");
 
@@ -386,14 +388,14 @@ describe("Headers", () => {
       ]);
     });
 
-    it("should preserve original Set-Cookie header values", () => {
+    test("should preserve original Set-Cookie header values", () => {
       const cookie = "SessionId=123; Path=/; Secure; HttpOnly";
       header.append("Set-Cookie", cookie);
 
       expect(header.getSetCookie()).toEqual([cookie]);
     });
 
-    it("should handle multiple Set-Cookie headers case-insensitively", () => {
+    test("should handle multiple Set-Cookie headers case-insensitively", () => {
       header.append("Set-Cookie", "cookie1=value1");
       header.append("set-cookie", "cookie2=value2");
       header.append("SET-COOKIE", "cookie3=value3");
