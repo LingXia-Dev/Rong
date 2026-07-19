@@ -31,6 +31,7 @@ export function homeBase(lang: Locale, base: string): string {
 
 export const LAYOUT = {
   en: {
+    skipToContent: "Skip to content",
     title: "Rong (融) — JavaScript Runtime for Rust",
     description:
       "Rong is a JavaScript runtime for Rust with a unified API over multiple engines — QuickJS, JavaScriptCore, and ArkJS. Built for embedding, Rust-driven JS APIs, and long-lived worker runtimes.",
@@ -53,6 +54,7 @@ export const LAYOUT = {
       workerModel: "Worker Model",
       valueSystem: "Value System",
       errorHandling: "Error Handling",
+      jsTesting: "JavaScript Testing",
       packages: "Packages",
       cratesIo: "rong on crates.io",
       license: "License",
@@ -61,6 +63,7 @@ export const LAYOUT = {
     },
   },
   zh: {
+    skipToContent: "跳到主要内容",
     title: "Rong（融）— Rust 的 JavaScript 运行时",
     description:
       "Rong 是一个面向 Rust 的 JavaScript 运行时，以统一的 API 覆盖多种引擎 —— QuickJS、JavaScriptCore 和 ArkJS。专为嵌入式场景、Rust 驱动的 JS API 以及长生命周期的 worker 运行时而设计。",
@@ -83,6 +86,7 @@ export const LAYOUT = {
       workerModel: "Worker 模型",
       valueSystem: "值系统",
       errorHandling: "错误处理",
+      jsTesting: "JavaScript 测试",
       packages: "软件包",
       cratesIo: "crates.io 上的 rong",
       license: "许可证",
