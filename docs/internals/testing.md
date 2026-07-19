@@ -4,6 +4,10 @@ Rong is a multi-engine project. Most tests need an engine feature enabled.
 By default, `rong` uses QuickJS. To switch to JavaScriptCore, always use
 `--no-default-features --features jscore` to avoid enabling both engines.
 
+JavaScript suites under `tests/unit` use `@rongjs/test`. See the
+[JavaScript testing guide](../guides/javascript-testing.md) for its public API,
+async execution model, matchers, reports, and embedding contract.
+
 ## Cargo tests
 
 ### Running all tests

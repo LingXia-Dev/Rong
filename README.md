@@ -221,6 +221,7 @@ Rong comes with a rich set of built-in modules:
 - **[Value System Guide](docs/internals/value_system.md)** - Understand type conversion between Rust and JavaScript
 - **[Error Handling Guide](docs/internals/error_handling.md)** - Best practices for error handling
 - **[Testing Guide](docs/internals/testing.md)** - How to run and write tests
+- **[JavaScript Testing Guide](docs/guides/javascript-testing.md)** - Write and embed tests with `@rongjs/test`
 
 ## 📄 License
 
