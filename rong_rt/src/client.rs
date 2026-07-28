@@ -12,12 +12,15 @@ use hyper_http_proxy::{Intercept, Proxy};
 use hyper_rustls::HttpsConnectorBuilder;
 use hyper_util::client::legacy::Client;
 use hyper_util::client::legacy::connect::HttpConnector;
+use hyper_util::client::legacy::connect::dns::{GaiResolver, Name};
 use std::io::Error;
+use std::net::SocketAddr;
 #[cfg(any(feature = "tls-aws-lc", feature = "tls-ring", test))]
 use std::sync::Mutex;
 use std::sync::{OnceLock, RwLock};
 use tokio::sync::{mpsc, oneshot};
 use tokio::time::{Duration, Instant, timeout};
+use tower_service::Service;
 
 pub const DEFAULT_BLOCKING_BODY_LIMIT: usize = 512 * 1024;
 pub const DEFAULT_STREAM_COALESCE_TARGET: usize = 512 * 1024;
@@ -42,8 +45,56 @@ fn body_frame_timeout(
     ))
 }
 
-type HttpClient =
-    Client<hyper_rustls::HttpsConnector<ProxyConnector<HttpConnector>>, BoxBody<Bytes, Error>>;
+type HttpClient = Client<
+    hyper_rustls::HttpsConnector<ProxyConnector<HttpConnector<GuardedResolver>>>,
+    BoxBody<Bytes, Error>,
+>;
+
+#[derive(Clone, Debug)]
+struct GuardedResolver {
+    inner: GaiResolver,
+}
+
+impl Default for GuardedResolver {
+    fn default() -> Self {
+        Self {
+            inner: GaiResolver::new(),
+        }
+    }
+}
+
+impl Service<Name> for GuardedResolver {
+    type Response = std::vec::IntoIter<SocketAddr>;
+    type Error = std::io::Error;
+    type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
+
+    fn poll_ready(
+        &mut self,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Result<(), Self::Error>> {
+        self.inner.poll_ready(cx)
+    }
+
+    fn call(&mut self, name: Name) -> Self::Future {
+        let host = name.as_str().to_string();
+        let guard = crate::http::current_network_access_guard();
+        let resolve = self.inner.call(name);
+        async move {
+            let addresses: Vec<_> = resolve.await?.collect();
+            if let Some(guard) = guard {
+                for address in &addresses {
+                    guard
+                        .check_resolved_address(&host, address.ip())
+                        .map_err(|error| {
+                            std::io::Error::new(std::io::ErrorKind::PermissionDenied, error)
+                        })?;
+                }
+            }
+            Ok(addresses.into_iter())
+        }
+        .boxed()
+    }
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct ProxyConfig {
@@ -206,7 +257,7 @@ fn build_client(proxy: Option<ProxyConfig>, connect_timeout: Option<Duration>) -
 
     let _ = provider.clone().install_default();
 
-    let mut connector = HttpConnector::new();
+    let mut connector = HttpConnector::new_with_resolver(GuardedResolver::default());
     // Required when using wrap_connector and https URIs.
     connector.enforce_http(false);
     connector.set_connect_timeout(connect_timeout);
@@ -236,8 +287,16 @@ fn build_proxy(proxy_config: ProxyConfig) -> Proxy {
 
 #[cfg(any(feature = "tls-aws-lc", feature = "tls-ring"))]
 fn client(timeouts: RequestTimeouts) -> Result<HttpClient, String> {
-    let proxy = current_proxy();
+    let guarded = crate::http::current_network_access_guard().is_some();
+    let proxy = if guarded { None } else { current_proxy() };
     let connect_timeout = timeouts.connect_timeout;
+
+    // A guarded request gets a fresh pool so it cannot reuse a connection
+    // established outside the guard, and bypasses proxies whose resolver and
+    // destination connection are outside this process's address policy.
+    if guarded {
+        return Ok(build_client(None, connect_timeout));
+    }
 
     if let Ok(slot) = client_cache().lock()
         && let Some(cached) = slot.as_ref()
@@ -524,6 +583,41 @@ async fn process_request(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::net::IpAddr;
+
+    struct RejectLoopback;
+
+    impl crate::http::NetworkAccessGuard for RejectLoopback {
+        fn check_access(&self, _uri: &http::Uri) -> Result<(), crate::http::HttpError> {
+            Ok(())
+        }
+
+        fn check_resolved_address(
+            &self,
+            _host: &str,
+            address: IpAddr,
+        ) -> Result<(), crate::http::HttpError> {
+            if address.is_loopback() {
+                Err(crate::http::HttpError::access_denied("loopback blocked"))
+            } else {
+                Ok(())
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn guarded_resolver_checks_addresses_used_for_connect() {
+        let result =
+            crate::http::scope_network_access_guard(std::sync::Arc::new(RejectLoopback), async {
+                let mut resolver = GuardedResolver::default();
+                resolver.call("localhost".parse().unwrap()).await
+            })
+            .await;
+
+        let error = result.expect_err("loopback resolution must be blocked");
+        assert_eq!(error.kind(), std::io::ErrorKind::PermissionDenied);
+        assert!(error.to_string().contains("loopback blocked"));
+    }
 
     #[test]
     fn custom_connect_timeout_does_not_populate_shared_cache() {
