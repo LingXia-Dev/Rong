@@ -9,6 +9,7 @@ use serde::de::DeserializeOwned;
 use std::fmt;
 use std::future::Future;
 use std::io::Error;
+use std::net::IpAddr;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::oneshot;
@@ -84,6 +85,12 @@ impl std::error::Error for HttpError {}
 /// such as an app-specific domain allowlist.
 pub trait NetworkAccessGuard: Send + Sync {
     fn check_access(&self, uri: &Uri) -> Result<(), HttpError>;
+
+    /// Validate an address returned by the connector's resolver before it is
+    /// eligible for a socket connection.
+    fn check_resolved_address(&self, _host: &str, _address: IpAddr) -> Result<(), HttpError> {
+        Ok(())
+    }
 }
 
 pub async fn scope_network_access_guard<F, T>(guard: Arc<dyn NetworkAccessGuard>, future: F) -> T
@@ -240,11 +247,14 @@ pub async fn send(
     let (timeouts, abort_rx, guard) = options.into_parts();
     let guard = guard.or_else(current_network_access_guard);
     check_network_access(&request, guard.as_deref())?;
-    client::send_request_with_timeout(
-        request,
-        client::DEFAULT_BLOCKING_BODY_LIMIT,
-        abort_rx,
-        timeouts,
+    scope_network_access_guard_opt(
+        guard,
+        client::send_request_with_timeout(
+            request,
+            client::DEFAULT_BLOCKING_BODY_LIMIT,
+            abort_rx,
+            timeouts,
+        ),
     )
     .await
     .map_err(Into::into)
@@ -259,9 +269,12 @@ pub async fn send_with_small_body_limit(
     let (timeouts, abort_rx, guard) = options.into_parts();
     let guard = guard.or_else(current_network_access_guard);
     check_network_access(&request, guard.as_deref())?;
-    client::send_request_with_timeout(request, small_body_limit, abort_rx, timeouts)
-        .await
-        .map_err(Into::into)
+    scope_network_access_guard_opt(
+        guard,
+        client::send_request_with_timeout(request, small_body_limit, abort_rx, timeouts),
+    )
+    .await
+    .map_err(Into::into)
 }
 
 /// Send a request while forcing response delivery through the streaming body path.
@@ -272,9 +285,12 @@ pub async fn send_stream(
     let (timeouts, abort_rx, guard) = options.into_parts();
     let guard = guard.or_else(current_network_access_guard);
     check_network_access(&request, guard.as_deref())?;
-    client::send_request_with_coalesce(request, 0, abort_rx, 0, timeouts)
-        .await
-        .map_err(Into::into)
+    scope_network_access_guard_opt(
+        guard,
+        client::send_request_with_coalesce(request, 0, abort_rx, 0, timeouts),
+    )
+    .await
+    .map_err(Into::into)
 }
 
 /// Collect an `HttpBody` into a single `Bytes` buffer.
