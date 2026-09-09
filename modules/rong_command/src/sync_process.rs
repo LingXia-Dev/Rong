@@ -430,8 +430,10 @@ mod authority_tests {
     #[test]
     fn revocation_terminates_a_synchronous_child() {
         let authority = Arc::new(RevocableAuthority(AtomicBool::new(true)));
-        let mut options = SpawnSyncOptions::default();
-        options.cmd = vec!["sh".to_string(), "-c".to_string(), "sleep 30".to_string()];
+        let options = SpawnSyncOptions {
+            cmd: vec!["sh".to_string(), "-c".to_string(), "sleep 30".to_string()],
+            ..Default::default()
+        };
         let mut child = build_sync_command(&options)
             .spawn()
             .expect("spawn test child");
