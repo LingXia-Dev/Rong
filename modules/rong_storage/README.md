@@ -9,6 +9,7 @@ Key-value storage backed by a local database file.
 - `Storage` instance methods:
   - `set(key, value)` — store a key-value pair
   - `get(key)` — retrieve a value by key
+  - `has(key)` — `true` when the exact key exists; does not load the value
   - `delete(key)` — remove a key
   - `clear()` — remove all entries
   - `list(prefix?)` — list keys, optionally filtered by prefix

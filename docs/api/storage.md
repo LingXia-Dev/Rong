@@ -22,6 +22,10 @@ await store.set("user", { name: "Alice", age: 30 });
 const user = await store.get("user");
 // { name: "Alice", age: 30 }
 
+// Presence (exact key, does not load the value)
+await store.has("user"); // true
+await store.has("use"); // false
+
 // Delete
 await store.delete("user");
 

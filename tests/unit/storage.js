@@ -191,6 +191,23 @@ describe("Storage API", () => {
     assert.equal(value, undefined);
   });
 
+  test("has reports exact key presence without prefix matches", async () => {
+    assert.equal(await storage.has("foo"), false);
+
+    await storage.set("foobar", "longer");
+    assert.equal(await storage.has("foo"), false);
+    assert.equal(await storage.has("foobar"), true);
+    assert.equal(await storage.has("fo"), false);
+
+    await storage.set("foo", "exact");
+    assert.equal(await storage.has("foo"), true);
+    assert.equal(await storage.has("foobar"), true);
+
+    await storage.delete("foo");
+    assert.equal(await storage.has("foo"), false);
+    assert.equal(await storage.has("foobar"), true);
+  });
+
   test("should delete values", async () => {
     await storage.set("test_delete", "to be deleted");
     assert.equal(await storage.get("test_delete"), "to be deleted");

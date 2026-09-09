@@ -28,6 +28,8 @@ export declare class Storage {
   set(key: string, value: any): Promise<void>;
   /** Get a value from storage */
   get(key: string): Promise<any>;
+  /** Return whether an exact key exists without reading its value. */
+  has(key: string): Promise<boolean>;
   /** Delete a key from storage */
   delete(key: string): Promise<void>;
   /** Clear all data from storage */
