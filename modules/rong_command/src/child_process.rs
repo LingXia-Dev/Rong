@@ -1,5 +1,7 @@
 //! Native child-process helpers used by `rong_command`.
 
+use crate::{ProcessAuthority, authorize_process, authorize_process_with, process_authority};
+
 use rong::{
     HostError, JSArray, JSContext, JSContextService, JSObject, JSResult, JSValue, Promise,
     function::{Optional, Rest, This},
@@ -9,12 +11,16 @@ use rong_event::{Emitter, EmitterExt, EventEmitter};
 use rong_stream::{JSReadableStream, JSWritableStream};
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::io;
+use std::pin::Pin;
 use std::rc::Rc;
 use std::sync::{
     Arc, Mutex,
     atomic::{AtomicBool, Ordering},
 };
-use std::time::Duration;
+use std::task::{Context, Poll};
+use std::time::{Duration, Instant};
+use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 use tokio::process::{Child, Command};
 use tokio::sync::Notify;
 
@@ -59,6 +65,70 @@ impl JSContextService for ChildProcessTaskRegistry {
 
 fn type_error(message: impl Into<String>) -> HostError {
     HostError::new(rong::error::E_TYPE, message).with_name("TypeError")
+}
+
+struct AuthorityIo<T> {
+    inner: T,
+    authority: Option<Arc<dyn ProcessAuthority>>,
+}
+
+impl<T> AuthorityIo<T> {
+    fn new(inner: T, authority: Option<Arc<dyn ProcessAuthority>>) -> Self {
+        Self { inner, authority }
+    }
+
+    fn check(&self) -> io::Result<()> {
+        if let Some(authority) = &self.authority {
+            authority
+                .authorize()
+                .map_err(|message| io::Error::new(io::ErrorKind::PermissionDenied, message))?;
+        }
+        Ok(())
+    }
+}
+
+impl<T: AsyncRead + Unpin> AsyncRead for AuthorityIo<T> {
+    fn poll_read(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &mut ReadBuf<'_>,
+    ) -> Poll<io::Result<()>> {
+        let this = self.get_mut();
+        if let Err(error) = this.check() {
+            return Poll::Ready(Err(error));
+        }
+        Pin::new(&mut this.inner).poll_read(cx, buf)
+    }
+}
+
+impl<T: AsyncWrite + Unpin> AsyncWrite for AuthorityIo<T> {
+    fn poll_write(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &[u8],
+    ) -> Poll<io::Result<usize>> {
+        let this = self.get_mut();
+        if let Err(error) = this.check() {
+            return Poll::Ready(Err(error));
+        }
+        Pin::new(&mut this.inner).poll_write(cx, buf)
+    }
+
+    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        let this = self.get_mut();
+        if let Err(error) = this.check() {
+            return Poll::Ready(Err(error));
+        }
+        Pin::new(&mut this.inner).poll_flush(cx)
+    }
+
+    fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        let this = self.get_mut();
+        if let Err(error) = this.check() {
+            return Poll::Ready(Err(error));
+        }
+        Pin::new(&mut this.inner).poll_shutdown(cx)
+    }
 }
 
 /// Options for spawn/exec.
@@ -120,12 +190,13 @@ pub struct ChildProcess {
     exit_notify: Arc<Notify>,
     exited: Arc<AtomicBool>,
     killed: Arc<AtomicBool>,
+    authority: Option<Arc<dyn ProcessAuthority>>,
     #[cfg(windows)]
     kill_tx: Option<mpsc::Sender<ChildCommand>>,
 }
 
 impl ChildProcess {
-    pub fn new() -> Self {
+    fn new(authority: Option<Arc<dyn ProcessAuthority>>) -> Self {
         Self {
             events: EventEmitter::new(),
             pid: None,
@@ -133,9 +204,21 @@ impl ChildProcess {
             exit_notify: Arc::new(Notify::new()),
             exited: Arc::new(AtomicBool::new(false)),
             killed: Arc::new(AtomicBool::new(false)),
+            authority,
             #[cfg(windows)]
             kill_tx: None,
         }
+    }
+
+    fn authorize(&self) -> JSResult<()> {
+        if let Some(authority) = &self.authority {
+            authorize_process_with(authority.as_ref())?;
+        }
+        Ok(())
+    }
+
+    fn exit_code_unchecked(&self) -> Option<i32> {
+        self.exit_code.lock().ok().and_then(|g| *g)
     }
 }
 
@@ -147,41 +230,52 @@ impl ChildProcess {
     }
 
     #[js_method(getter)]
-    fn pid(&self) -> Option<u32> {
-        self.pid
+    fn pid(&self) -> JSResult<Option<u32>> {
+        self.authorize()?;
+        Ok(self.pid)
     }
 
     #[js_method(getter, rename = "exitCode")]
-    fn exit_code(&self) -> Option<i32> {
-        self.exit_code.lock().ok().and_then(|g| *g)
+    fn exit_code(&self) -> JSResult<Option<i32>> {
+        self.authorize()?;
+        Ok(self.exit_code_unchecked())
     }
 
     #[js_method(getter)]
-    fn killed(&self) -> bool {
-        self.killed.load(Ordering::SeqCst)
+    fn killed(&self) -> JSResult<bool> {
+        self.authorize()?;
+        Ok(self.killed.load(Ordering::SeqCst))
     }
 
     #[js_method(getter, rename = "signalCode")]
-    fn signal_code(&self) -> Option<i32> {
-        None
+    fn signal_code(&self) -> JSResult<Option<i32>> {
+        self.authorize()?;
+        Ok(None)
     }
 
     #[js_method(getter)]
-    fn success(&self) -> bool {
-        self.exit_code() == Some(0)
+    fn success(&self) -> JSResult<bool> {
+        self.authorize()?;
+        Ok(self.exit_code_unchecked() == Some(0))
     }
 
     #[js_method(getter)]
     fn exited(&self, ctx: JSContext) -> JSResult<Promise> {
+        self.authorize()?;
         let this = self.clone();
-        Promise::from_future(&ctx, None, async move { this.wait().await })
+        Promise::from_future(&ctx, None, async move { this.wait_authorized().await })
     }
 
     /// Kill the child process with optional signal.
     /// Supported signals: SIGTERM (default), SIGKILL, SIGINT, SIGHUP, SIGUSR1, SIGUSR2
     /// Returns true if the signal was sent successfully.
     #[js_method]
-    pub(crate) fn kill(&self, signal: Optional<String>) -> bool {
+    pub(crate) fn kill(&self, signal: Optional<String>) -> JSResult<bool> {
+        self.authorize()?;
+        Ok(self.kill_unchecked(signal))
+    }
+
+    pub(crate) fn kill_unchecked(&self, signal: Optional<String>) -> bool {
         let Some(pid) = self.pid else {
             return false;
         };
@@ -245,19 +339,36 @@ impl ChildProcess {
 
     /// Wait for the process to exit and return the exit code.
     #[js_method]
-    pub(crate) async fn wait(&self) -> JSResult<Option<i32>> {
+    pub(crate) async fn wait_authorized(&self) -> JSResult<Option<i32>> {
         loop {
             let notified = self.exit_notify.notified();
             if self.exited.load(Ordering::SeqCst) {
                 break;
             }
-            notified.await;
+            if let Some(authority) = &self.authority {
+                tokio::select! {
+                    _ = notified => {}
+                    _ = crate::wait_for_process_revocation(Arc::clone(authority)) => {
+                        self.authorize()?;
+                    }
+                }
+            } else {
+                notified.await;
+            }
         }
-        Ok(self.exit_code.lock().ok().and_then(|g| *g))
+        self.authorize()?;
+        Ok(self.exit_code_unchecked())
     }
 
     #[js_method]
-    fn unref(&self) {}
+    async fn wait(&self) -> JSResult<Option<i32>> {
+        self.wait_authorized().await
+    }
+
+    #[js_method]
+    fn unref(&self) -> JSResult<()> {
+        self.authorize()
+    }
 
     #[js_method(gc_mark)]
     fn gc_mark_with<F>(&self, mark_fn: F)
@@ -270,7 +381,7 @@ impl ChildProcess {
 
 impl Default for ChildProcess {
     fn default() -> Self {
-        Self::new()
+        Self::new(None)
     }
 }
 
@@ -424,6 +535,7 @@ fn build_command(
     cmd.stdout(std::process::Stdio::piped());
     cmd.stderr(std::process::Stdio::piped());
     cmd.kill_on_drop(true);
+    configure_timeout_process_group(&mut cmd);
 
     cmd
 }
@@ -471,8 +583,45 @@ fn kill_child_process_group(pid: u32) {
     }
 }
 
+fn kill_process_tree_by_pid(pid: u32) {
+    #[cfg(unix)]
+    kill_child_process_group(pid);
+
+    #[cfg(windows)]
+    {
+        let _ = std::process::Command::new("taskkill.exe")
+            .args(["/PID", &pid.to_string(), "/T", "/F"])
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status();
+    }
+}
+
+struct ProcessTreeLease {
+    pid: Option<u32>,
+}
+
+impl ProcessTreeLease {
+    fn new(pid: Option<u32>) -> Self {
+        Self { pid }
+    }
+
+    fn disarm(&mut self) {
+        self.pid = None;
+    }
+}
+
+impl Drop for ProcessTreeLease {
+    fn drop(&mut self) {
+        if let Some(pid) = self.pid {
+            kill_process_tree_by_pid(pid);
+        }
+    }
+}
+
 #[cfg(windows)]
-async fn terminate_child_process(child: &mut Child) {
+async fn terminate_child_process_tree(child: &mut Child) {
     // `cmd /C` can outlive its direct child on timeout unless we terminate the tree.
     let terminated_tree = if let Some(pid) = child.id() {
         Command::new("taskkill.exe")
@@ -490,6 +639,16 @@ async fn terminate_child_process(child: &mut Child) {
 
     if !terminated_tree {
         let _ = child.start_kill();
+    }
+}
+
+#[cfg(not(windows))]
+async fn terminate_child_process_tree(child: &mut Child) {
+    let pid = child.id();
+    let _ = child.start_kill();
+    #[cfg(unix)]
+    if let Some(pid) = pid {
+        kill_child_process_group(pid);
     }
 }
 
@@ -511,41 +670,45 @@ async fn read_all(
 async fn run_command_with_output(
     mut child: Child,
     timeout: Option<u64>,
+    authority: Option<Arc<dyn ProcessAuthority>>,
 ) -> JSResult<(std::process::ExitStatus, Vec<u8>, Vec<u8>)> {
-    #[cfg(not(windows))]
-    let child_pid = child.id();
+    let mut process_lease = ProcessTreeLease::new(child.id());
     let stdout = child.stdout.take();
     let stderr = child.stderr.take();
 
     let stdout_task = tokio::task::spawn_local(async move { read_all(stdout).await });
     let stderr_task = tokio::task::spawn_local(async move { read_all(stderr).await });
 
-    let status = if let Some(timeout_ms) = timeout {
-        match tokio::time::timeout(Duration::from_millis(timeout_ms), child.wait()).await {
-            Ok(res) => res.map_err(|e| HostError::new(rong::error::E_IO, e.to_string()))?,
-            Err(_) => {
-                #[cfg(windows)]
-                terminate_child_process(&mut child).await;
-
-                #[cfg(not(windows))]
-                {
-                    let _ = child.start_kill();
-                    if let Some(pid) = child_pid {
-                        kill_child_process_group(pid);
-                    }
-                }
-                let _ = child.wait().await;
-                let _ = stdout_task.await;
-                let _ = stderr_task.await;
-                return Err(HostError::new(rong::error::E_TIMEOUT, "Command timed out").into());
-            }
+    let started = Instant::now();
+    let status = loop {
+        if let Some(authority) = &authority
+            && let Err(message) = authority.authorize()
+        {
+            terminate_child_process_tree(&mut child).await;
+            let _ = child.wait().await;
+            process_lease.disarm();
+            let _ = stdout_task.await;
+            let _ = stderr_task.await;
+            return Err(HostError::new(rong::error::E_PERMISSION_DENIED, message).into());
         }
-    } else {
-        child
-            .wait()
-            .await
+        if timeout.is_some_and(|timeout_ms| started.elapsed() >= Duration::from_millis(timeout_ms))
+        {
+            terminate_child_process_tree(&mut child).await;
+            let _ = child.wait().await;
+            process_lease.disarm();
+            let _ = stdout_task.await;
+            let _ = stderr_task.await;
+            return Err(HostError::new(rong::error::E_TIMEOUT, "Command timed out").into());
+        }
+        if let Some(status) = child
+            .try_wait()
             .map_err(|e| HostError::new(rong::error::E_IO, e.to_string()))?
+        {
+            break status;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
     };
+    process_lease.disarm();
 
     let stdout_bytes = stdout_task
         .await
@@ -567,6 +730,8 @@ pub(crate) fn spawn_native(
     args: Optional<JSValue>,
     options: Optional<JSObject>,
 ) -> JSResult<JSObject> {
+    authorize_process(&ctx)?;
+    let authority = process_authority(&ctx);
     let args_vec = parse_args(&args)?;
 
     let mut opts = if let Some(ref opts_obj) = options.0 {
@@ -596,7 +761,7 @@ pub(crate) fn spawn_native(
     let task_registry = ChildProcessTaskRegistry::ensure(&ctx);
 
     // Create ChildProcess instance
-    let mut child_process = ChildProcess::new();
+    let mut child_process = ChildProcess::new(authority.clone());
     child_process.pid = pid;
     let exit_events = child_process.events.clone();
 
@@ -620,7 +785,8 @@ pub(crate) fn spawn_native(
 
     // Create WritableStream for stdin
     if let Some(stdin) = stdin_writer {
-        let stdin_stream = JSWritableStream::from_async_writer(&ctx, stdin)?;
+        let stdin_stream =
+            JSWritableStream::from_async_writer(&ctx, AuthorityIo::new(stdin, authority.clone()))?;
         child_obj.set("stdin", stdin_stream.into_object())?;
     } else {
         child_obj.set("stdin", JSValue::null(&ctx))?;
@@ -628,7 +794,11 @@ pub(crate) fn spawn_native(
 
     // Create ReadableStream for stdout
     if let Some(stdout) = stdout_reader {
-        let stdout_stream = JSReadableStream::from_async_reader(&ctx, stdout, STREAM_CHUNK_SIZE)?;
+        let stdout_stream = JSReadableStream::from_async_reader(
+            &ctx,
+            AuthorityIo::new(stdout, authority.clone()),
+            STREAM_CHUNK_SIZE,
+        )?;
         child_obj.set("stdout", stdout_stream.into_object())?;
     } else {
         child_obj.set("stdout", JSValue::null(&ctx))?;
@@ -636,7 +806,11 @@ pub(crate) fn spawn_native(
 
     // Create ReadableStream for stderr
     if let Some(stderr) = stderr_reader {
-        let stderr_stream = JSReadableStream::from_async_reader(&ctx, stderr, STREAM_CHUNK_SIZE)?;
+        let stderr_stream = JSReadableStream::from_async_reader(
+            &ctx,
+            AuthorityIo::new(stderr, authority.clone()),
+            STREAM_CHUNK_SIZE,
+        )?;
         child_obj.set("stderr", stderr_stream.into_object())?;
     } else {
         child_obj.set("stderr", JSValue::null(&ctx))?;
@@ -647,6 +821,7 @@ pub(crate) fn spawn_native(
     let child_obj_for_exit = child_obj.clone();
 
     let wait_task = rong::spawn_local(async move {
+        let mut process_lease = ProcessTreeLease::new(pid);
         let emit_exit = |code: Option<i32>| {
             if let Ok(mut ec) = exit_code.lock() {
                 *ec = code;
@@ -670,95 +845,35 @@ pub(crate) fn spawn_native(
             );
         };
 
-        #[cfg(windows)]
-        {
-            if let Some(timeout_ms) = timeout {
-                let sleep = tokio::time::sleep(Duration::from_millis(timeout_ms));
-                tokio::pin!(sleep);
+        let started = Instant::now();
+        loop {
+            let revoked = authority
+                .as_ref()
+                .is_some_and(|authority| authority.authorize().is_err());
+            let timed_out = timeout
+                .is_some_and(|timeout_ms| started.elapsed() >= Duration::from_millis(timeout_ms));
+            #[cfg(windows)]
+            let requested_kill = matches!(kill_rx.try_recv(), Ok(ChildCommand::Kill));
+            #[cfg(not(windows))]
+            let requested_kill = false;
 
-                loop {
-                    tokio::select! {
-                        status = child.wait() => {
-                            let code = status.ok().and_then(|s| s.code());
-                            emit_exit(code);
-                            break;
-                        }
-                        _ = &mut sleep => {
-                            killed.store(true, Ordering::SeqCst);
-                            terminate_child_process(&mut child).await;
-                            let status = child.wait().await;
-                            let code = status.ok().and_then(|s| s.code());
-                            emit_exit(code);
-                            break;
-                        }
-                        cmd = kill_rx.recv() => {
-                            match cmd {
-                                Some(ChildCommand::Kill) => {
-                                    terminate_child_process(&mut child).await;
-                                }
-                                None => {
-                                    break;
-                                }
-                            }
-                        }
-                    }
-                }
-            } else {
-                loop {
-                    tokio::select! {
-                        status = child.wait() => {
-                            let code = status.ok().and_then(|s| s.code());
-                            emit_exit(code);
-                            break;
-                        }
-                        cmd = kill_rx.recv() => {
-                            match cmd {
-                                Some(ChildCommand::Kill) => {
-                                    terminate_child_process(&mut child).await;
-                                }
-                                None => {
-                                    break;
-                                }
-                            }
-                        }
-                    }
-                }
+            if revoked || timed_out || requested_kill {
+                killed.store(true, Ordering::SeqCst);
+                terminate_child_process_tree(&mut child).await;
             }
-
-            if !exited.load(Ordering::SeqCst) {
-                let status = child.wait().await;
-                let code = status.ok().and_then(|s| s.code());
-                emit_exit(code);
-            }
-        }
-
-        #[cfg(not(windows))]
-        {
-            if let Some(timeout_ms) = timeout {
-                let sleep = tokio::time::sleep(Duration::from_millis(timeout_ms));
-                tokio::pin!(sleep);
-
-                tokio::select! {
-                    status = child.wait() => {
-                        let code = status.ok().and_then(|s| s.code());
-                        emit_exit(code);
-                    }
-                    _ = &mut sleep => {
-                        killed.store(true, Ordering::SeqCst);
-                        let _ = child.start_kill();
-                        if let Some(pid) = pid {
-                            kill_child_process_group(pid);
-                        }
-                        let status = child.wait().await;
-                        let code = status.ok().and_then(|s| s.code());
-                        emit_exit(code);
-                    }
+            match child.try_wait() {
+                Ok(Some(status)) => {
+                    process_lease.disarm();
+                    emit_exit(status.code());
+                    break;
                 }
-            } else {
-                let status = child.wait().await;
-                let code = status.ok().and_then(|s| s.code());
-                emit_exit(code);
+                Err(_) => {
+                    emit_exit(None);
+                    break;
+                }
+                Ok(None) => {}
             }
+            tokio::time::sleep(Duration::from_millis(10)).await;
         }
     });
     task_registry.track(wait_task);
@@ -772,6 +887,8 @@ pub(crate) fn exec_native(
     command: String,
     options: Optional<JSObject>,
 ) -> JSResult<Promise> {
+    authorize_process(&ctx)?;
+    let authority = process_authority(&ctx);
     let mut opts = if let Some(ref opts_obj) = options.0 {
         SpawnOptions::from_js_object(&ctx, opts_obj)?
     } else {
@@ -813,9 +930,7 @@ pub(crate) fn exec_native(
             }
         }
 
-        if timeout.is_some() {
-            configure_timeout_process_group(&mut cmd);
-        }
+        configure_timeout_process_group(&mut cmd);
 
         cmd.stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
@@ -824,7 +939,7 @@ pub(crate) fn exec_native(
         let child = cmd
             .spawn()
             .map_err(|e| HostError::new(rong::error::E_IO, e.to_string()))?;
-        let (status, stdout, stderr) = run_command_with_output(child, timeout).await?;
+        let (status, stdout, stderr) = run_command_with_output(child, timeout, authority).await?;
 
         Ok(ExecResult {
             stdout: String::from_utf8_lossy(&stdout).to_string(),
@@ -844,4 +959,55 @@ pub fn init(ctx: &JSContext) -> JSResult<()> {
     ChildProcess::add_node_event_target_prototype(ctx)?;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod authority_tests {
+    use super::*;
+    use std::sync::atomic::AtomicBool;
+
+    struct RevocableAuthority(AtomicBool);
+
+    impl ProcessAuthority for RevocableAuthority {
+        fn authorize(&self) -> Result<(), String> {
+            self.0
+                .load(Ordering::SeqCst)
+                .then_some(())
+                .ok_or_else(|| "process session revoked".to_string())
+        }
+    }
+
+    #[test]
+    fn retained_child_handle_rechecks_its_bound_authority() {
+        let authority = Arc::new(RevocableAuthority(AtomicBool::new(true)));
+        let child = ChildProcess::new(Some(authority.clone()));
+        assert!(child.authorize().is_ok());
+        authority.0.store(false, Ordering::SeqCst);
+        assert!(child.authorize().is_err());
+
+        let successor = Arc::new(RevocableAuthority(AtomicBool::new(true)));
+        let successor_child = ChildProcess::new(Some(successor));
+        assert!(successor_child.authorize().is_ok());
+        assert!(child.authorize().is_err());
+    }
+
+    #[cfg(unix)]
+    #[tokio::test(flavor = "current_thread")]
+    async fn revocation_terminates_an_async_child() {
+        let authority = Arc::new(RevocableAuthority(AtomicBool::new(true)));
+        let args = vec!["-c".to_string(), "sleep 30".to_string()];
+        let mut command = build_command("sh", &args, &SpawnOptions::default(), false);
+        let child = command.spawn().expect("spawn test child");
+        let authority_for_revoke = authority.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(30));
+            authority_for_revoke.0.store(false, Ordering::SeqCst);
+        });
+
+        let local = tokio::task::LocalSet::new();
+        let result = local
+            .run_until(run_command_with_output(child, None, Some(authority)))
+            .await;
+        assert!(result.is_err());
+    }
 }

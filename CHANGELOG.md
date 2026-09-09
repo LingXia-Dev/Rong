@@ -6,6 +6,16 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 
 ## [Unreleased]
 
+### Command execution authority
+
+- `rong_command` can seal a per-context `ProcessAuthority`. Embedders bind
+  `Rong.spawn` / `spawnSync` / `$` to a live host grant through
+  `init_with_authority`. The authority is checked before parameters are decoded,
+  on every retained child or shell handle, and while children run. Revocation
+  terminates the process tree. `init()` stays unrestricted for simple embeddings
+  and `rong_modules`. A second `init_with_authority` on the same context is
+  rejected.
+
 ### Storage
 
 - `Storage.has(key)` reports whether an exact key exists without reading or

@@ -2,6 +2,19 @@
 
 Command execution APIs exposed on `globalThis.Rong`.
 
+## Host process authority
+
+`rong_command::init` installs these APIs unrestricted. Embedders that must bind
+subprocess execution to a live session grant should call
+`rong_command::init_with_authority` with a `ProcessAuthority` instead.
+
+The authority is stored as a sealed context service. JavaScript cannot install
+or replace it. Rong checks it before decoding spawn/shell parameters, on every
+retained child handle, and while synchronous or asynchronous children run. A
+failing `authorize` returns `E_PERMISSION_DENIED` and terminates the child
+process tree. Calling `init_with_authority` twice on the same context returns
+`E_ALREADY_EXISTS`.
+
 ## `Rong.env`
 
 `Rong.env` is the mutable environment object exposed on `Rong`.

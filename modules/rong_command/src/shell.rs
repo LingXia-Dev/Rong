@@ -1,4 +1,4 @@
-use crate::{child_process, io, sync_process};
+use crate::{authorize_process, child_process, io, sync_process};
 use rong::function::{Optional, Rest};
 use rong::*;
 use rong_abort::AbortSignal;
@@ -623,6 +623,7 @@ fn spawn(
     cmd_or_options: JSValue,
     options: Optional<JSObject>,
 ) -> JSResult<JSObject> {
+    authorize_process(&ctx)?;
     let normalized = parse_spawn_options(cmd_or_options, options)?;
     let native_options = build_native_spawn_options(&ctx, &normalized)?;
     let args = vec_to_js_array(&ctx, &normalized.cmd[1..])?;
@@ -723,7 +724,7 @@ fn spawn(
                     .await;
                 return;
             };
-            let wait_result = proc.wait().await;
+            let wait_result = proc.wait_authorized().await;
             match wait_result {
                 Ok(code) => {
                     let _ = on_exit
@@ -764,6 +765,7 @@ fn spawn_sync(
     cmd_or_options: JSValue,
     options: Optional<JSObject>,
 ) -> JSResult<JSObject> {
+    authorize_process(&ctx)?;
     let normalized = parse_spawn_options(cmd_or_options, options)?;
     let native = JSObject::new(&ctx);
     native.set("cmd", vec_to_js_array(&ctx, &normalized.cmd)?)?;
@@ -881,6 +883,7 @@ fn shell_defaults_snapshot(ctx: &JSContext) -> ShellDefaults {
 }
 
 fn shell_default_cwd(ctx: JSContext, path: Optional<String>) -> JSResult<JSValue> {
+    authorize_process(&ctx)?;
     let mut state = ShellDefaults::ensure(&ctx);
     if let Some(path) = path.0 {
         state.cwd = Some(path);
@@ -894,6 +897,7 @@ fn shell_default_cwd(ctx: JSContext, path: Optional<String>) -> JSResult<JSValue
 }
 
 fn shell_default_env(ctx: JSContext, env: Optional<JSObject>) -> JSResult<JSValue> {
+    authorize_process(&ctx)?;
     let mut state = ShellDefaults::ensure(&ctx);
     if let Some(env_obj) = env.0 {
         state.env = Some(normalize_env_map(&env_obj)?);
@@ -912,6 +916,7 @@ fn shell_default_env(ctx: JSContext, env: Optional<JSObject>) -> JSResult<JSValu
 }
 
 fn shell_default_throws(ctx: JSContext, value: Optional<bool>) -> JSResult<JSObject> {
+    authorize_process(&ctx)?;
     let mut state = ShellDefaults::ensure(&ctx);
     state.throws = value.0.unwrap_or(true);
     ctx.set_service(state);
@@ -919,6 +924,7 @@ fn shell_default_throws(ctx: JSContext, value: Optional<bool>) -> JSResult<JSObj
 }
 
 fn shell_default_nothrow(ctx: JSContext) -> JSResult<JSObject> {
+    authorize_process(&ctx)?;
     let mut state = ShellDefaults::ensure(&ctx);
     state.throws = false;
     ctx.set_service(state);
@@ -926,17 +932,20 @@ fn shell_default_nothrow(ctx: JSContext) -> JSResult<JSObject> {
 }
 
 fn shell_default_quiet(ctx: JSContext) -> JSResult<JSObject> {
+    authorize_process(&ctx)?;
     let mut state = ShellDefaults::ensure(&ctx);
     state.quiet = true;
     ctx.set_service(state);
     ctx.host_namespace().get("$")
 }
 
-fn shell_escape(value: JSValue) -> JSResult<String> {
+fn shell_escape(ctx: JSContext, value: JSValue) -> JSResult<String> {
+    authorize_process(&ctx)?;
     shell_escape_value(value)
 }
 
 fn shell_tag(ctx: JSContext, first: JSValue, rest: Rest<JSValue>) -> JSResult<ShellCommand> {
+    authorize_process(&ctx)?;
     let command = if let Some(obj) = first.clone().into_object() {
         if let Some(array) = JSArray::from_object(obj) {
             compose_shell_command(array, rest)?
@@ -967,6 +976,7 @@ fn shell_result_to_object(ctx: &JSContext, data: ShellResultData) -> JSResult<JS
 
 impl ShellCommand {
     async fn run_internal(&self, ctx: JSContext) -> JSResult<ShellResultData> {
+        authorize_process(&ctx)?;
         let options = JSObject::new(&ctx);
         let mut has_options = false;
         if let Some(cwd) = &self.cwd {
@@ -1117,30 +1127,35 @@ impl ShellCommand {
     }
 
     #[js_method]
-    fn cwd(&self, path: String) -> Self {
-        self.with_overrides(Some(Some(path)), None, None, None)
+    fn cwd(&self, ctx: JSContext, path: String) -> JSResult<Self> {
+        authorize_process(&ctx)?;
+        Ok(self.with_overrides(Some(Some(path)), None, None, None))
     }
 
     #[js_method]
-    fn env(&self, values: JSObject) -> JSResult<Self> {
+    fn env(&self, ctx: JSContext, values: JSObject) -> JSResult<Self> {
+        authorize_process(&ctx)?;
         let mut next = self.env.clone().unwrap_or_default();
         next.extend(normalize_env_map(&values)?);
         Ok(self.with_overrides(None, Some(next), None, None))
     }
 
     #[js_method]
-    fn quiet(&self) -> Self {
-        self.with_overrides(None, None, None, Some(true))
+    fn quiet(&self, ctx: JSContext) -> JSResult<Self> {
+        authorize_process(&ctx)?;
+        Ok(self.with_overrides(None, None, None, Some(true)))
     }
 
     #[js_method]
-    fn nothrow(&self) -> Self {
-        self.with_overrides(None, None, Some(false), None)
+    fn nothrow(&self, ctx: JSContext) -> JSResult<Self> {
+        authorize_process(&ctx)?;
+        Ok(self.with_overrides(None, None, Some(false), None))
     }
 
     #[js_method]
-    fn throws(&self, value: Optional<bool>) -> Self {
-        self.with_overrides(None, None, Some(value.0.unwrap_or(true)), None)
+    fn throws(&self, ctx: JSContext, value: Optional<bool>) -> JSResult<Self> {
+        authorize_process(&ctx)?;
+        Ok(self.with_overrides(None, None, Some(value.0.unwrap_or(true)), None))
     }
 
     #[js_method]

@@ -70,6 +70,13 @@ initialization. Repeated registry initialization skips modules already installed
 through the registry in that context. Use `init_all` only when the host policy
 intentionally exposes every compiled module.
 
+When the host must gate `Rong.spawn` / `spawnSync` / `$` on a live session
+grant, do not rely on `rong_modules`'s `"command"` entry (`rong_command::init`
+is unrestricted). Initialize the rest of the module set without `"command"`,
+then call `rong_command::init_with_authority` with a `ProcessAuthority` that
+rechecks the grant on every operation. A second installer on the same context
+is rejected; revocation terminates in-flight children.
+
 ## Configure the host executor only when needed
 
 Rong services and worker pools use the process-global `RongExecutor`, creating a
