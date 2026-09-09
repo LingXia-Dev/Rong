@@ -6,7 +6,28 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 
 ## [Unreleased]
 
-### Command execution authority
+### CI
+
+- Host verification batches `cargo test` (core integration tests, module
+  crates, then isolated `rong_timer`) instead of one invocation per file or
+  crate, and Unix core tests reuse the clippy dev profile instead of a
+  second `--release` compile.
+- Pull requests skip the macOS Intel `jscore-source` consumer; `master` and
+  manual dispatch still run it. macOS jobs prefer Xcode libclang over
+  Homebrew LLVM when present.
+
+## [0.6.1] - 2026-09-09
+
+Independent crate releases: `rong_rt` 0.6.1, `rong_command` 0.6.1, and
+`rong_storage` 0.6.1.
+
+### Runtime
+
+- `rong_rt` validates resolved socket addresses before connect, so a hostname
+  cannot pass the URI policy and then resolve to a forbidden IP when the
+  connector opens the socket.
+
+### Command
 
 - `rong_command` can seal a per-context `ProcessAuthority`. Embedders bind
   `Rong.spawn` / `spawnSync` / `$` to a live host grant through
@@ -21,16 +42,6 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 - `Storage.has(key)` reports whether an exact key exists without reading or
   deserializing the stored value. Prefix neighbors such as `foo` and `foobar`
   are distinct.
-
-### CI
-
-- Host verification batches `cargo test` (core integration tests, module
-  crates, then isolated `rong_timer`) instead of one invocation per file or
-  crate, and Unix core tests reuse the clippy dev profile instead of a
-  second `--release` compile.
-- Pull requests skip the macOS Intel `jscore-source` consumer; `master` and
-  manual dispatch still run it. macOS jobs prefer Xcode libclang over
-  Homebrew LLVM when present.
 
 ## [0.6.0] - 2026-07-19
 
