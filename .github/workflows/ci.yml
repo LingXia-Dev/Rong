@@ -356,21 +356,12 @@ jobs:
 
   jscore-source-test:
     needs: [scope, fmt]
-    if: needs.scope.outputs.rust == 'true' && (matrix.full != 'true' || github.event_name != 'pull_request')
+    if: needs.scope.outputs.rust == 'true'
     name: jscore-source-${{ matrix.target }} (${{ matrix.os }})
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - os: macos-15
-            target: aarch64-apple-darwin
-          - os: macos-15-intel
-            target: x86_64-apple-darwin
-            full: "true"
-          - os: ubuntu-24.04
-            target: x86_64-unknown-linux-gnu
-          - os: windows-2025-vs2026
-            target: x86_64-pc-windows-msvc
+        include: ${{ github.event_name != 'pull_request' && fromJSON('[{"os":"macos-15","target":"aarch64-apple-darwin"},{"os":"macos-15-intel","target":"x86_64-apple-darwin"},{"os":"ubuntu-24.04","target":"x86_64-unknown-linux-gnu"},{"os":"windows-2025-vs2026","target":"x86_64-pc-windows-msvc"}]') || fromJSON('[{"os":"macos-15","target":"aarch64-apple-darwin"},{"os":"ubuntu-24.04","target":"x86_64-unknown-linux-gnu"},{"os":"windows-2025-vs2026","target":"x86_64-pc-windows-msvc"}]') }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     env:
