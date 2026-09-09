@@ -1,3 +1,4 @@
+use crate::{authorize_process, process_authority};
 use rong::{
     AnyJSTypedArray, HostError, JSArray, JSArrayBuffer, JSContext, JSObject, JSResult, JSValue,
 };
@@ -282,7 +283,62 @@ fn build_sync_command(options: &SpawnSyncOptions) -> Command {
         StreamMode::Inherit => Stdio::inherit(),
     });
 
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        command.process_group(0);
+    }
+
     command
+}
+
+fn kill_sync_process_tree(child: &mut std::process::Child) {
+    #[cfg(unix)]
+    unsafe {
+        let _ = libc::kill(-(child.id() as i32), libc::SIGKILL);
+    }
+    #[cfg(windows)]
+    {
+        let _ = Command::new("taskkill.exe")
+            .args(["/PID", &child.id().to_string(), "/T", "/F"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+    }
+    let _ = child.kill();
+}
+
+fn wait_for_sync_child(
+    child: &mut std::process::Child,
+    timeout: Option<Duration>,
+    authority: Option<&dyn crate::ProcessAuthority>,
+) -> JSResult<std::process::ExitStatus> {
+    let start = Instant::now();
+    loop {
+        if let Some(authority) = authority
+            && let Err(message) = authority.authorize()
+        {
+            kill_sync_process_tree(child);
+            let _ = child.wait();
+            return Err(HostError::new(rong::error::E_PERMISSION_DENIED, message).into());
+        }
+        match child
+            .try_wait()
+            .map_err(|err| HostError::new(rong::error::E_IO, err.to_string()))?
+        {
+            Some(status) => return Ok(status),
+            None => {
+                if timeout.is_some_and(|timeout| start.elapsed() >= timeout) {
+                    kill_sync_process_tree(child);
+                    return child
+                        .wait()
+                        .map_err(|err| HostError::new(rong::error::E_IO, err.to_string()).into());
+                }
+                thread::sleep(Duration::from_millis(10));
+            }
+        }
+    }
 }
 
 fn read_pipe_to_end<T>(pipe: Option<T>) -> thread::JoinHandle<Vec<u8>>
@@ -314,6 +370,8 @@ fn build_spawn_sync_result(
 }
 
 pub(crate) fn spawn_sync_native(ctx: JSContext, options: JSObject) -> JSResult<JSObject> {
+    authorize_process(&ctx)?;
+    let authority = process_authority(&ctx);
     let options = SpawnSyncOptions::from_js_object(&options)?;
     let mut command = build_sync_command(&options);
     let mut child = command
@@ -331,34 +389,15 @@ pub(crate) fn spawn_sync_native(ctx: JSContext, options: JSObject) -> JSResult<J
     let stdout_task = read_pipe_to_end(child.stdout.take());
     let stderr_task = read_pipe_to_end(child.stderr.take());
 
-    let timeout = options.timeout.map(Duration::from_millis);
-    let start = Instant::now();
-    let status = loop {
-        match child
-            .try_wait()
-            .map_err(|err| HostError::new(rong::error::E_IO, err.to_string()))?
-        {
-            Some(status) => break status,
-            None => {
-                if let Some(timeout) = timeout
-                    && start.elapsed() >= timeout
-                {
-                    let _ = child.kill();
-                    let status = child
-                        .wait()
-                        .map_err(|err| HostError::new(rong::error::E_IO, err.to_string()))?;
-                    let stdout = stdout_task.join().unwrap_or_default();
-                    let stderr = stderr_task.join().unwrap_or_default();
-                    return build_spawn_sync_result(&ctx, status.code(), stdout, stderr);
-                }
-
-                thread::sleep(Duration::from_millis(10));
-            }
-        }
-    };
+    let status = wait_for_sync_child(
+        &mut child,
+        options.timeout.map(Duration::from_millis),
+        authority.as_deref(),
+    );
 
     let stdout = stdout_task.join().unwrap_or_default();
     let stderr = stderr_task.join().unwrap_or_default();
+    let status = status?;
 
     build_spawn_sync_result(&ctx, status.code(), stdout, stderr)
 }
@@ -366,4 +405,43 @@ pub(crate) fn spawn_sync_native(ctx: JSContext, options: JSObject) -> JSResult<J
 pub fn init(ctx: &JSContext) -> JSResult<()> {
     let _ = ctx;
     Ok(())
+}
+
+#[cfg(all(test, unix))]
+mod authority_tests {
+    use super::*;
+    use crate::ProcessAuthority;
+    use std::sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    };
+
+    struct RevocableAuthority(AtomicBool);
+
+    impl ProcessAuthority for RevocableAuthority {
+        fn authorize(&self) -> Result<(), String> {
+            self.0
+                .load(Ordering::SeqCst)
+                .then_some(())
+                .ok_or_else(|| "process session revoked".to_string())
+        }
+    }
+
+    #[test]
+    fn revocation_terminates_a_synchronous_child() {
+        let authority = Arc::new(RevocableAuthority(AtomicBool::new(true)));
+        let mut options = SpawnSyncOptions::default();
+        options.cmd = vec!["sh".to_string(), "-c".to_string(), "sleep 30".to_string()];
+        let mut child = build_sync_command(&options)
+            .spawn()
+            .expect("spawn test child");
+        let authority_for_revoke = authority.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(30));
+            authority_for_revoke.0.store(false, Ordering::SeqCst);
+        });
+
+        let result = wait_for_sync_child(&mut child, None, Some(authority.as_ref()));
+        assert!(result.is_err());
+    }
 }
