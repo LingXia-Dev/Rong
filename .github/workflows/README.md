@@ -12,13 +12,20 @@
   because `UnitJSRunner` embeds that runtime. Workflow and local
   action changes run every scope so CI validates changes to itself. Manual
   `workflow_dispatch` also runs all scopes.
-- **Runs:** for Rust/source changes, `cargo fmt` runs once, then each host
-  matrix job runs `clippy` and `test` in the same workspace so setup and build
-  artifacts are reused. A separate lightweight QuickJS check runs on the
-  workspace MSRV:
+- **Runs:** for Rust/source changes, `cargo fmt` runs once (without the
+  QuickJS-NG submodule), then each host matrix job runs `clippy` and `test`
+  in the same workspace so setup and build artifacts are reused. Tests are
+  batched into a few `cargo test` invocations (core integration tests, then
+  module crates, with `rong_timer` isolated) instead of one invocation per
+  file or crate. A separate lightweight QuickJS check runs on the workspace
+  MSRV:
   - `quickjs` on Windows, Linux, and macOS
   - `jscore` on macOS using the system `JavaScriptCore.framework`
-  - `jscore-source-*` on currently pinned macOS Intel, macOS arm64, Linux, and Windows targets, gated by pinned prebuilt artifact rows in `javascriptcore/sys/webkit-artifacts.tsv`
+  - `jscore-source-*` on currently pinned macOS arm64, Linux, and Windows
+    targets. The macOS Intel source consumer runs on `master` and
+    `workflow_dispatch`, not on pull requests (scarce/slow runner). All
+    source jobs are gated by pinned prebuilt artifact rows in
+    `javascriptcore/sys/webkit-artifacts.tsv`
 - **npm packaging:** builds the Rong type package, validates `docs/skills` +
   `docs/api` can generate self-contained installable skills through
   `packages/skill/bin/pack.mjs`, and tests/dry-packs `@rongjs/test`. TypeScript
@@ -26,6 +33,10 @@
   disabled; the workflow runs the intended build exactly once.
 - **Source backend behavior:** `jscore-source-*` is the production-style prebuilt consumer path. It downloads and caches the pinned artifact through `rong_jscore_sys/build.rs`; if no row exists for a supported target, CI fails instead of silently skipping.
 - **Steps:** `cargo fmt --check` plus `cargo make clippy-engine` and `cargo make test-engine`. Clippy performs the same complete type-check, so a separate host `cargo check` would duplicate compilation without increasing target coverage.
+- **Compile settings:** host jobs set `CARGO_INCREMENTAL=0` and
+  `CARGO_PROFILE_{DEV,TEST}_DEBUG=line-tables-only` so rust-cache restores
+  smaller artifacts and links faster. macOS bindgen uses Xcode's libclang
+  instead of `brew install llvm` when that dylib is already on the image.
 - **Hardening:** CI has read-only repository permissions, pins third-party actions by commit, uses the latest stable Rust for the main matrix plus Rust 1.95.0 for the explicit MSRV lane, uses versioned runner images, and applies explicit job/test timeouts. Monthly grouped Dependabot updates keep pinned actions and the type-package lockfile current.
 - **No standalone Windows JSC workflow:** Windows source support is covered by
   `build-jsc-artifacts.yml` for producing artifacts and `CI`'s

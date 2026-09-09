@@ -16,6 +16,9 @@ permissions:
 env:
   CARGO_HTTP_MULTIPLEXING: "false"
   CARGO_NET_RETRY: "10"
+  CARGO_INCREMENTAL: "0"
+  CARGO_PROFILE_DEV_DEBUG: "line-tables-only"
+  CARGO_PROFILE_TEST_DEBUG: "line-tables-only"
   RUST_TOOLCHAIN: "1.97.0"
   RUST_MSRV: "1.95.0"
 
@@ -119,8 +122,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-        with:
-          submodules: recursive
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
@@ -175,13 +176,16 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-        with:
-          submodules: recursive
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
         with:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          shared-key: typegen-ubuntu-24.04
 
       # Fails if the committed TS definitions are stale vs the Rust source.
       # Run `cargo run -p rong_typegen` to update them.
@@ -298,13 +302,16 @@ jobs:
         with:
           tool: cargo-make
 
-      - name: Install system dependencies (macOS)
+      - name: Configure libclang (macOS)
         if: runner.os == 'macOS'
-        env:
-          HOMEBREW_NO_AUTO_UPDATE: "1"
         run: |
-          brew install llvm
-          echo "LIBCLANG_PATH=$(brew --prefix llvm)/lib" >> "$GITHUB_ENV"
+          toolchain="$(xcode-select -p)/Toolchains/XcodeDefault.xctoolchain/usr/lib"
+          if [ -f "$toolchain/libclang.dylib" ]; then
+            echo "LIBCLANG_PATH=$toolchain" >> "$GITHUB_ENV"
+          else
+            HOMEBREW_NO_AUTO_UPDATE=1 brew install llvm
+            echo "LIBCLANG_PATH=$(brew --prefix llvm)/lib" >> "$GITHUB_ENV"
+          fi
 
       - name: Clippy
         env:
@@ -349,7 +356,7 @@ jobs:
 
   jscore-source-test:
     needs: [scope, fmt]
-    if: needs.scope.outputs.rust == 'true'
+    if: needs.scope.outputs.rust == 'true' && (matrix.full != 'true' || github.event_name != 'pull_request')
     name: jscore-source-${{ matrix.target }} (${{ matrix.os }})
     strategy:
       fail-fast: false
@@ -359,6 +366,7 @@ jobs:
             target: aarch64-apple-darwin
           - os: macos-15-intel
             target: x86_64-apple-darwin
+            full: "true"
           - os: ubuntu-24.04
             target: x86_64-unknown-linux-gnu
           - os: windows-2025-vs2026
@@ -413,16 +421,27 @@ jobs:
       - name: Install libclang (Linux)
         if: steps.source-artifact.outputs.run_source == 'true' && runner.os == 'Linux'
         run: |
+          if ldconfig -p 2>/dev/null | grep -q 'libclang.so'; then
+            echo "libclang already present on the runner"
+            if ! dpkg -s libicu-dev >/dev/null 2>&1; then
+              sudo apt-get update
+              sudo apt-get install -y --no-install-recommends libicu-dev
+            fi
+            exit 0
+          fi
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends clang libicu-dev
 
-      - name: Install libclang (macOS)
+      - name: Configure libclang (macOS)
         if: steps.source-artifact.outputs.run_source == 'true' && runner.os == 'macOS'
-        env:
-          HOMEBREW_NO_AUTO_UPDATE: "1"
         run: |
-          brew install llvm
-          echo "LIBCLANG_PATH=$(brew --prefix llvm)/lib" >> "$GITHUB_ENV"
+          toolchain="$(xcode-select -p)/Toolchains/XcodeDefault.xctoolchain/usr/lib"
+          if [ -f "$toolchain/libclang.dylib" ]; then
+            echo "LIBCLANG_PATH=$toolchain" >> "$GITHUB_ENV"
+          else
+            HOMEBREW_NO_AUTO_UPDATE=1 brew install llvm
+            echo "LIBCLANG_PATH=$(brew --prefix llvm)/lib" >> "$GITHUB_ENV"
+          fi
 
       - name: Install libclang (Windows)
         if: steps.source-artifact.outputs.run_source == 'true' && runner.os == 'Windows'

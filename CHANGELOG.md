@@ -6,6 +6,16 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 
 ## [Unreleased]
 
+### CI
+
+- Host verification batches `cargo test` (core integration tests, module
+  crates, then isolated `rong_timer`) instead of one invocation per file or
+  crate, and Unix core tests reuse the clippy dev profile instead of a
+  second `--release` compile.
+- Pull requests skip the macOS Intel `jscore-source` consumer; `master` and
+  manual dispatch still run it. macOS jobs prefer Xcode libclang over
+  Homebrew LLVM when present.
+
 ## [0.6.0] - 2026-07-19
 
 Rong 0.6.0 adds bounded JavaScript execution, cross-engine interruption

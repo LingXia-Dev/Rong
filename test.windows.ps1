@@ -213,19 +213,76 @@ function Run-ModuleTest([string]$ModuleName, [string]$EngineName) {
     Stop-IfFailFast
 }
 
+function Get-FeatureSet([string]$EngineName) {
+    if ($EngineName -eq "jscore") {
+        return Get-JscoreFeatures
+    }
+    return "$EngineName,$HostTlsBackend"
+}
+
+function Record-SuiteResult([string]$Name, [int]$ExitCode) {
+    $script:TotalTests++
+    if ($ExitCode -eq 0) {
+        Log-Pass $Name
+        $script:PassedTests++
+        return
+    }
+    Log-Fail $Name
+    $script:FailedTests++
+    Stop-IfFailFast
+}
+
 function Run-AllCoreTests([string]$EngineName, [string[]]$CoreTests) {
     Write-Host ""
     Write-Host "Running core tests on $EngineName..." -ForegroundColor Yellow
-    foreach ($testName in $CoreTests) {
-        Run-CoreTest -TestName $testName -EngineName $EngineName
+    Log-Info "Running rong integration tests as one cargo test ($EngineName)"
+
+    $featureSet = Get-FeatureSet $EngineName
+    $testArgs = @("-p", "rong", "--no-default-features", "--features=$featureSet", "--tests", "--quiet")
+    if (-not $script:FailFast) {
+        $testArgs += "--no-fail-fast"
     }
+    & cargo test @testArgs
+    Record-SuiteResult -Name "Core integration tests on $EngineName" -ExitCode $LASTEXITCODE
 }
 
 function Run-AllModuleTests([string]$EngineName, [string[]]$ModuleTests) {
     Write-Host ""
     Write-Host "Running module tests on $EngineName..." -ForegroundColor Yellow
+
+    $featureSet = Get-FeatureSet $EngineName
+    $packageArgs = @()
+    $hasTimer = $false
     foreach ($moduleName in $ModuleTests) {
-        Run-ModuleTest -ModuleName $moduleName -EngineName $EngineName
+        if ($moduleName -eq "rong_timer") {
+            $hasTimer = $true
+        } else {
+            $packageArgs += @("-p", $moduleName)
+        }
+    }
+    if ($packageArgs.Count -gt 0) {
+        Log-Info "Running module lib tests as one cargo test ($EngineName)"
+        $testArgs = $packageArgs + @(
+            "--no-default-features"
+            "--features=$featureSet"
+            "--quiet"
+        )
+        if (-not $script:FailFast) {
+            $testArgs += "--no-fail-fast"
+        }
+        & cargo test @testArgs
+        Record-SuiteResult -Name "Module tests on $EngineName" -ExitCode $LASTEXITCODE
+    }
+
+    if ($hasTimer) {
+        Log-Info "Running rong_timer tests single-threaded ($EngineName)"
+        $timerArgs = @("-p", "rong_timer", "--no-default-features", "--features=$featureSet", "--quiet")
+        if (-not $script:FailFast) {
+            $timerArgs += "--no-fail-fast"
+        }
+        $timerArgs += @("--", "--test-threads=1")
+        & cargo test @timerArgs
+        Record-SuiteResult -Name "rong_timer tests on $EngineName" -ExitCode $LASTEXITCODE
     }
 }
 

@@ -18,7 +18,15 @@ cargo test
 
 # JavaScriptCore
 cargo test --no-default-features --features jscore
+
+# Engine-filtered suite used by CI (`clippy-engine` + this script)
+./test.sh -e quickjs
 ```
+
+`test.sh` / `test.windows.ps1` run core integration tests as one `cargo test
+-p rong --tests`, then all `modules/*` crates in one invocation, then
+`rong_timer` with `--test-threads=1`. Pass `-t <name>` to run a single core
+binary or crate.
 
 On Apple, `jscore` uses the system `JavaScriptCore.framework`. To exercise the
 source-built (JSCOnly) backend instead, use the `jscore-source` feature:
