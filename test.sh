@@ -50,7 +50,7 @@ run_jscore_interrupt_spi() {
     log_info "Running interrupt tests with JSC execution-time-limit SPI"
     TOTAL_TESTS=$((TOTAL_TESTS + 1))
 
-    if run_cargo_test --release --test=interrupt --no-default-features \
+    if run_cargo_test --test=interrupt --no-default-features \
         --features="$features" --quiet; then
         log_success "JSC execution-time-limit SPI interrupt tests passed"
         PASSED_TESTS=$((PASSED_TESTS + 1))
@@ -238,7 +238,7 @@ run_core_test() {
     log_info "Running core test: $test_name (engine: $engine)"
     TOTAL_TESTS=$((TOTAL_TESTS + 1))
 
-    if run_cargo_test --release --test="$test_name" --no-default-features --features="$feature_set" --quiet; then
+    if run_cargo_test --test="$test_name" --no-default-features --features="$feature_set" --quiet; then
         log_success "Core test $test_name passed on $engine"
         PASSED_TESTS=$((PASSED_TESTS + 1))
         return 0
@@ -290,24 +290,89 @@ run_module_test() {
     fi
 }
 
+feature_set_for() {
+    local engine=$1
+    if [[ "$engine" == "jscore" ]]; then
+        jscore_features
+    else
+        echo "$engine,$HOST_TLS_BACKEND"
+    fi
+}
+
+record_suite_result() {
+    local name=$1
+    local status=$2
+    TOTAL_TESTS=$((TOTAL_TESTS + 1))
+    if [[ "$status" -eq 0 ]]; then
+        log_success "$name"
+        PASSED_TESTS=$((PASSED_TESTS + 1))
+        return 0
+    fi
+    log_error "$name"
+    FAILED_TESTS=$((FAILED_TESTS + 1))
+    if [[ "$FAIL_FAST" == true ]]; then
+        log_error "Stopping due to fail-fast mode (default); use -k/--continue-on-error to keep going"
+        print_summary
+        exit 1
+    fi
+    return 1
+}
+
 run_all_core_tests() {
     local engine=$1
+    local feature_set
+    feature_set="$(feature_set_for "$engine")"
+    local extra=()
+    if [[ "$FAIL_FAST" != true ]]; then
+        extra+=(--no-fail-fast)
+    fi
 
     echo -e "\n${YELLOW}Running core tests on $engine...${NC}"
-
-    for test in "${CORE_TESTS[@]}"; do
-        run_core_test "$test" "$engine" || true
-    done
+    log_info "Running rong integration tests as one cargo test ($engine)"
+    if run_cargo_test -p rong --no-default-features --features="$feature_set" --tests --quiet "${extra[@]}"; then
+        record_suite_result "Core integration tests on $engine" 0
+    else
+        record_suite_result "Core integration tests on $engine" 1 || true
+    fi
 }
 
 run_all_module_tests() {
     local engine=$1
+    local feature_set
+    feature_set="$(feature_set_for "$engine")"
+    local extra=()
+    if [[ "$FAIL_FAST" != true ]]; then
+        extra+=(--no-fail-fast)
+    fi
+    local package_args=()
+    local has_timer=false
+    local module
+    for module in "${MODULE_TESTS[@]}"; do
+        if [[ "$module" == "rong_timer" ]]; then
+            has_timer=true
+        else
+            package_args+=(-p "$module")
+        fi
+    done
 
     echo -e "\n${YELLOW}Running module tests on $engine...${NC}"
+    if [[ ${#package_args[@]} -gt 0 ]]; then
+        log_info "Running module lib tests as one cargo test ($engine)"
+        if run_cargo_test "${package_args[@]}" --no-default-features --features="$feature_set" --quiet "${extra[@]}"; then
+            record_suite_result "Module tests on $engine" 0
+        else
+            record_suite_result "Module tests on $engine" 1 || true
+        fi
+    fi
 
-    for module in "${MODULE_TESTS[@]}"; do
-        run_module_test "$module" "$engine" || true
-    done
+    if [[ "$has_timer" == true ]]; then
+        log_info "Running rong_timer tests single-threaded ($engine)"
+        if run_cargo_test -p rong_timer --no-default-features --features="$feature_set" --quiet "${extra[@]}" -- --test-threads=1; then
+            record_suite_result "rong_timer tests on $engine" 0
+        else
+            record_suite_result "rong_timer tests on $engine" 1 || true
+        fi
+    fi
 }
 
 run_specific_test() {
