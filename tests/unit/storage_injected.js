@@ -31,6 +31,14 @@ describe("Storage injected instance", () => {
     assert.equal(await storage.get("key"), undefined);
   });
 
+  test("has reports exact keys only", async () => {
+    await storage.set("foobar", "x");
+    assert.equal(await storage.has("foo"), false);
+    assert.equal(await storage.has("foobar"), true);
+    await storage.set("foo", "y");
+    assert.equal(await storage.has("foo"), true);
+  });
+
   test("clear removes all keys", async () => {
     await storage.set("a", "1");
     await storage.set("b", "2");

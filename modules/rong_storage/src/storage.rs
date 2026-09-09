@@ -602,6 +602,33 @@ impl Storage {
         })
     }
 
+    /// Return whether an exact key exists without reading its value.
+    #[js_method]
+    async fn has(&self, key: String) -> JSResult<bool> {
+        self.with_db(|db| {
+            let read_txn = db.begin_read().map_err(|e| {
+                HostError::new(
+                    rong::error::E_IO,
+                    format!("Failed to begin read transaction: {}", e),
+                )
+            })?;
+
+            let table = read_txn.open_table(STORAGE_TABLE).map_err(|e| {
+                HostError::new(rong::error::E_IO, format!("Failed to open table: {}", e))
+            })?;
+
+            match table.get(key.as_str()) {
+                Ok(Some(_)) => Ok(true),
+                Ok(None) => Ok(false),
+                Err(e) => Err(HostError::new(
+                    rong::error::E_IO,
+                    format!("Failed to check key: {}", e),
+                )
+                .into()),
+            }
+        })
+    }
+
     /// Delete a key from storage
     #[js_method]
     async fn delete(&self, key: String) -> JSResult<()> {

@@ -6,6 +6,12 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 
 ## [Unreleased]
 
+### Storage
+
+- `Storage.has(key)` reports whether an exact key exists without reading or
+  deserializing the stored value. Prefix neighbors such as `foo` and `foobar`
+  are distinct.
+
 ### CI
 
 - Host verification batches `cargo test` (core integration tests, module
