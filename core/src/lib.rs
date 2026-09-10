@@ -33,7 +33,7 @@ pub mod advanced {
 pub use invoke::{JsInvokePriority, enqueue_js_invoke};
 
 pub use class::{Class, ClassSetup, JSClass};
-pub use context::{JSContext, PromiseHandlerRegistration};
+pub use context::{JSContext, PromiseHandlerRegistration, TaskScope};
 pub use error::{HostError, JSResult, RongJSError, illegal_constructor};
 pub use function::Constructor;
 pub use interrupt::{InterruptGuard, InterruptHandle, InterruptMode};

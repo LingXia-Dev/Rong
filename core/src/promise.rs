@@ -117,14 +117,49 @@ where
         R: PromiseResolver<V>,
     {
         let (promise, resolve, reject) = ctx.promise()?;
+        // A host promise belongs to the task scope that was current when it was
+        // created. Cancelling that scope abandons it: the future is dropped, so
+        // whatever it holds is released, and the promise is left unsettled so
+        // that none of its continuations ever run. That is the point — a
+        // continuation of abandoned work would otherwise resume against
+        // whatever state the context holds by then, which is not the state it
+        // was written against.
+        let scope = ctx.current_task_scope_state();
+        let scope_for_registry = scope.clone();
 
         // Spawn a new async task to handle the future and keep `root` alive
-        ctx.spawn_task(async move {
-            let result = future.await;
+        let task = ctx.spawn_task_with_handle(async move {
+            let result = match scope {
+                Some(scope) => {
+                    let mut future = std::pin::pin!(future);
+                    let scoped = ScopedFuture {
+                        scope: &scope,
+                        future: future.as_mut(),
+                    };
+                    match scoped.await {
+                        Some(result) => result,
+                        None => {
+                            // Returning drops the future — releasing whatever
+                            // it held — along with `root` and both resolvers.
+                            // Neither resolver is called, so the promise stays
+                            // pending and no continuation of this call is ever
+                            // queued.
+                            return;
+                        }
+                    }
+                }
+                None => future.await,
+            };
             // Keep the optional root alive until the future completes
             let _keep_root_alive = root;
             result.resolve_promise(resolve, reject);
         });
+        // The scope owns the task from here, so cancelling it can abort the
+        // future outright. The flag the task reads is only a fast path for
+        // work that is still being polled.
+        if let (Some(scope), Some(task)) = (scope_for_registry, task) {
+            scope.adopt(task);
+        }
 
         Ok(promise)
     }
@@ -156,6 +191,34 @@ where
 
 /// Converts a Rust future result into JavaScript Promise resolution
 /// using the provided resolve/reject callbacks
+/// Polls a host future while its task scope is live.
+///
+/// Resolves to `None` the first time the scope is found cancelled, so the
+/// caller can drop the future and release whatever it held — a connection, a
+/// buffer, an in-flight request — instead of carrying it to the end of the
+/// context. The flag is checked before each poll: cancellation is host-driven
+/// and cannot wake this task by itself, so an abandoned task is observed the
+/// next time something else polls it.
+struct ScopedFuture<'a, F> {
+    scope: &'a std::rc::Rc<crate::context::TaskScopeState>,
+    future: std::pin::Pin<&'a mut F>,
+}
+
+impl<F: Future> Future for ScopedFuture<'_, F> {
+    type Output = Option<F::Output>;
+
+    fn poll(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Self::Output> {
+        let this = self.get_mut();
+        if this.scope.is_cancelled() {
+            return std::task::Poll::Ready(None);
+        }
+        this.future.as_mut().poll(cx).map(Some)
+    }
+}
+
 pub trait PromiseResolver<V: JSValueImpl> {
     fn resolve_promise(self, resolve: JSFunc<V>, reject: JSFunc<V>);
 }
