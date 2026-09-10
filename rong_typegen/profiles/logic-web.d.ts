@@ -286,6 +286,128 @@ declare var Response: {
 
 declare function fetch(url: RequestInfo | URL, options?: RequestInit): Promise<Response>;
 
+type AlgorithmIdentifier = string | { name: string; [option: string]: any };
+type BufferSource = ArrayBufferView | ArrayBuffer;
+type KeyType = 'secret' | 'public' | 'private';
+type KeyUsage =
+  | 'encrypt' | 'decrypt' | 'sign' | 'verify'
+  | 'deriveKey' | 'deriveBits' | 'wrapKey' | 'unwrapKey';
+type KeyFormat = 'raw' | 'jwk';
+type AesKeyLength = 128 | 192 | 256;
+
+interface KeyAlgorithm { name: string }
+interface HmacKeyAlgorithm extends KeyAlgorithm { hash: KeyAlgorithm; length: number }
+interface AesKeyAlgorithm extends KeyAlgorithm { length: number }
+
+interface JsonWebKey {
+  kty: string;
+  k?: string;
+  alg?: string;
+  ext?: boolean;
+  key_ops?: KeyUsage[];
+}
+
+interface CryptoKey {
+  readonly type: KeyType;
+  readonly extractable: boolean;
+  readonly algorithm: HmacKeyAlgorithm | AesKeyAlgorithm;
+  readonly usages: KeyUsage[];
+}
+declare var CryptoKey: { prototype: CryptoKey };
+
+interface HmacKeyGenParams { name: 'HMAC'; hash: AlgorithmIdentifier; length?: number }
+interface AesKeyGenParams { name: 'AES-GCM' | 'AES-CBC'; length: AesKeyLength }
+interface AesGcmParams {
+  name: 'AES-GCM';
+  iv: BufferSource;
+  additionalData?: BufferSource;
+  tagLength?: 128;
+}
+interface AesCbcParams { name: 'AES-CBC'; iv: BufferSource }
+interface Pbkdf2Params {
+  name: 'PBKDF2';
+  salt: BufferSource;
+  iterations: number;
+  hash: AlgorithmIdentifier;
+}
+interface HkdfParams {
+  name: 'HKDF';
+  salt: BufferSource;
+  info?: BufferSource;
+  hash: AlgorithmIdentifier;
+}
+type DeriveParams = Pbkdf2Params | HkdfParams;
+type KeyGenParams = AesKeyGenParams | HmacKeyGenParams;
+
+interface SubtleCrypto {
+  digest(algorithm: AlgorithmIdentifier, data: BufferSource): Promise<ArrayBuffer>;
+  generateKey(
+    algorithm: KeyGenParams,
+    extractable: boolean,
+    keyUsages: KeyUsage[],
+  ): Promise<CryptoKey>;
+  importKey(
+    format: 'raw',
+    keyData: BufferSource,
+    algorithm: AlgorithmIdentifier,
+    extractable: boolean,
+    keyUsages: KeyUsage[],
+  ): Promise<CryptoKey>;
+  importKey(
+    format: 'jwk',
+    keyData: JsonWebKey,
+    algorithm: AlgorithmIdentifier,
+    extractable: boolean,
+    keyUsages: KeyUsage[],
+  ): Promise<CryptoKey>;
+  exportKey(format: 'raw', key: CryptoKey): Promise<ArrayBuffer>;
+  exportKey(format: 'jwk', key: CryptoKey): Promise<JsonWebKey>;
+  sign(
+    algorithm: AlgorithmIdentifier,
+    key: CryptoKey,
+    data: BufferSource,
+  ): Promise<ArrayBuffer>;
+  verify(
+    algorithm: AlgorithmIdentifier,
+    key: CryptoKey,
+    signature: BufferSource,
+    data: BufferSource,
+  ): Promise<boolean>;
+  encrypt(
+    algorithm: AesGcmParams | AesCbcParams,
+    key: CryptoKey,
+    data: BufferSource,
+  ): Promise<ArrayBuffer>;
+  decrypt(
+    algorithm: AesGcmParams | AesCbcParams,
+    key: CryptoKey,
+    data: BufferSource,
+  ): Promise<ArrayBuffer>;
+  deriveBits(algorithm: DeriveParams, baseKey: CryptoKey, length: number): Promise<ArrayBuffer>;
+  deriveKey(
+    algorithm: DeriveParams,
+    baseKey: CryptoKey,
+    derivedKeyType: KeyGenParams,
+    extractable: boolean,
+    keyUsages: KeyUsage[],
+  ): Promise<CryptoKey>;
+}
+declare var SubtleCrypto: { prototype: SubtleCrypto };
+
+type IntegerTypedArray =
+  | Int8Array | Uint8Array | Uint8ClampedArray
+  | Int16Array | Uint16Array
+  | Int32Array | Uint32Array
+  | BigInt64Array | BigUint64Array;
+
+interface Crypto {
+  readonly subtle: SubtleCrypto;
+  getRandomValues<T extends IntegerTypedArray>(array: T): T;
+  randomUUID(): string;
+}
+declare var Crypto: { prototype: Crypto };
+declare var crypto: Crypto;
+
 interface Console {
   log(...args: any[]): void;
   error(...args: any[]): void;

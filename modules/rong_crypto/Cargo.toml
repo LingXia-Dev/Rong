@@ -1,0 +1,46 @@
+[package]
+name = "rong_crypto"
+version = "0.6.0"
+edition.workspace = true
+
+description = "Web Cryptography API module for RongJS"
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
+keywords.workspace = true
+categories.workspace = true
+documentation = "https://docs.rs/rong_crypto"
+readme = "README.md"
+
+[lib]
+name = "rong_crypto"
+path = "src/lib.rs"
+
+[dependencies]
+rong = { workspace = true }
+aes = { workspace = true }
+aes-gcm = { workspace = true }
+base64 = { workspace = true }
+cbc = { workspace = true }
+getrandom = { workspace = true }
+hkdf = { workspace = true }
+hmac = { workspace = true }
+pbkdf2 = { workspace = true }
+sha1 = { workspace = true }
+sha2 = { workspace = true }
+
+[features]
+# Forward JS engine features to the main rong crate
+default = []
+quickjs = ["rong/quickjs"]
+jscore = ["rong/jscore"]
+arkjs = ["rong/arkjs"]
+tls-aws-lc = ["rong/tls-aws-lc"]
+tls-ring = ["rong/tls-ring"]
+
+[dev-dependencies]
+rong_test = { path = "../../testing/rong_test" }
+rong_assert = { workspace = true }
+rong_console = { workspace = true }
+rong_encoding = { workspace = true }
