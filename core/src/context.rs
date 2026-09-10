@@ -182,6 +182,55 @@ struct ContextServiceContainer {
 
 struct ContextState<T: 'static>(T);
 
+/// Identifies a group of host tasks spawned on one context.
+///
+/// An embedder that serves several logical requests on one long-lived context
+/// opens a scope per request. Work a request starts and forgets — a promise
+/// that is neither awaited nor handed to a background-work API — belongs to
+/// that scope, so cancelling it settles that work while the request that
+/// started it is still the current one, instead of letting it resume during
+/// the next request and observe *its* state.
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct TaskScope(u64);
+
+/// One scope's cancellation flag and the tasks it owns. Held by the registry
+/// and by every task spawned while the scope was current.
+#[derive(Default)]
+pub(crate) struct TaskScopeState {
+    cancelled: Cell<bool>,
+    tasks: RefCell<Vec<tokio::task::AbortHandle>>,
+}
+
+impl TaskScopeState {
+    pub(crate) fn is_cancelled(&self) -> bool {
+        self.cancelled.get()
+    }
+
+    /// Takes ownership of a task spawned while this scope was current, so
+    /// cancelling the scope can abort it.
+    ///
+    /// Finished handles are swept on the way in: a request that makes many
+    /// host calls would otherwise accumulate one handle per call for as long
+    /// as it runs.
+    pub(crate) fn adopt(&self, task: tokio::task::AbortHandle) {
+        let mut tasks = self.tasks.borrow_mut();
+        tasks.retain(|task| !task.is_finished());
+        tasks.push(task);
+    }
+
+    /// Aborts every unfinished task in the scope.
+    ///
+    /// The flag alone is not enough. It is only read the next time a task is
+    /// polled, and a task parked on an upstream that never answers is never
+    /// polled again — it would hold its connection or buffer until the context
+    /// itself went away. Aborting makes the runtime drop the future instead.
+    fn abort_tasks(&self) {
+        for task in self.tasks.take() {
+            task.abort();
+        }
+    }
+}
+
 #[derive(Clone, Default)]
 struct ContextTaskRegistry {
     inner: Rc<ContextTaskRegistryInner>,
@@ -191,6 +240,9 @@ struct ContextTaskRegistry {
 struct ContextTaskRegistryInner {
     closed: std::cell::Cell<bool>,
     tasks: RefCell<Vec<tokio::task::JoinHandle<()>>>,
+    next_scope: Cell<u64>,
+    current_scope: RefCell<Option<(TaskScope, Rc<TaskScopeState>)>>,
+    scopes: RefCell<HashMap<TaskScope, Rc<TaskScopeState>>>,
 }
 
 impl ContextTaskRegistry {
@@ -208,6 +260,54 @@ impl ContextTaskRegistry {
         tasks.retain(|task| !task.is_finished());
         tasks.push(task);
         Some(abort_handle)
+    }
+
+    fn begin_scope(&self) -> TaskScope {
+        let id = self.inner.next_scope.get().wrapping_add(1);
+        self.inner.next_scope.set(id);
+        let scope = TaskScope(id);
+        let state = Rc::new(TaskScopeState::default());
+        self.inner.scopes.borrow_mut().insert(scope, state.clone());
+        *self.inner.current_scope.borrow_mut() = Some((scope, state));
+        scope
+    }
+
+    fn current_scope(&self) -> Option<(TaskScope, Rc<TaskScopeState>)> {
+        self.inner.current_scope.borrow().clone()
+    }
+
+    fn enter_scope(&self, scope: Option<TaskScope>) -> Option<TaskScope> {
+        let previous = self
+            .inner
+            .current_scope
+            .borrow()
+            .as_ref()
+            .map(|(id, _)| *id);
+        let next = scope.and_then(|scope| {
+            self.inner
+                .scopes
+                .borrow()
+                .get(&scope)
+                .map(|state| (scope, state.clone()))
+        });
+        *self.inner.current_scope.borrow_mut() = next;
+        previous
+    }
+
+    fn cancel_scope(&self, scope: TaskScope) -> bool {
+        let Some(state) = self.inner.scopes.borrow_mut().remove(&scope) else {
+            return false;
+        };
+        state.cancelled.set(true);
+        state.abort_tasks();
+        let clear = matches!(
+            self.inner.current_scope.borrow().as_ref(),
+            Some((current, _)) if *current == scope
+        );
+        if clear {
+            *self.inner.current_scope.borrow_mut() = None;
+        }
+        true
     }
 
     fn abort_all(&self) -> Vec<tokio::task::JoinHandle<()>> {
@@ -671,6 +771,58 @@ impl<C: JSContextImpl> JSContext<C> {
     /// Cancel and drain all context-owned async work before releasing the context.
     pub async fn shutdown_tasks(&self) {
         self.task_registry().shutdown().await;
+    }
+
+    /// Open a task scope and make it current.
+    ///
+    /// Every host promise created from now on — `Promise::from_future`, which
+    /// is what every async host method resolves through — belongs to this
+    /// scope until another is entered. See [`TaskScope`].
+    pub fn begin_task_scope(&self) -> TaskScope {
+        self.task_registry().begin_scope()
+    }
+
+    /// The scope host promises are currently created in.
+    pub fn current_task_scope(&self) -> Option<TaskScope> {
+        self.task_registry().current_scope().map(|(scope, _)| scope)
+    }
+
+    /// Make `scope` current (or leave no scope at all) and return the previous
+    /// one, for save-and-restore around a nested call.
+    ///
+    /// A cancelled or unknown scope cannot be entered, and passing one leaves
+    /// **no** scope current rather than failing: host promises created after
+    /// that belong to nothing and cannot be abandoned later. Restore a scope
+    /// you saved, or open a fresh one; do not hold a [`TaskScope`] across the
+    /// cancellation that ends it.
+    pub fn enter_task_scope(&self, scope: Option<TaskScope>) -> Option<TaskScope> {
+        self.task_registry().enter_scope(scope)
+    }
+
+    /// Abandon every unfinished host promise created in `scope`.
+    ///
+    /// Each one has its task aborted, so its future is dropped and whatever it
+    /// held — a connection, a buffer, an in-flight request — is released now
+    /// rather than whenever something next polls it. The promise is left
+    /// unsettled, neither resolved nor rejected, so none of its continuations
+    /// ever run: work a scope started and forgot cannot resume once the scope
+    /// is over and observe state it was not written against.
+    ///
+    /// Promises that already resolved are unaffected, and their continuations
+    /// are already queued: drain microtasks *before* cancelling if you want
+    /// them to run.
+    ///
+    /// This is also how a scope is closed. A scope holds bookkeeping until it
+    /// is cancelled, so cancel every scope you open, including the ones that
+    /// left nothing pending — that case is cheap.
+    ///
+    /// Returns whether the scope existed.
+    pub fn cancel_task_scope(&self, scope: TaskScope) -> bool {
+        self.task_registry().cancel_scope(scope)
+    }
+
+    pub(crate) fn current_task_scope_state(&self) -> Option<Rc<TaskScopeState>> {
+        self.task_registry().current_scope().map(|(_, state)| state)
     }
 
     /// Compile JavaScript source code to bytecode

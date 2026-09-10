@@ -436,3 +436,206 @@ fn test_rust_async_with_mut_state() {
         Ok(())
     })
 }
+
+/// A context that serves several logical requests in sequence keeps one JS
+/// context, so work a request starts and forgets stays queued on it. Without a
+/// scope that work resumes during a later request and observes *its* state; the
+/// scope is what lets the embedder abandon it at the boundary instead.
+#[test]
+fn test_task_scope_abandons_forgotten_work() {
+    async_run!(|ctx: JSContext| async move {
+        let ctx2 = ctx.clone();
+        let async_fn = JSFunc::new(&ctx, move |delay: i32| {
+            let future = async move {
+                tokio::time::sleep(Duration::from_millis(delay as u64)).await;
+                format!("completed after {}ms", delay)
+            };
+            Promise::from_future(&ctx2, None, future).unwrap()
+        })?;
+        ctx.global().set("rustAsync", async_fn)?;
+
+        // Request one starts work it never awaits, and ends.
+        let first = ctx.begin_task_scope();
+        ctx.eval::<()>(Source::from_bytes(
+            br#"
+            globalThis.observed = 'none';
+            rustAsync(30).then(msg => { globalThis.observed = msg; });
+            "#,
+        ))?;
+        assert_eq!(ctx.current_task_scope(), Some(first));
+        assert!(ctx.cancel_task_scope(first));
+        assert_eq!(
+            ctx.current_task_scope(),
+            None,
+            "cancelling the current scope leaves none current"
+        );
+
+        // Request two runs long enough that the abandoned work would have
+        // completed, and pumps microtasks the way a host does between requests.
+        let second = ctx.begin_task_scope();
+        tokio::time::sleep(Duration::from_millis(60)).await;
+        ctx.runtime().run_pending_jobs();
+        let observed: String = ctx.eval(Source::from_bytes(b"observed"))?;
+        assert_eq!(
+            observed, "none",
+            "abandoned work must not resume inside a later scope"
+        );
+
+        // The second scope is unaffected: its own work still resolves.
+        ctx.eval::<()>(Source::from_bytes(
+            br#"rustAsync(10).then(msg => { globalThis.observed = msg; });"#,
+        ))?;
+        tokio::time::sleep(Duration::from_millis(40)).await;
+        ctx.runtime().run_pending_jobs();
+        let observed: String = ctx.eval(Source::from_bytes(b"observed"))?;
+        assert_eq!(observed, "completed after 10ms");
+
+        assert!(ctx.cancel_task_scope(second));
+        assert!(
+            !ctx.cancel_task_scope(second),
+            "a scope is cancelled exactly once"
+        );
+        Ok(())
+    })
+}
+
+/// Work that finished before its scope was cancelled has already queued its
+/// continuation, so a host that wants those to run drains microtasks first.
+#[test]
+fn test_task_scope_keeps_work_that_already_completed() {
+    async_run!(|ctx: JSContext| async move {
+        let ctx2 = ctx.clone();
+        let async_fn = JSFunc::new(&ctx, move |delay: i32| {
+            let future = async move {
+                tokio::time::sleep(Duration::from_millis(delay as u64)).await;
+                format!("completed after {}ms", delay)
+            };
+            Promise::from_future(&ctx2, None, future).unwrap()
+        })?;
+        ctx.global().set("rustAsync", async_fn)?;
+
+        let scope = ctx.begin_task_scope();
+        ctx.eval::<()>(Source::from_bytes(
+            br#"
+            globalThis.observed = 'none';
+            rustAsync(10).then(msg => { globalThis.observed = msg; });
+            "#,
+        ))?;
+        tokio::time::sleep(Duration::from_millis(40)).await;
+        ctx.runtime().run_pending_jobs();
+        ctx.cancel_task_scope(scope);
+
+        let observed: String = ctx.eval(Source::from_bytes(b"observed"))?;
+        assert_eq!(observed, "completed after 10ms");
+        Ok(())
+    })
+}
+
+/// Without a scope nothing changes: this is the shape every existing embedder
+/// already has.
+#[test]
+fn test_promises_outside_a_scope_are_untouched() {
+    async_run!(|ctx: JSContext| async move {
+        let ctx2 = ctx.clone();
+        let async_fn = JSFunc::new(&ctx, move |delay: i32| {
+            let future = async move {
+                tokio::time::sleep(Duration::from_millis(delay as u64)).await;
+                "done".to_owned()
+            };
+            Promise::from_future(&ctx2, None, future).unwrap()
+        })?;
+        ctx.global().set("rustAsync", async_fn)?;
+        assert_eq!(ctx.current_task_scope(), None);
+
+        let scope = ctx.begin_task_scope();
+        ctx.enter_task_scope(None);
+        ctx.eval::<()>(Source::from_bytes(
+            br#"
+            globalThis.observed = 'none';
+            rustAsync(10).then(msg => { globalThis.observed = msg; });
+            "#,
+        ))?;
+        // Cancelling a scope this promise was never created in cannot touch it.
+        ctx.cancel_task_scope(scope);
+        tokio::time::sleep(Duration::from_millis(40)).await;
+        ctx.runtime().run_pending_jobs();
+        let observed: String = ctx.eval(Source::from_bytes(b"observed"))?;
+        assert_eq!(observed, "done");
+        Ok(())
+    })
+}
+
+/// Cancelling a scope is supposed to release what its abandoned work still
+/// holds — a connection, a buffer, an in-flight request. A future parked on
+/// I/O is never polled again on its own, so nothing but aborting its task can
+/// drop it.
+#[test]
+fn test_task_scope_releases_what_abandoned_work_holds() {
+    async_run!(|ctx: JSContext| async move {
+        let dropped = Rc::new(Cell::new(false));
+        let ctx2 = ctx.clone();
+        let marker = dropped.clone();
+        let async_fn = JSFunc::new(&ctx, move |_: i32| {
+            let held = DropMarker(marker.clone());
+            let future = async move {
+                // Reach the park through one real poll first: the interesting
+                // case is work already waiting on an upstream, not work that
+                // was cancelled before it ever ran. Nothing can wake it after
+                // that, which is what a request waiting on an upstream that
+                // never answers looks like.
+                tokio::task::yield_now().await;
+                std::future::pending::<()>().await;
+                let _keep = held;
+                "never".to_owned()
+            };
+            Promise::from_future(&ctx2, None, future).unwrap()
+        })?;
+        ctx.global().set("rustAsync", async_fn)?;
+
+        let scope = ctx.begin_task_scope();
+        ctx.eval::<()>(Source::from_bytes(b"rustAsync(0).then(() => {});"))?;
+        // Let the task run until it parks.
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        assert!(!dropped.get(), "the future is parked, not finished");
+
+        assert!(ctx.cancel_task_scope(scope));
+        // Give the runtime a turn to actually drop the abandoned task.
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        assert!(
+            dropped.get(),
+            "cancelling the scope left the abandoned future holding its resources"
+        );
+        Ok(())
+    })
+}
+
+/// Entering a scope that no longer exists leaves no scope current, which is
+/// the one way to end up with work nothing can abandon later. Pinning it here
+/// because the failure is silent: everything keeps working until a request
+/// forgets something.
+#[test]
+fn test_entering_a_dead_scope_leaves_no_scope_current() {
+    async_run!(|ctx: JSContext| async move {
+        let outer = ctx.begin_task_scope();
+        let inner = ctx.begin_task_scope();
+        assert_eq!(ctx.current_task_scope(), Some(inner));
+
+        // Save and restore is the shape this is for.
+        let saved = ctx.enter_task_scope(Some(outer));
+        assert_eq!(saved, Some(inner));
+        assert_eq!(ctx.current_task_scope(), Some(outer));
+        ctx.enter_task_scope(saved);
+        assert_eq!(ctx.current_task_scope(), Some(inner));
+
+        assert!(ctx.cancel_task_scope(outer));
+        ctx.enter_task_scope(Some(outer));
+        assert_eq!(
+            ctx.current_task_scope(),
+            None,
+            "a cancelled scope must not become current again"
+        );
+
+        assert!(ctx.cancel_task_scope(inner));
+        Ok(())
+    })
+}
