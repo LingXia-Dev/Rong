@@ -96,6 +96,7 @@ define_modules!(
     ("storage", "storage", [], rong_storage::init),
     ("redis", "redis", ["abort"], rong_redis::init),
     ("sqlite", "sqlite", [], rong_sqlite::init),
+    ("crypto", "crypto", [], rong_crypto::init),
     ("worker", "worker", [], rong_worker::init),
     ("s3", "s3", [], rong_s3::init),
 );
