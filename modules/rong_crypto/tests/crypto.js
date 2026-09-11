@@ -988,3 +988,255 @@ describe("crypto interface shape", () => {
     expect(Object.isFrozen(key.usages)).toBe(true);
   });
 });
+// Deterministic API-boundary regressions. Mutate inputs in the same JS turn
+// immediately after invocation; await the returned promise, never a timer.
+const subtle = crypto.subtle;
+const abcHash = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
+
+async function rejection(invoke, name) {
+  // A synchronous throw fails the test here, rather than accidentally passing
+  // as the expected promise rejection.
+  const promise = invoke();
+  expect(promise instanceof Promise).toBe(true);
+  let caught;
+  try { await promise; } catch (error) { caught = error; }
+  expect(caught !== undefined).toBe(true);
+  expect(caught.name).toBe(name);
+}
+
+describe("call-time snapshots", () => {
+  for (const kind of ["ArrayBuffer", "TypedArray", "DataView"]) {
+    test(`digest snapshots ${kind} and algorithm name`, async () => {
+      const bytes = new Uint8Array([97, 98, 99]);
+      const data = kind === "ArrayBuffer" ? bytes.buffer : kind === "DataView" ? new DataView(bytes.buffer) : bytes;
+      const algorithm = { name: "SHA-256" };
+      const pending = subtle.digest(algorithm, data);
+      algorithm.name = "unsupported";
+      bytes.fill(0);
+      expect(hex(await pending)).toBe(abcHash);
+    });
+  }
+
+  test("digest copies data before calling algorithm getters", async () => {
+    // Web Crypto digest steps 2鈥? copy data before normalizing Algorithm.
+    // This is a specification check; Node currently normalizes first.
+    const data = new Uint8Array([97, 98, 99]);
+    const pending = subtle.digest({ get name() { data.fill(0); return "SHA-256"; } }, data);
+    expect(hex(await pending)).toBe(abcHash);
+  });
+
+  test("raw import snapshots key material, nested hash and usages", async () => {
+    const data = new Uint8Array([1, 2, 3]);
+    const algorithm = { name: "HMAC", hash: { name: "SHA-256" }, length: 24 };
+    const usages = ["sign", "verify"];
+    const pending = subtle.importKey("raw", data, algorithm, true, usages);
+    data.fill(0);
+    algorithm.hash.name = "SHA-1";
+    algorithm.length = 0;
+    usages.length = 0;
+    const key = await pending;
+    expect(hex(await subtle.exportKey("raw", key))).toBe("010203");
+    expect(key.algorithm.hash.name).toBe("SHA-256");
+    expect(key.algorithm.length).toBe(24);
+    expect(Array.from(key.usages)).toEqual(["sign", "verify"]);
+  });
+
+  test("JWK import snapshots material and restrictions", async () => {
+    const jwk = { kty: "oct", k: "AQID", alg: "HS256", ext: true, key_ops: ["sign"] };
+    const pending = subtle.importKey("jwk", jwk, { name: "HMAC", hash: "SHA-256" }, true, ["sign"]);
+    jwk.k = "AAAA";
+    jwk.ext = false;
+    jwk.key_ops.length = 0;
+    const key = await pending;
+    expect(hex(await subtle.exportKey("raw", key))).toBe("010203");
+    expect(key.extractable).toBe(true);
+    expect(Array.from(key.usages)).toEqual(["sign"]);
+  });
+
+  test("generateKey snapshots nested hash, length and usages", async () => {
+    const algorithm = { name: "HMAC", hash: { name: "SHA-256" }, length: 128 };
+    const usages = ["sign"];
+    const pending = subtle.generateKey(algorithm, true, usages);
+    algorithm.hash.name = "SHA-1";
+    algorithm.length = 0;
+    usages.length = 0;
+    const key = await pending;
+    expect(key.algorithm.hash.name).toBe("SHA-256");
+    expect(key.algorithm.length).toBe(128);
+    expect(Array.from(key.usages)).toEqual(["sign"]);
+  });
+
+  test("sign and verify snapshot both message and signature", async () => {
+    const key = await subtle.importKey("raw", new Uint8Array([1, 2, 3]), { name: "HMAC", hash: "SHA-256" }, false, ["sign", "verify"]);
+    const message = new Uint8Array([97, 98, 99]);
+    const expected = await subtle.sign("HMAC", key, message);
+    const algorithm = { name: "HMAC" };
+    const pending = subtle.sign(algorithm, key, message);
+    message.fill(0);
+    algorithm.name = "SHA-1";
+    expect(hex(await pending)).toBe(hex(expected));
+
+    const original = new Uint8Array([97, 98, 99]);
+    const signature = new Uint8Array(expected);
+    const verifyAlgorithm = { name: "HMAC" };
+    const valid = subtle.verify(verifyAlgorithm, key, signature, original);
+    original.fill(0);
+    signature.fill(0);
+    verifyAlgorithm.name = "SHA-1";
+    expect(await valid).toBe(true);
+    expect(await subtle.verify("HMAC", key, signature, original)).toBe(false);
+  });
+
+  for (const name of ["AES-GCM", "AES-CBC"]) {
+    for (const operation of ["encrypt", "decrypt"]) {
+      test(`${operation} snapshots ${name} data, IV and parameters`, async () => {
+        const key = await subtle.importKey("raw", new Uint8Array(16), name, false, ["encrypt", "decrypt"]);
+        const params = () => ({ name, iv: new Uint8Array(name === "AES-GCM" ? 12 : 16), additionalData: new Uint8Array([1, 2, 3]), tagLength: 128 });
+        const message = new Uint8Array([97, 98, 99]);
+        const ciphertext = await subtle.encrypt(params(), key, message);
+        const data = operation === "encrypt" ? message : new Uint8Array(ciphertext.slice(0));
+        const algorithm = params();
+        const pending = subtle[operation](algorithm, key, data);
+        data.fill(0);
+        algorithm.iv.fill(1);
+        algorithm.additionalData.fill(2);
+        algorithm.tagLength = 0;
+        algorithm.name = "unsupported";
+        expect(hex(await pending)).toBe(operation === "encrypt" ? hex(ciphertext) : "616263");
+      });
+    }
+  }
+
+  for (const name of ["PBKDF2", "HKDF"]) {
+    for (const operation of ["deriveBits", "deriveKey"]) {
+      test(`${operation} snapshots ${name} parameters and derived key metadata`, async () => {
+        const base = await subtle.importKey("raw", new Uint8Array([1, 2, 3]), name, false, [operation]);
+        const params = () => ({ name, hash: { name: "SHA-256" }, salt: new Uint8Array([4, 5]), info: new Uint8Array([6]), iterations: 2 });
+        const target = () => ({ name: "HMAC", hash: { name: "SHA-256" }, length: 128 });
+        const derive = async (algorithm, derived, usages) => {
+          if (operation === "deriveBits") return subtle.deriveBits(algorithm, base, 128);
+          return subtle.exportKey("raw", await subtle.deriveKey(algorithm, base, derived, true, usages));
+        };
+        const expected = await derive(params(), target(), ["sign"]);
+        const algorithm = params();
+        const derived = target();
+        const usages = ["sign"];
+        const pending = derive(algorithm, derived, usages);
+        algorithm.hash.name = "unsupported";
+        algorithm.salt.fill(0);
+        algorithm.info.fill(0);
+        algorithm.iterations = 0;
+        derived.hash.name = "unsupported";
+        derived.length = 0;
+        usages.length = 0;
+        expect(hex(await pending)).toBe(hex(expected));
+      });
+    }
+  }
+
+  test("validation errors remain promise rejections and do not poison later calls", async () => {
+    await rejection(() => subtle.digest("unsupported", new Uint8Array()), "NotSupportedError");
+    await rejection(() => subtle.digest("SHA-256", {}), "TypeError");
+    await rejection(() => subtle.generateKey({ name: "AES-GCM", length: 7 }, true, ["encrypt"]), "OperationError");
+    expect(hex(await subtle.digest("SHA-256", new Uint8Array([97, 98, 99])))).toBe(abcHash);
+  });
+});
+
+describe("DataView internal storage", () => {
+  test("accepts subclassed views and preserves their slice", async () => {
+    class CustomView extends DataView {}
+    const bytes = new Uint8Array([0, 97, 98, 99, 0]);
+    expect(hex(await subtle.digest("SHA-256", new CustomView(bytes.buffer, 1, 3)))).toBe(abcHash);
+  });
+
+  test("ignores shadowed properties, including throwing getters", async () => {
+    // BufferSource copying uses internal slots, not these public properties.
+    const view = new DataView(new Uint8Array([97, 98, 99]).buffer);
+    for (const name of ["constructor", "buffer", "byteOffset", "byteLength"]) {
+      Object.defineProperty(view, name, { get() { throw new Error(`must not read ${name}`); } });
+    }
+    expect(hex(await subtle.digest("SHA-256", view))).toBe(abcHash);
+  });
+
+  test("rejects lookalikes and proxies without invoking their getters", async () => {
+    const fake = { constructor: { name: "DataView" }, buffer: new ArrayBuffer(3), byteOffset: 0, byteLength: 3 };
+    await rejection(() => subtle.digest("SHA-256", fake), "TypeError");
+    const proxy = new Proxy(new DataView(new ArrayBuffer(3)), {
+      get() { throw new Error("must not inspect proxy properties"); },
+    });
+    await rejection(() => subtle.digest("SHA-256", proxy), "TypeError");
+  });
+
+  test("captured accessors survive prototype replacement", async () => {
+    const descriptor = Object.getOwnPropertyDescriptor(DataView.prototype, "buffer");
+    const view = new DataView(new Uint8Array([97, 98, 99]).buffer);
+    try {
+      Object.defineProperty(DataView.prototype, "buffer", { configurable: true, get() { return new ArrayBuffer(3); } });
+      expect(hex(await subtle.digest("SHA-256", view))).toBe(abcHash);
+    } finally {
+      Object.defineProperty(DataView.prototype, "buffer", descriptor);
+    }
+  });
+
+  test("empty views hash as empty data", async () => {
+    const view = new DataView(new ArrayBuffer(4), 4, 0);
+    expect(hex(await subtle.digest("SHA-256", view))).toBe("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
+  });
+});
+
+describe("numeric ranges before allocation", () => {
+  // 2**64 is intentionally chosen: the old saturating conversion rejects it
+  // for alignment rather than attempting a giant allocation. Regression tests
+  // must fail safely even when the range check is accidentally removed.
+  for (const length of [2 ** 64, Infinity, NaN, -1]) {
+    test(`generateKey rejects out-of-range HMAC length ${length}`, async () => {
+      await rejection(() => subtle.generateKey({ name: "HMAC", hash: "SHA-256", length }, false, ["sign"]), "TypeError");
+    });
+  }
+
+  test("HMAC import enforces the uint32 boundary without allocating", async () => {
+    const data = new Uint8Array([1]);
+    await rejection(() => subtle.importKey("raw", data, { name: "HMAC", hash: "SHA-256", length: 2 ** 32 }, false, ["sign"]), "TypeError");
+    await rejection(() => subtle.importKey("raw", data, { name: "HMAC", hash: "SHA-256", length: 2 ** 32 - 8 }, false, ["sign"]), "DataError");
+  });
+
+  test("AES generation enforces uint16 before algorithm length validation", async () => {
+    await rejection(() => subtle.generateKey({ name: "AES-GCM", length: 65536 }, false, ["encrypt"]), "TypeError");
+    await rejection(() => subtle.generateKey({ name: "AES-GCM", length: 65535 }, false, ["encrypt"]), "OperationError");
+    const key = await subtle.generateKey({ name: "AES-GCM", length: 128.9 }, false, ["encrypt"]);
+    expect(key.algorithm.length).toBe(128);
+  });
+
+  test("PBKDF2 checks iteration bounds even for zero output", async () => {
+    const key = await subtle.importKey("raw", new Uint8Array([1]), "PBKDF2", false, ["deriveBits"]);
+    const algorithm = iterations => ({ name: "PBKDF2", hash: "SHA-256", salt: new Uint8Array(), iterations });
+    await rejection(() => subtle.deriveBits(algorithm(2 ** 32), key, 0), "TypeError");
+    expect((await subtle.deriveBits(algorithm(2 ** 32 - 1), key, 0)).byteLength).toBe(0);
+    await rejection(() => subtle.deriveBits(algorithm(0), key, 0), "OperationError");
+    const fractional = await subtle.deriveBits(algorithm(1.9), key, 128);
+    expect(hex(fractional)).toBe(hex(await subtle.deriveBits(algorithm(1), key, 128)));
+  });
+
+  test("deriveKey validates destination length before deriving", async () => {
+    const base = await subtle.importKey("raw", new Uint8Array([1]), "HKDF", false, ["deriveKey"]);
+    const algorithm = { name: "HKDF", hash: "SHA-256", salt: new Uint8Array(), info: new Uint8Array() };
+    for (const [name, length, usages] of [["AES-GCM", 65536, ["encrypt"]], ["HMAC", 2 ** 32, ["sign"]], ["HMAC", 2 ** 60, ["sign"]]]) {
+      await rejection(() => subtle.deriveKey(algorithm, base, { name, hash: "SHA-256", length }, false, usages), "TypeError");
+    }
+  });
+
+  test("deriveBits converts unsigned long before allocating", async () => {
+    const base = await subtle.importKey("raw", new Uint8Array([1]), "HKDF", false, ["deriveBits"]);
+    const algorithm = { name: "HKDF", hash: "SHA-256", salt: new Uint8Array(), info: new Uint8Array() };
+    expect((await subtle.deriveBits(algorithm, base, 2 ** 64)).byteLength).toBe(0);
+    expect(hex(await subtle.deriveBits(algorithm, base, 2 ** 32 + 128))).toBe(hex(await subtle.deriveBits(algorithm, base, 128)));
+    await rejection(() => subtle.deriveBits(algorithm, base, 2 ** 32 - 1), "OperationError");
+  });
+
+  test("GCM tagLength enforces uint8 before supported-tag validation", async () => {
+    const key = await subtle.importKey("raw", new Uint8Array(16), "AES-GCM", false, ["encrypt"]);
+    await rejection(() => subtle.encrypt({ name: "AES-GCM", iv: new Uint8Array(12), tagLength: 256 }, key, new Uint8Array()), "TypeError");
+    const encrypted = await subtle.encrypt({ name: "AES-GCM", iv: new Uint8Array(12), tagLength: 128.9 }, key, new Uint8Array());
+    expect(hex(encrypted)).toBe("58e2fccefa7e3061367f1d57a4e7455a");
+  });
+});

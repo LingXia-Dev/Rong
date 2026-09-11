@@ -42,6 +42,7 @@ pub use subtle::SubtleCrypto;
 /// Register `Crypto`, `SubtleCrypto` and `CryptoKey`, then install the
 /// `globalThis.crypto` instance with its `subtle` member.
 pub fn init(ctx: &rong::JSContext) -> JSResult<()> {
+    buffer::init(ctx)?;
     ctx.register_class::<CryptoKey>()?;
     ctx.register_class::<SubtleCrypto>()?;
     ctx.register_class::<Crypto>()?;

@@ -5,9 +5,33 @@
 //! `ArrayBuffer`. These helpers follow the same shape `rong_compression` and
 //! `rong_http` use for reading binary arguments.
 
-use rong::{AnyJSTypedArray, JSArrayBuffer, JSContext, JSObject, JSResult, JSValue};
+use rong::{
+    AnyJSTypedArray, JSArray, JSArrayBuffer, JSContext, JSFunc, JSObject, JSResult, JSValue, Source,
+};
 
 use crate::error;
+
+struct DataViewAccess {
+    buffer: JSFunc,
+    offset: JSFunc,
+    length: JSFunc,
+}
+
+/// Capture the engine's brand-checking accessors before application code runs.
+/// Calling them directly ignores shadowed properties and accepts subclasses.
+pub(crate) fn init(ctx: &JSContext) -> JSResult<()> {
+    if ctx.get_state::<DataViewAccess>().is_none() {
+        let getters: JSArray = ctx.eval(Source::from_bytes(
+            "['buffer', 'byteOffset', 'byteLength'].map(name => Object.getOwnPropertyDescriptor(DataView.prototype, name).get)",
+        ))?;
+        ctx.set_state(DataViewAccess {
+            buffer: getters.get(0)?,
+            offset: getters.get(1)?,
+            length: getters.get(2)?,
+        });
+    }
+    Ok(())
+}
 
 /// Copy the bytes out of an `ArrayBuffer` or any `ArrayBufferView`.
 pub(crate) fn buffer_source(value: &JSValue, label: &str) -> JSResult<Vec<u8>> {
@@ -21,12 +45,12 @@ pub(crate) fn buffer_source(value: &JSValue, label: &str) -> JSResult<Vec<u8>> {
         return Ok(bytes.to_vec());
     }
 
-    if let Some(bytes) = data_view_bytes(&object)? {
-        return Ok(bytes);
+    if let Some(buffer) = JSArrayBuffer::from_object(object.clone()) {
+        return Ok(buffer.to_vec());
     }
 
-    if let Some(buffer) = JSArrayBuffer::from_object(object) {
-        return Ok(buffer.to_vec());
+    if let Some(bytes) = data_view_bytes(&object)? {
+        return Ok(bytes);
     }
 
     Err(not_buffer_source(label))
@@ -35,27 +59,17 @@ pub(crate) fn buffer_source(value: &JSValue, label: &str) -> JSResult<Vec<u8>> {
 /// `BufferSource` includes `DataView`, which is an `ArrayBufferView` but not a
 /// typed array, so `AnyJSTypedArray` does not accept it.
 fn data_view_bytes(object: &JSObject) -> JSResult<Option<Vec<u8>>> {
-    let ctor_name = object
-        .get::<_, JSObject>("constructor")
-        .ok()
-        .and_then(|ctor| ctor.get::<_, String>("name").ok());
-    if ctor_name.as_deref() != Some("DataView") {
+    let ctx = object.context();
+    let access = ctx
+        .get_state::<DataViewAccess>()
+        .ok_or_else(|| error::operation("DataView accessors are not initialized"))?;
+    let Ok(buffer_obj) = access.buffer.call::<_, JSObject>(Some(object.clone()), ()) else {
         return Ok(None);
-    }
-
-    let buffer_obj: JSObject = object
-        .get("buffer")
-        .map_err(|_| error::type_error("DataView is missing its ArrayBuffer"))?;
+    };
     let buffer = JSArrayBuffer::from_object(buffer_obj)
         .ok_or_else(|| error::type_error("DataView.buffer must be an ArrayBuffer"))?;
-    let byte_offset = object
-        .get::<_, f64>("byteOffset")
-        .map_err(|_| error::type_error("DataView.byteOffset must be a number"))?
-        as usize;
-    let byte_length = object
-        .get::<_, f64>("byteLength")
-        .map_err(|_| error::type_error("DataView.byteLength must be a number"))?
-        as usize;
+    let byte_offset = access.offset.call::<_, f64>(Some(object.clone()), ())? as usize;
+    let byte_length = access.length.call::<_, f64>(Some(object.clone()), ())? as usize;
     let end = byte_offset
         .checked_add(byte_length)
         .ok_or_else(|| error::operation("DataView range overflows its ArrayBuffer"))?;
