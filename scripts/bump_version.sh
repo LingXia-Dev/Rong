@@ -50,6 +50,7 @@ MODULE_CRATES=(
   "rong_command"
   "rong_redis"
   "rong_sqlite"
+  "rong_crypto"
   "rong_worker"
   "rong_s3"
 )
