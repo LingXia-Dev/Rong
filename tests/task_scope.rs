@@ -185,3 +185,26 @@ fn scope_ids_are_not_reused_across_runtimes() {
     assert_eq!(ctx.current_task_scope(), Some(second));
     assert!(ctx.cancel_task_scope(second));
 }
+
+/// An embedder that opens a scope per request cannot open and cancel it in one
+/// function: it opens the scope where the request starts and cancels it where
+/// the request ends, so the value has to live in a field in between. Writing a
+/// field means writing the type, which means `TaskScope` has to be reachable
+/// under the name an embedder depends on — `rong`, not `rong_core`.
+///
+/// Every other test here gets the type from inference, so none of them would
+/// notice it missing from the facade.
+#[test]
+fn a_scope_can_be_stored_under_its_public_name() {
+    struct PendingRequest {
+        scope: TaskScope,
+    }
+
+    let runtime = RongJS::runtime();
+    let ctx = runtime.context();
+    let request = PendingRequest {
+        scope: ctx.begin_task_scope(),
+    };
+    // Opened elsewhere, cancelled here, exactly as a request's lifetime runs.
+    assert!(ctx.cancel_task_scope(request.scope));
+}
