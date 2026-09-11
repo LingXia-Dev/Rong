@@ -55,6 +55,12 @@ pub(crate) fn decode_secret(jwk: &JSObject) -> JSResult<Vec<u8>> {
         .map_err(|error| error::data(format!("JWK 'k' is not valid base64url: {error}")))
 }
 
+fn jwk_string(jwk: &JSObject, member: &str) -> JSResult<String> {
+    jwk.get::<_, JSValue>(member)?
+        .to_rust::<String>()
+        .map_err(|_| error::data(format!("JWK '{member}' must be a string")))
+}
+
 /// Check the JWK members that constrain how the key may be used, once the key
 /// algorithm is known.
 pub(crate) fn validate(
@@ -63,36 +69,69 @@ pub(crate) fn validate(
     extractable: bool,
     usages: &[KeyUsage],
 ) -> JSResult<()> {
-    if let Some(expected) = expected_alg(algorithm)
-        && let Ok(alg) = jwk.get::<_, String>("alg")
-        && alg != expected
-    {
-        return Err(error::data(format!(
-            "JWK alg '{alg}' does not match the requested algorithm (expected '{expected}')"
-        )));
+    if jwk.has_property("use")? {
+        let use_value = jwk_string(jwk, "use")?;
+        let expected = match algorithm {
+            KeyAlgorithm::Hmac { .. } => "sig",
+            KeyAlgorithm::Aes { .. } => "enc",
+            KeyAlgorithm::Derivation { .. } => {
+                return Err(error::data(
+                    "JWK 'use' is not valid for a key-derivation base key",
+                ));
+            }
+        };
+        if !usages.is_empty() && use_value != expected {
+            return Err(error::data(format!(
+                "JWK use '{use_value}' is not valid for this algorithm (expected '{expected}')"
+            )));
+        }
     }
 
-    if jwk.has_property("ext")?
-        && let Ok(ext) = jwk.get::<_, bool>("ext")
-        && !ext
-        && extractable
+    if jwk.has_property("alg")?
+        && let Some(expected) = expected_alg(algorithm)
     {
-        return Err(error::data(
-            "JWK is marked non-extractable but an extractable key was requested",
-        ));
+        let alg = jwk_string(jwk, "alg")?;
+        if alg != expected {
+            return Err(error::data(format!(
+                "JWK alg '{alg}' does not match the requested algorithm (expected '{expected}')"
+            )));
+        }
     }
 
-    if jwk.has_property("key_ops")?
-        && let Ok(ops) = jwk.get::<_, JSValue>("key_ops")
-        && let Some(ops) = ops.into_object().and_then(JSArray::from_object)
-    {
+    if jwk.has_property("ext")? {
+        let ext = jwk
+            .get::<_, JSValue>("ext")?
+            .to_rust::<bool>()
+            .map_err(|_| error::data("JWK 'ext' must be a boolean"))?;
+        if !ext && extractable {
+            return Err(error::data(
+                "JWK is marked non-extractable but an extractable key was requested",
+            ));
+        }
+    }
+
+    if jwk.has_property("key_ops")? {
+        let ops = jwk.get::<_, JSValue>("key_ops")?;
+        let ops = ops
+            .into_object()
+            .and_then(JSArray::from_object)
+            .ok_or_else(|| error::data("JWK 'key_ops' must be an array of operation strings"))?;
         let mut allowed = Vec::new();
         for entry in ops.iter_values()? {
-            if let Ok(name) = entry?.to_rust::<String>()
-                && let Some(usage) = KeyUsage::from_name(&name)
-            {
-                allowed.push(usage);
+            let name = entry?
+                .to_rust::<String>()
+                .map_err(|_| error::data("JWK 'key_ops' entries must be strings"))?;
+            let Some(usage) = KeyUsage::from_name(&name) else {
+                // RFC 7517 allows other operation names; they simply do not
+                // satisfy a Web Crypto usage.
+                continue;
+            };
+            if allowed.contains(&usage) {
+                return Err(error::data(format!(
+                    "JWK key_ops contains duplicate '{name}'"
+                )));
             }
+            allowed.push(usage);
         }
         if let Some(missing) = usages.iter().find(|usage| !allowed.contains(usage)) {
             return Err(error::data(format!(

@@ -84,6 +84,12 @@ fn bad_iv_len(algorithm: &str, expected: usize, len: usize) -> RongJSError {
     ))
 }
 
+fn unsupported_gcm_iv(len: usize) -> RongJSError {
+    error::not_supported(format!(
+        "AES-GCM only supports a 12-byte (96-bit) iv, got {len}"
+    ))
+}
+
 /// Run `$body` with `$cipher` bound to the AES variant matching the key length.
 macro_rules! by_aes_key_len {
     ($algorithm:literal, $key:expr, |$cipher:ident| $body:expr, $c128:ty, $c192:ty, $c256:ty) => {
@@ -114,10 +120,9 @@ pub(crate) fn aes_gcm_encrypt(
     plaintext: &[u8],
 ) -> JSResult<Vec<u8>> {
     if iv.len() != GCM_IV_LEN {
-        return Err(bad_iv_len("AES-GCM", GCM_IV_LEN, iv.len()));
+        return Err(unsupported_gcm_iv(iv.len()));
     }
-    let nonce =
-        Nonce::<U12>::try_from(iv).map_err(|_| bad_iv_len("AES-GCM", GCM_IV_LEN, iv.len()))?;
+    let nonce = Nonce::<U12>::try_from(iv).map_err(|_| unsupported_gcm_iv(iv.len()))?;
 
     by_aes_key_len!(
         "AES-GCM",
@@ -150,10 +155,9 @@ pub(crate) fn aes_gcm_decrypt(
     ciphertext: &[u8],
 ) -> JSResult<Vec<u8>> {
     if iv.len() != GCM_IV_LEN {
-        return Err(bad_iv_len("AES-GCM", GCM_IV_LEN, iv.len()));
+        return Err(unsupported_gcm_iv(iv.len()));
     }
-    let nonce =
-        Nonce::<U12>::try_from(iv).map_err(|_| bad_iv_len("AES-GCM", GCM_IV_LEN, iv.len()))?;
+    let nonce = Nonce::<U12>::try_from(iv).map_err(|_| unsupported_gcm_iv(iv.len()))?;
 
     by_aes_key_len!(
         "AES-GCM",

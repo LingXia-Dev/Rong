@@ -1,10 +1,12 @@
 //! `CryptoKey` and the key-usage rules the operations enforce.
 
-use rong::{Class, JSArray, JSContext, JSObject, JSResult, JSValue, js_class, js_method};
+use rong::{Class, JSArray, JSContext, JSFunc, JSObject, JSResult, JSValue, js_class, js_method};
 
 use crate::algorithm::Algorithm;
 use crate::error;
 use crate::hash::HashAlg;
+use std::rc::Rc;
+use std::sync::Mutex;
 
 /// A member of the `KeyUsage` enumeration.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -116,6 +118,12 @@ impl KeyAlgorithm {
     }
 }
 
+#[derive(Default)]
+struct JsKeyCache {
+    algorithm: Option<JSObject>,
+    usages: Option<JSArray>,
+}
+
 /// The Web Cryptography `CryptoKey` interface.
 ///
 /// Instances are only ever produced by `SubtleCrypto`; the constructor is
@@ -126,9 +134,11 @@ pub struct CryptoKey {
     extractable: bool,
     algorithm: KeyAlgorithm,
     usages: Vec<KeyUsage>,
-    /// Raw key material. Only symmetric keys exist in this pass, so this is
-    /// always the secret itself.
+    /// Raw key material for this secret key.
     secret: Vec<u8>,
+    /// Cached `algorithm` / `usages` objects. The spec returns the same
+    /// ECMAScript values on every get; `usages` is frozen.
+    cache: Rc<Mutex<JsKeyCache>>,
 }
 
 impl CryptoKey {
@@ -144,6 +154,7 @@ impl CryptoKey {
             algorithm,
             usages,
             secret,
+            cache: Rc::new(Mutex::new(JsKeyCache::default())),
         }
     }
 
@@ -210,22 +221,49 @@ impl CryptoKey {
 
     #[js_method(getter, enumerable)]
     fn algorithm(&self, ctx: JSContext) -> JSResult<JSObject> {
-        self.algorithm.to_js_object(&ctx)
+        let mut cache = self.cache.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(algorithm) = cache.algorithm.as_ref() {
+            return Ok(algorithm.clone());
+        }
+        let algorithm = self.algorithm.to_js_object(&ctx)?;
+        cache.algorithm = Some(algorithm.clone());
+        Ok(algorithm)
     }
 
     #[js_method(getter, enumerable)]
     fn usages(&self, ctx: JSContext) -> JSResult<JSArray> {
+        let mut cache = self.cache.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(usages) = cache.usages.as_ref() {
+            return Ok(usages.clone());
+        }
         let array = JSArray::new(&ctx)?;
         for usage in &self.usages {
             array.push(usage.as_str())?;
         }
+        freeze_js(&ctx, array.clone())?;
+        cache.usages = Some(array.clone());
         Ok(array)
     }
 
     #[js_method(gc_mark)]
-    fn gc_mark_with<F>(&self, _mark_fn: F)
+    fn gc_mark_with<F>(&self, mut mark_fn: F)
     where
         F: FnMut(&JSValue),
     {
+        if let Ok(cache) = self.cache.lock() {
+            if let Some(algorithm) = cache.algorithm.as_ref() {
+                mark_fn(algorithm.as_js_value());
+            }
+            if let Some(usages) = cache.usages.as_ref() {
+                mark_fn(usages.as_js_value());
+            }
+        }
     }
+}
+
+fn freeze_js(ctx: &JSContext, array: JSArray) -> JSResult<()> {
+    let object: JSObject = ctx.global().get("Object")?;
+    let freeze: JSFunc = object.get("freeze")?;
+    freeze.call::<_, JSValue>(None, (array,))?;
+    Ok(())
 }
