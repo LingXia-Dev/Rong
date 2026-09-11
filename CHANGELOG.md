@@ -16,6 +16,46 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
   manual dispatch still run it. macOS jobs prefer Xcode libclang over
   Homebrew LLVM when present.
 
+## [0.6.2] - 2026-09-11
+
+Independent crate and npm releases: first publish of `rong_crypto` 0.6.0,
+plus `rong_core` 0.6.1, `rong_abort` 0.6.1, `rong_http` 0.6.1,
+`rong_modules` 0.6.1, `rong_typegen` 0.6.1, and `@rongjs/rong` 0.6.1.
+
+### Crypto
+
+- First public `rong_crypto` module. `rong_crypto::init` installs
+  `globalThis.crypto` with a Web Crypto subset: `getRandomValues`,
+  `randomUUID`, SHA-1/256/384/512 digest, HMAC sign/verify, AES-GCM
+  (96-bit IV, 128-bit tag) and AES-CBC encrypt/decrypt, PBKDF2 and HKDF
+  derivation, and `raw` / oct JWK import/export. Asymmetric algorithms and
+  AES-CTR/AES-KW are recognized and rejected with `NotSupportedError`.
+- `rong_modules` adds an optional `crypto` feature, also included in `all`.
+
+### Core
+
+- Embedders can open a `TaskScope` on a context (`begin_task_scope`,
+  `enter_task_scope`, `cancel_task_scope`). Host promises created while a
+  scope is current can be abandoned as a group: their tasks abort, held
+  resources drop, and unsettled promises never run their continuations.
+
+### Abort
+
+- A dropped `AbortSignal` parks its receivers instead of spinning. Fetch
+  abort bridges no longer pin a JS worker at full CPU after the signal is
+  gone.
+
+### HTTP
+
+- Fetch's abort bridge ends when the transport drops its receiver (response
+  done or gone), instead of outliving every request that carried a signal.
+
+### npm
+
+- `@rongjs/rong` 0.6.1 documents the crypto subset and `Storage.has`.
+  `rong_typegen` 0.6.1 ships Crypto ambient types in the `logic-web`
+  profile.
+
 ## [0.6.1] - 2026-09-09
 
 Independent crate releases: `rong_rt` 0.6.1, `rong_command` 0.6.1, and

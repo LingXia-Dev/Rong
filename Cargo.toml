@@ -41,7 +41,7 @@ categories = ["api-bindings"]
 [workspace.dependencies]
 # Internal dependencies
 rong = { path = ".", default-features = false      , version = "0.6.0" }
-rong_core = { path = "core"      , version = "0.6.0" }
+rong_core = { path = "core"      , version = "0.6.1" }
 rong_quickjs = { path = "quickjs"      , version = "0.6.0" }
 rong_quickjs_sys = { path = "quickjs/sys"      , version = "0.6.0" }
 rong_jscore = { path = "javascriptcore"      , version = "0.6.0" }
@@ -52,9 +52,9 @@ rong_macro = { path = "rong_macro"      , version = "0.6.0" }
 rong_test = { path = "testing/rong_test", default-features = false   , version = "0.4.0" }
 rong_test_harness = { path = "testing/rong_test_harness"   , version = "0.4.0" }
 rong_test_device = { path = "testing/rong_test_device"   , version = "0.4.0" }
-rong_modules = { path = "rong_modules"      , version = "0.6.0" }
+rong_modules = { path = "rong_modules"      , version = "0.6.1" }
 rong_rt = { path = "rong_rt"   , default-features = false   , version = "0.6.1" }
-rong_typegen = { path = "rong_typegen", default-features = false, version = "0.6.0" }
+rong_typegen = { path = "rong_typegen", default-features = false, version = "0.6.1" }
 
 # Module dependencies
 rong_timer = { path = "modules/rong_timer"   , default-features = false   , version = "0.6.0" }
@@ -62,11 +62,11 @@ rong_cron = { path = "modules/rong_cron"   , default-features = false   , versio
 rong_console = { path = "modules/rong_console"   , default-features = false   , version = "0.6.0" }
 rong_assert = { path = "modules/rong_assert"   , default-features = false   , version = "0.6.0" }
 rong_fs = { path = "modules/rong_fs"   , default-features = false   , version = "0.6.0" }
-rong_http = { path = "modules/rong_http"   , default-features = false   , version = "0.6.0" }
+rong_http = { path = "modules/rong_http"   , default-features = false   , version = "0.6.1" }
 rong_encoding = { path = "modules/rong_encoding"   , default-features = false   , version = "0.6.0" }
 rong_event = { path = "modules/rong_event"   , default-features = false   , version = "0.6.0" }
 rong_exception = { path = "modules/rong_exception"   , default-features = false   , version = "0.6.0" }
-rong_abort = { path = "modules/rong_abort"   , default-features = false   , version = "0.6.0" }
+rong_abort = { path = "modules/rong_abort"   , default-features = false   , version = "0.6.1" }
 rong_url = { path = "modules/rong_url"   , default-features = false   , version = "0.6.0" }
 rong_buffer = { path = "modules/rong_buffer"   , default-features = false   , version = "0.6.0" }
 rong_stream = { path = "modules/rong_stream"   , default-features = false   , version = "0.6.0" }
