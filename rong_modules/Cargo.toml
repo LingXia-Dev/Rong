@@ -13,6 +13,9 @@ categories.workspace = true
 documentation = "https://docs.rs/rong_modules"
 readme = "README.md"
 
+[package.metadata.docs.rs]
+features = ["quickjs"]
+
 [dependencies]
 rong = { workspace = true }
 rong_timer = { workspace = true, optional = true }

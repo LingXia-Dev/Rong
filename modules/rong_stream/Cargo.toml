@@ -12,6 +12,10 @@ keywords.workspace = true
 categories.workspace = true
 documentation = "https://docs.rs/rong_stream"
 readme = "README.md"
+
+[package.metadata.docs.rs]
+features = ["quickjs"]
+
 [lib]
 name = "rong_stream"
 path = "src/lib.rs"
