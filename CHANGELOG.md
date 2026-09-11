@@ -6,6 +6,12 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 
 ## [Unreleased]
 
+### Crypto
+
+- docs.rs documents `rong_crypto` with the `quickjs` engine feature so
+  rustdoc can see `rong::JSContext`. 0.6.0's docs build failed without an
+  engine.
+
 ### CI
 
 - Host verification batches `cargo test` (core integration tests, module

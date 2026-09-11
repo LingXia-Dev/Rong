@@ -1,6 +1,6 @@
 [package]
 name = "rong_crypto"
-version = "0.6.0"
+version = "0.6.1"
 edition.workspace = true
 
 description = "Web Cryptography API module for RongJS"
@@ -12,6 +12,9 @@ keywords.workspace = true
 categories.workspace = true
 documentation = "https://docs.rs/rong_crypto"
 readme = "README.md"
+
+[package.metadata.docs.rs]
+features = ["quickjs"]
 
 [lib]
 name = "rong_crypto"

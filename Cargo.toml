@@ -70,7 +70,7 @@ rong_abort = { path = "modules/rong_abort"   , default-features = false   , vers
 rong_url = { path = "modules/rong_url"   , default-features = false   , version = "0.6.0" }
 rong_buffer = { path = "modules/rong_buffer"   , default-features = false   , version = "0.6.0" }
 rong_stream = { path = "modules/rong_stream"   , default-features = false   , version = "0.6.0" }
-rong_crypto = { path = "modules/rong_crypto"   , default-features = false   , version = "0.6.0" }
+rong_crypto = { path = "modules/rong_crypto"   , default-features = false   , version = "0.6.1" }
 rong_compression = { path = "modules/rong_compression"   , default-features = false   , version = "0.6.0" }
 rong_command = { path = "modules/rong_command"   , default-features = false   , version = "0.6.1" }
 rong_storage = { path = "modules/rong_storage"   , default-features = false   , version = "0.6.1" }
