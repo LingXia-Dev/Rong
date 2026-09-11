@@ -1,7 +1,7 @@
 //! The `SubtleCrypto` interface: `crypto.subtle`.
 //!
-//! Every method is `async`, so the `#[js_class]` macro turns it into a
-//! promise-returning JavaScript method, matching the specification.
+//! Entry points copy and normalize inputs synchronously, then return a promise
+//! for the operation. No caller-owned dictionary or buffer crosses that boundary.
 //!
 //! Each entry point normalizes its `AlgorithmIdentifier` first and then matches
 //! on [`Algorithm`]. Asymmetric algorithms are recognized by
@@ -10,16 +10,19 @@
 
 use rong::function::Optional;
 use rong::{
-    Class, IntoJSValue, JSArrayBuffer, JSContext, JSObject, JSResult, JSValue, js_class, js_method,
+    Class, IntoJSValue, JSContext, JSEngineValue, JSObject, JSResult, JSValue, Promise, js_class,
+    js_method,
 };
 
 use crate::algorithm::{self, Algorithm, NormalizedAlgorithm};
 use crate::buffer;
 use crate::crypto::random_bytes;
 use crate::error;
+use crate::hash::HashAlg;
 use crate::jwk;
 use crate::key::{CryptoKey, KeyAlgorithm, KeyUsage, parse_usages};
 use crate::ops;
+use std::future::Future;
 
 const HMAC_USAGES: &[KeyUsage] = &[KeyUsage::Sign, KeyUsage::Verify];
 const AES_USAGES: &[KeyUsage] = &[
@@ -47,22 +50,45 @@ fn check_usages(algorithm: &str, allowed: &[KeyUsage], usages: &[KeyUsage]) -> J
     Ok(())
 }
 
-/// Read a dictionary member that must be a non-negative integer.
-fn integer_param(normalized: &NormalizedAlgorithm, key: &str) -> JSResult<u64> {
-    let value = normalized.require_param(key)?;
-    let number = value.to_rust::<f64>().map_err(|_| {
-        error::type_error(format!(
-            "{}: '{key}' must be a number",
-            normalized.algorithm.canonical_name()
-        ))
-    })?;
-    if !number.is_finite() || number < 0.0 || number.fract() != 0.0 {
+/// Prepare inputs now; even preparation failures are delivered as rejections.
+fn dispatch<F, T>(ctx: &JSContext, prepare: impl FnOnce() -> JSResult<F>) -> JSResult<Promise>
+where
+    F: Future<Output = JSResult<T>> + 'static,
+    T: IntoJSValue<JSEngineValue> + 'static,
+{
+    let prepared = prepare();
+    Promise::from_future(ctx, None, async move { prepared?.await })
+}
+
+/// WebIDL [EnforceRange]: truncate first, then check the destination range.
+fn unsigned_param(value: JSValue, label: &str, max: u32) -> JSResult<u32> {
+    let number = value.to_rust::<f64>()?;
+    let integer = number.trunc();
+    if !number.is_finite() || integer < 0.0 || integer > f64::from(max) {
         return Err(error::type_error(format!(
-            "{}: '{key}' must be a non-negative integer",
-            normalized.algorithm.canonical_name()
+            "{label} must be between 0 and {max}"
         )));
     }
-    Ok(number as u64)
+    Ok(integer as u32)
+}
+
+/// Unlike dictionary members, deriveBits' length has no [EnforceRange].
+/// WebIDL unsigned long conversion wraps modulo 2^32 before the operation.
+fn derived_bits_length(value: JSValue) -> JSResult<usize> {
+    let number = value.to_rust::<f64>()?;
+    if !number.is_finite() || number == 0.0 {
+        return Ok(0);
+    }
+    Ok(number.trunc().rem_euclid(4_294_967_296.0) as u32 as usize)
+}
+
+fn integer_param(normalized: &NormalizedAlgorithm, key: &str) -> JSResult<u32> {
+    let max = if normalized.algorithm.is_aes() && key == "length" {
+        u32::from(u16::MAX)
+    } else {
+        u32::MAX
+    };
+    unsigned_param(normalized.require_param(key)?, key, max)
 }
 
 /// Read an optional `BufferSource` dictionary member, defaulting to empty.
@@ -84,10 +110,8 @@ fn check_gcm_tag_length(normalized: &NormalizedAlgorithm) -> JSResult<()> {
     let Some(value) = normalized.param("tagLength")? else {
         return Ok(());
     };
-    let bits = value
-        .to_rust::<f64>()
-        .map_err(|_| error::type_error("AES-GCM: 'tagLength' must be a number"))?;
-    if bits != 128.0 {
+    let bits = unsigned_param(value, "AES-GCM tagLength", u32::from(u8::MAX))?;
+    if bits != 128 {
         return Err(error::not_supported(format!(
             "AES-GCM only supports a 128-bit tagLength, got {bits}"
         )));
@@ -192,52 +216,79 @@ fn derived_length_bytes(bits: usize) -> JSResult<usize> {
     Ok(bits / 8)
 }
 
-/// The shared body of `deriveBits` and `deriveKey`.
-async fn derive_bits_from(
-    normalized: &NormalizedAlgorithm,
-    base_key: &CryptoKey,
-    usage: KeyUsage,
-    bits: usize,
-) -> JSResult<Vec<u8>> {
-    let algorithm = normalized.require_implemented("deriveBits")?;
+/// Owned derivation inputs; preparation never starts background work.
+struct Derivation {
+    algorithm: Algorithm,
+    hash: HashAlg,
+    material: Vec<u8>,
+    salt: Vec<u8>,
+    info: Vec<u8>,
+    iterations: u32,
+    out_len: usize,
+}
 
-    match algorithm {
-        Algorithm::Pbkdf2 => {
-            base_key.require(Algorithm::Pbkdf2, usage)?;
-            let hash = normalized.require_hash()?;
-            let salt = require_buffer_param(normalized, "salt")?;
+impl Derivation {
+    fn prepare(
+        normalized: &NormalizedAlgorithm,
+        base_key: &CryptoKey,
+        usage: KeyUsage,
+        bits: usize,
+    ) -> JSResult<Self> {
+        let algorithm = normalized.require_implemented("deriveBits")?;
+        if !matches!(algorithm, Algorithm::Pbkdf2 | Algorithm::Hkdf) {
+            return Err(error::not_supported(format!(
+                "{} is not supported for key derivation",
+                algorithm.canonical_name()
+            )));
+        }
+        base_key.require(algorithm, usage)?;
+        let hash = normalized.require_hash()?;
+        let salt = require_buffer_param(normalized, "salt")?;
+        let (iterations, info) = if algorithm == Algorithm::Pbkdf2 {
             let iterations = integer_param(normalized, "iterations")?;
-            if iterations == 0 || iterations > u32::MAX as u64 {
-                return Err(error::operation(
-                    "PBKDF2 'iterations' must be between 1 and 2^32 - 1",
-                ));
+            if iterations == 0 {
+                return Err(error::operation("PBKDF2 iterations must not be zero"));
             }
-            let out_len = derived_length_bytes(bits)?;
-            if out_len == 0 {
-                return Ok(Vec::new());
-            }
-            let material = base_key.material().to_vec();
+            (iterations, Vec::new())
+        } else {
+            (0, require_buffer_param(normalized, "info")?)
+        };
+        Ok(Self {
+            algorithm,
+            hash,
+            material: base_key.material().to_vec(),
+            salt,
+            info,
+            iterations,
+            out_len: derived_length_bytes(bits)?,
+        })
+    }
+
+    async fn run(self) -> JSResult<Vec<u8>> {
+        if self.out_len == 0 {
+            return Ok(Vec::new());
+        }
+        if self.algorithm == Algorithm::Pbkdf2 {
             tokio::task::spawn_blocking(move || {
-                ops::pbkdf2(hash, &material, &salt, iterations as u32, out_len)
+                ops::pbkdf2(
+                    self.hash,
+                    &self.material,
+                    &self.salt,
+                    self.iterations,
+                    self.out_len,
+                )
             })
             .await
             .map_err(|error| error::operation(format!("PBKDF2 derivation task failed: {error}")))
+        } else {
+            ops::hkdf(
+                self.hash,
+                &self.material,
+                &self.salt,
+                &self.info,
+                self.out_len,
+            )
         }
-        Algorithm::Hkdf => {
-            base_key.require(Algorithm::Hkdf, usage)?;
-            let hash = normalized.require_hash()?;
-            let salt = require_buffer_param(normalized, "salt")?;
-            let info = require_buffer_param(normalized, "info")?;
-            let out_len = derived_length_bytes(bits)?;
-            if out_len == 0 {
-                return Ok(Vec::new());
-            }
-            ops::hkdf(hash, base_key.material(), &salt, &info, out_len)
-        }
-        other => Err(error::not_supported(format!(
-            "{} is not supported for key derivation",
-            other.canonical_name()
-        ))),
     }
 }
 
@@ -271,27 +322,29 @@ impl SubtleCrypto {
 
     /// `digest(algorithm, data)` for SHA-1, SHA-256, SHA-384 and SHA-512.
     #[js_method]
-    async fn digest(
-        &self,
-        ctx: JSContext,
-        algorithm: JSValue,
-        data: JSValue,
-    ) -> JSResult<JSArrayBuffer> {
-        let normalized = algorithm::normalize(&algorithm)?;
-        let bytes = buffer::buffer_source(&data, "data")?;
-        match normalized.require_implemented("digest")? {
-            Algorithm::Hash(hash) => buffer::to_array_buffer(&ctx, hash.digest(&bytes)),
-            other => Err(error::not_supported(format!(
-                "{} is not supported for digest",
-                other.canonical_name()
-            ))),
-        }
+    fn digest(&self, ctx: JSContext, algorithm: JSValue, data: JSValue) -> JSResult<Promise> {
+        let promise_ctx = ctx.clone();
+        dispatch(&promise_ctx, || {
+            let bytes = buffer::buffer_source(&data, "data")?;
+            let normalized = algorithm::normalize(&algorithm)?;
+            let algorithm = normalized.require_implemented("digest")?;
+
+            Ok(async move {
+                match algorithm {
+                    Algorithm::Hash(hash) => buffer::to_array_buffer(&ctx, hash.digest(&bytes)),
+                    other => Err(error::not_supported(format!(
+                        "{} is not supported for digest",
+                        other.canonical_name()
+                    ))),
+                }
+            })
+        })
     }
 
     /// `importKey(format, keyData, algorithm, extractable, keyUsages)` for the
     /// `raw` and `jwk` formats.
     #[js_method(rename = "importKey")]
-    async fn import_key(
+    fn import_key(
         &self,
         ctx: JSContext,
         format: String,
@@ -299,68 +352,74 @@ impl SubtleCrypto {
         algorithm: JSValue,
         extractable: bool,
         key_usages: JSValue,
-    ) -> JSResult<JSObject> {
-        let normalized = algorithm::normalize(&algorithm)?;
-        let usages = parse_usages(&key_usages)?;
-        let algorithm_id = normalized.require_implemented("importKey")?;
+    ) -> JSResult<Promise> {
+        let promise_ctx = ctx.clone();
+        dispatch(&promise_ctx, || {
+            let normalized = algorithm::normalize(&algorithm)?;
+            let usages = parse_usages(&key_usages)?;
+            let algorithm_id = normalized.require_implemented("importKey")?;
 
-        let allowed = match algorithm_id {
-            Algorithm::Hmac => HMAC_USAGES,
-            id if id.is_aes() => AES_USAGES,
-            Algorithm::Pbkdf2 | Algorithm::Hkdf => DERIVE_USAGES,
-            other => {
-                return Err(error::not_supported(format!(
-                    "{} is not supported for importKey",
-                    other.canonical_name()
-                )));
-            }
-        };
-        check_usages(algorithm_id.canonical_name(), allowed, &usages)?;
+            let allowed = match algorithm_id {
+                Algorithm::Hmac => HMAC_USAGES,
+                id if id.is_aes() => AES_USAGES,
+                Algorithm::Pbkdf2 | Algorithm::Hkdf => DERIVE_USAGES,
+                other => {
+                    return Err(error::not_supported(format!(
+                        "{} is not supported for importKey",
+                        other.canonical_name()
+                    )));
+                }
+            };
+            check_usages(algorithm_id.canonical_name(), allowed, &usages)?;
 
-        // PBKDF2/HKDF base keys are never extractable.
-        if matches!(algorithm_id, Algorithm::Pbkdf2 | Algorithm::Hkdf) {
-            if format != "raw" {
-                return Err(error::not_supported(format!(
-                    "{} keys can only be imported in 'raw' format",
-                    algorithm_id.canonical_name()
-                )));
+            // PBKDF2/HKDF base keys are never extractable.
+            if matches!(algorithm_id, Algorithm::Pbkdf2 | Algorithm::Hkdf) {
+                if format != "raw" {
+                    return Err(error::not_supported(format!(
+                        "{} keys can only be imported in 'raw' format",
+                        algorithm_id.canonical_name()
+                    )));
+                }
+                if extractable {
+                    return Err(error::syntax(format!(
+                        "{} keys must be imported as non-extractable",
+                        algorithm_id.canonical_name()
+                    )));
+                }
             }
-            if extractable {
-                return Err(error::syntax(format!(
-                    "{} keys must be imported as non-extractable",
-                    algorithm_id.canonical_name()
-                )));
-            }
-        }
 
-        let (secret, source_jwk) = match format.as_str() {
-            "raw" => (buffer::buffer_source(&key_data, "keyData")?, None),
-            "jwk" => {
-                let object = key_data.clone().into_object().ok_or_else(|| {
-                    error::data("a 'jwk' import requires the key data to be a JSON Web Key object")
-                })?;
-                (jwk::decode_secret(&object)?, Some(object))
-            }
-            other => {
-                return Err(error::not_supported(format!(
-                    "key format '{other}' is not supported"
-                )));
-            }
-        };
+            let (secret, source_jwk) = match format.as_str() {
+                "raw" => (buffer::buffer_source(&key_data, "keyData")?, None),
+                "jwk" => {
+                    let object = key_data.clone().into_object().ok_or_else(|| {
+                        error::data(
+                            "a 'jwk' import requires the key data to be a JSON Web Key object",
+                        )
+                    })?;
+                    (jwk::decode_secret(&object)?, Some(object))
+                }
+                other => {
+                    return Err(error::not_supported(format!(
+                        "key format '{other}' is not supported"
+                    )));
+                }
+            };
 
-        let key = build_symmetric_key(
-            &normalized,
-            algorithm_id,
-            secret,
-            extractable,
-            usages.clone(),
-        )?;
-        if let Some(object) = source_jwk {
-            // `alg`, `ext` and `key_ops` are checked against the key the other
-            // arguments describe, which needs the decoded material first.
-            jwk::validate(&object, key.key_algorithm(), extractable, &usages)?;
-        }
-        key.into_js(&ctx)
+            let key = build_symmetric_key(
+                &normalized,
+                algorithm_id,
+                secret,
+                extractable,
+                usages.clone(),
+            )?;
+            if let Some(object) = source_jwk {
+                // `alg`, `ext` and `key_ops` are checked against the key the other
+                // arguments describe, which needs the decoded material first.
+                jwk::validate(&object, key.key_algorithm(), extractable, &usages)?;
+            }
+
+            Ok(async move { key.into_js(&ctx) })
+        })
     }
 
     /// `exportKey(format, key)` for the `raw` and `jwk` formats.
@@ -396,215 +455,243 @@ impl SubtleCrypto {
     /// `generateKey(algorithm, extractable, keyUsages)` for HMAC, AES-GCM and
     /// AES-CBC.
     #[js_method(rename = "generateKey")]
-    async fn generate_key(
+    fn generate_key(
         &self,
         ctx: JSContext,
         algorithm: JSValue,
         extractable: bool,
         key_usages: JSValue,
-    ) -> JSResult<JSObject> {
-        let normalized = algorithm::normalize(&algorithm)?;
-        let usages = parse_usages(&key_usages)?;
-        let algorithm_id = normalized.require_implemented("generateKey")?;
+    ) -> JSResult<Promise> {
+        let promise_ctx = ctx.clone();
+        dispatch(&promise_ctx, || {
+            let normalized = algorithm::normalize(&algorithm)?;
+            let usages = parse_usages(&key_usages)?;
+            let algorithm_id = normalized.require_implemented("generateKey")?;
 
-        let (key_algorithm, byte_len) = match algorithm_id {
-            Algorithm::Hmac => {
-                check_usages(algorithm_id.canonical_name(), HMAC_USAGES, &usages)?;
-                let hash = normalized.require_hash()?;
-                let length_bits = match normalized.param("length")? {
-                    Some(_) => integer_param(&normalized, "length")? as usize,
-                    None => hash.block_len() * 8,
-                };
-                if length_bits == 0 || !length_bits.is_multiple_of(8) {
-                    return Err(error::operation(format!(
-                        "HMAC key length must be a non-zero multiple of 8, got {length_bits}"
+            let (key_algorithm, byte_len) = match algorithm_id {
+                Algorithm::Hmac => {
+                    check_usages(algorithm_id.canonical_name(), HMAC_USAGES, &usages)?;
+                    let hash = normalized.require_hash()?;
+                    let length_bits = match normalized.param("length")? {
+                        Some(_) => integer_param(&normalized, "length")? as usize,
+                        None => hash.block_len() * 8,
+                    };
+                    if length_bits == 0 || !length_bits.is_multiple_of(8) {
+                        return Err(error::operation(format!(
+                            "HMAC key length must be a non-zero multiple of 8, got {length_bits}"
+                        )));
+                    }
+                    (KeyAlgorithm::Hmac { hash, length_bits }, length_bits / 8)
+                }
+                Algorithm::AesCbc | Algorithm::AesGcm => {
+                    check_usages(algorithm_id.canonical_name(), AES_USAGES, &usages)?;
+                    let length_bits = integer_param(&normalized, "length")? as usize;
+                    if !ops::AES_KEY_LENGTHS.contains(&length_bits) {
+                        return Err(error::operation(format!(
+                            "{} key length must be 128, 192 or 256, got {length_bits}",
+                            algorithm_id.canonical_name()
+                        )));
+                    }
+                    (
+                        KeyAlgorithm::Aes {
+                            algorithm: algorithm_id,
+                            length_bits,
+                        },
+                        length_bits / 8,
+                    )
+                }
+                other => {
+                    return Err(error::not_supported(format!(
+                        "{} is not supported for generateKey",
+                        other.canonical_name()
                     )));
                 }
-                (KeyAlgorithm::Hmac { hash, length_bits }, length_bits / 8)
-            }
-            Algorithm::AesCbc | Algorithm::AesGcm => {
-                check_usages(algorithm_id.canonical_name(), AES_USAGES, &usages)?;
-                let length_bits = integer_param(&normalized, "length")? as usize;
-                if !ops::AES_KEY_LENGTHS.contains(&length_bits) {
-                    return Err(error::operation(format!(
-                        "{} key length must be 128, 192 or 256, got {length_bits}",
-                        algorithm_id.canonical_name()
-                    )));
-                }
-                (
-                    KeyAlgorithm::Aes {
-                        algorithm: algorithm_id,
-                        length_bits,
-                    },
-                    length_bits / 8,
-                )
-            }
-            other => {
-                return Err(error::not_supported(format!(
-                    "{} is not supported for generateKey",
-                    other.canonical_name()
-                )));
-            }
-        };
+            };
 
-        let secret = random_bytes(byte_len)?;
-        CryptoKey::secret(key_algorithm, extractable, usages, secret).into_js(&ctx)
+            Ok(async move {
+                let secret = random_bytes(byte_len)?;
+                CryptoKey::secret(key_algorithm, extractable, usages, secret).into_js(&ctx)
+            })
+        })
     }
 
     /// `sign(algorithm, key, data)`; HMAC only.
     #[js_method]
-    async fn sign(
+    fn sign(
         &self,
         ctx: JSContext,
         algorithm: JSValue,
         key: CryptoKey,
         data: JSValue,
-    ) -> JSResult<JSArrayBuffer> {
-        let normalized = algorithm::normalize(&algorithm)?;
-        let bytes = buffer::buffer_source(&data, "data")?;
-        match normalized.require_implemented("sign")? {
-            Algorithm::Hmac => {
-                key.require(Algorithm::Hmac, KeyUsage::Sign)?;
-                let KeyAlgorithm::Hmac { hash, .. } = key.key_algorithm() else {
-                    return Err(error::invalid_access("key is not an HMAC key"));
-                };
-                let signature = ops::hmac_sign(hash, key.material(), &bytes);
-                buffer::to_array_buffer(&ctx, signature)
-            }
-            other => Err(error::not_supported(format!(
-                "{} is not supported for sign",
-                other.canonical_name()
-            ))),
-        }
+    ) -> JSResult<Promise> {
+        let promise_ctx = ctx.clone();
+        dispatch(&promise_ctx, || {
+            let bytes = buffer::buffer_source(&data, "data")?;
+            let normalized = algorithm::normalize(&algorithm)?;
+            let algorithm = normalized.require_implemented("sign")?;
+
+            Ok(async move {
+                match algorithm {
+                    Algorithm::Hmac => {
+                        key.require(Algorithm::Hmac, KeyUsage::Sign)?;
+                        let KeyAlgorithm::Hmac { hash, .. } = key.key_algorithm() else {
+                            return Err(error::invalid_access("key is not an HMAC key"));
+                        };
+                        let signature = ops::hmac_sign(hash, key.material(), &bytes);
+                        buffer::to_array_buffer(&ctx, signature)
+                    }
+                    other => Err(error::not_supported(format!(
+                        "{} is not supported for sign",
+                        other.canonical_name()
+                    ))),
+                }
+            })
+        })
     }
 
     /// `verify(algorithm, key, signature, data)`; HMAC only.
     ///
     /// The tag comparison runs in constant time inside [`ops::hmac_verify`].
     #[js_method]
-    async fn verify(
+    fn verify(
         &self,
+        ctx: JSContext,
         algorithm: JSValue,
         key: CryptoKey,
         signature: JSValue,
         data: JSValue,
-    ) -> JSResult<bool> {
-        let normalized = algorithm::normalize(&algorithm)?;
-        let signature = buffer::buffer_source(&signature, "signature")?;
-        let bytes = buffer::buffer_source(&data, "data")?;
-        match normalized.require_implemented("verify")? {
-            Algorithm::Hmac => {
-                key.require(Algorithm::Hmac, KeyUsage::Verify)?;
-                let KeyAlgorithm::Hmac { hash, .. } = key.key_algorithm() else {
-                    return Err(error::invalid_access("key is not an HMAC key"));
-                };
-                Ok(ops::hmac_verify(hash, key.material(), &bytes, &signature))
-            }
-            other => Err(error::not_supported(format!(
-                "{} is not supported for verify",
-                other.canonical_name()
-            ))),
-        }
+    ) -> JSResult<Promise> {
+        let promise_ctx = ctx.clone();
+        dispatch(&promise_ctx, || {
+            let signature = buffer::buffer_source(&signature, "signature")?;
+            let bytes = buffer::buffer_source(&data, "data")?;
+            let normalized = algorithm::normalize(&algorithm)?;
+            let algorithm = normalized.require_implemented("verify")?;
+
+            Ok(async move {
+                match algorithm {
+                    Algorithm::Hmac => {
+                        key.require(Algorithm::Hmac, KeyUsage::Verify)?;
+                        let KeyAlgorithm::Hmac { hash, .. } = key.key_algorithm() else {
+                            return Err(error::invalid_access("key is not an HMAC key"));
+                        };
+                        Ok(ops::hmac_verify(hash, key.material(), &bytes, &signature))
+                    }
+                    other => Err(error::not_supported(format!(
+                        "{} is not supported for verify",
+                        other.canonical_name()
+                    ))),
+                }
+            })
+        })
     }
 
     /// `encrypt(algorithm, key, data)` for AES-GCM and AES-CBC.
     #[js_method]
-    async fn encrypt(
+    fn encrypt(
         &self,
         ctx: JSContext,
         algorithm: JSValue,
         key: CryptoKey,
         data: JSValue,
-    ) -> JSResult<JSArrayBuffer> {
-        let normalized = algorithm::normalize(&algorithm)?;
-        let plaintext = buffer::buffer_source(&data, "data")?;
-        let ciphertext = match normalized.require_implemented("encrypt")? {
-            Algorithm::AesGcm => {
-                key.require(Algorithm::AesGcm, KeyUsage::Encrypt)?;
-                check_gcm_tag_length(&normalized)?;
-                let iv = require_buffer_param(&normalized, "iv")?;
-                let aad = buffer_param(&normalized, "additionalData")?;
-                ops::aes_gcm_encrypt(key.material(), &iv, &aad, &plaintext)?
-            }
-            Algorithm::AesCbc => {
-                key.require(Algorithm::AesCbc, KeyUsage::Encrypt)?;
-                let iv = require_buffer_param(&normalized, "iv")?;
-                ops::aes_cbc_encrypt(key.material(), &iv, &plaintext)?
-            }
-            other => {
+    ) -> JSResult<Promise> {
+        let promise_ctx = ctx.clone();
+        dispatch(&promise_ctx, || {
+            let bytes = buffer::buffer_source(&data, "data")?;
+            let normalized = algorithm::normalize(&algorithm)?;
+            let algorithm = normalized.require_implemented("encrypt")?;
+            if !matches!(algorithm, Algorithm::AesGcm | Algorithm::AesCbc) {
                 return Err(error::not_supported(format!(
                     "{} is not supported for encrypt",
-                    other.canonical_name()
+                    algorithm.canonical_name()
                 )));
             }
-        };
-        buffer::to_array_buffer(&ctx, ciphertext)
+            key.require(algorithm, KeyUsage::Encrypt)?;
+            let iv = require_buffer_param(&normalized, "iv")?;
+            let aad = if algorithm == Algorithm::AesGcm {
+                check_gcm_tag_length(&normalized)?;
+                buffer_param(&normalized, "additionalData")?
+            } else {
+                Vec::new()
+            };
+
+            Ok(async move {
+                let result = if algorithm == Algorithm::AesGcm {
+                    ops::aes_gcm_encrypt(key.material(), &iv, &aad, &bytes)?
+                } else {
+                    ops::aes_cbc_encrypt(key.material(), &iv, &bytes)?
+                };
+                buffer::to_array_buffer(&ctx, result)
+            })
+        })
     }
 
     /// `decrypt(algorithm, key, data)` for AES-GCM and AES-CBC.
     #[js_method]
-    async fn decrypt(
+    fn decrypt(
         &self,
         ctx: JSContext,
         algorithm: JSValue,
         key: CryptoKey,
         data: JSValue,
-    ) -> JSResult<JSArrayBuffer> {
-        let normalized = algorithm::normalize(&algorithm)?;
-        let ciphertext = buffer::buffer_source(&data, "data")?;
-        let plaintext = match normalized.require_implemented("decrypt")? {
-            Algorithm::AesGcm => {
-                key.require(Algorithm::AesGcm, KeyUsage::Decrypt)?;
-                check_gcm_tag_length(&normalized)?;
-                let iv = require_buffer_param(&normalized, "iv")?;
-                let aad = buffer_param(&normalized, "additionalData")?;
-                ops::aes_gcm_decrypt(key.material(), &iv, &aad, &ciphertext)?
-            }
-            Algorithm::AesCbc => {
-                key.require(Algorithm::AesCbc, KeyUsage::Decrypt)?;
-                let iv = require_buffer_param(&normalized, "iv")?;
-                ops::aes_cbc_decrypt(key.material(), &iv, &ciphertext)?
-            }
-            other => {
+    ) -> JSResult<Promise> {
+        let promise_ctx = ctx.clone();
+        dispatch(&promise_ctx, || {
+            let bytes = buffer::buffer_source(&data, "data")?;
+            let normalized = algorithm::normalize(&algorithm)?;
+            let algorithm = normalized.require_implemented("decrypt")?;
+            if !matches!(algorithm, Algorithm::AesGcm | Algorithm::AesCbc) {
                 return Err(error::not_supported(format!(
                     "{} is not supported for decrypt",
-                    other.canonical_name()
+                    algorithm.canonical_name()
                 )));
             }
-        };
-        buffer::to_array_buffer(&ctx, plaintext)
+            key.require(algorithm, KeyUsage::Decrypt)?;
+            let iv = require_buffer_param(&normalized, "iv")?;
+            let aad = if algorithm == Algorithm::AesGcm {
+                check_gcm_tag_length(&normalized)?;
+                buffer_param(&normalized, "additionalData")?
+            } else {
+                Vec::new()
+            };
+
+            Ok(async move {
+                let result = if algorithm == Algorithm::AesGcm {
+                    ops::aes_gcm_decrypt(key.material(), &iv, &aad, &bytes)?
+                } else {
+                    ops::aes_cbc_decrypt(key.material(), &iv, &bytes)?
+                };
+                buffer::to_array_buffer(&ctx, result)
+            })
+        })
     }
 
     /// `deriveBits(algorithm, baseKey, length)` for PBKDF2 and HKDF.
     #[js_method(rename = "deriveBits")]
-    async fn derive_bits(
+    fn derive_bits(
         &self,
         ctx: JSContext,
         algorithm: JSValue,
         base_key: CryptoKey,
         length: Optional<JSValue>,
-    ) -> JSResult<JSArrayBuffer> {
-        let normalized = algorithm::normalize(&algorithm)?;
-        let bits = length
-            .0
-            .filter(|value| !value.is_undefined() && !value.is_null())
-            .ok_or_else(|| error::operation("deriveBits requires a length in bits"))?
-            .to_rust::<f64>()
-            .map_err(|_| error::type_error("deriveBits length must be a number"))?;
-        if !bits.is_finite() || bits < 0.0 || bits.fract() != 0.0 {
-            return Err(error::operation(
-                "deriveBits length must be a non-negative integer number of bits",
-            ));
-        }
-
-        let derived =
-            derive_bits_from(&normalized, &base_key, KeyUsage::DeriveBits, bits as usize).await?;
-        buffer::to_array_buffer(&ctx, derived)
+    ) -> JSResult<Promise> {
+        let promise_ctx = ctx.clone();
+        dispatch(&promise_ctx, || {
+            let normalized = algorithm::normalize(&algorithm)?;
+            let length = length
+                .0
+                .filter(|value| !value.is_undefined() && !value.is_null())
+                .ok_or_else(|| error::operation("deriveBits requires a length in bits"))?;
+            let bits = derived_bits_length(length)?;
+            let derivation =
+                Derivation::prepare(&normalized, &base_key, KeyUsage::DeriveBits, bits)?;
+            Ok(async move { buffer::to_array_buffer(&ctx, derivation.run().await?) })
+        })
     }
 
     /// `deriveKey(algorithm, baseKey, derivedKeyAlgorithm, extractable, keyUsages)`.
     #[js_method(rename = "deriveKey")]
-    async fn derive_key(
+    fn derive_key(
         &self,
         ctx: JSContext,
         algorithm: JSValue,
@@ -612,28 +699,54 @@ impl SubtleCrypto {
         derived_key_algorithm: JSValue,
         extractable: bool,
         key_usages: JSValue,
-    ) -> JSResult<JSObject> {
-        let normalized = algorithm::normalize(&algorithm)?;
-        let derived_normalized = algorithm::normalize(&derived_key_algorithm)?;
-        let usages = parse_usages(&key_usages)?;
-        let derived_id = derived_normalized.require_implemented("deriveKey")?;
+    ) -> JSResult<Promise> {
+        let promise_ctx = ctx.clone();
+        dispatch(&promise_ctx, || {
+            let normalized = algorithm::normalize(&algorithm)?;
+            let derived_normalized = algorithm::normalize(&derived_key_algorithm)?;
+            let usages = parse_usages(&key_usages)?;
+            let derived_id = derived_normalized.require_implemented("deriveKey")?;
 
-        let allowed = match derived_id {
-            Algorithm::Hmac => HMAC_USAGES,
-            id if id.is_aes() => AES_USAGES,
-            other => {
-                return Err(error::not_supported(format!(
-                    "{} keys cannot be derived",
-                    other.canonical_name()
-                )));
-            }
-        };
-        check_usages(derived_id.canonical_name(), allowed, &usages)?;
+            let allowed = match derived_id {
+                Algorithm::Hmac => HMAC_USAGES,
+                id if id.is_aes() => AES_USAGES,
+                other => {
+                    return Err(error::not_supported(format!(
+                        "{} keys cannot be derived",
+                        other.canonical_name()
+                    )));
+                }
+            };
+            check_usages(derived_id.canonical_name(), allowed, &usages)?;
 
-        let bits = derived_key_length(&derived_normalized, derived_id)?;
-        let secret = derive_bits_from(&normalized, &base_key, KeyUsage::DeriveKey, bits).await?;
-        build_symmetric_key(&derived_normalized, derived_id, secret, extractable, usages)?
-            .into_js(&ctx)
+            let bits = derived_key_length(&derived_normalized, derived_id)?;
+            let key_algorithm = match derived_id {
+                Algorithm::Hmac => {
+                    if bits == 0 {
+                        return Err(error::operation("HMAC key length must not be zero"));
+                    }
+                    KeyAlgorithm::Hmac {
+                        hash: derived_normalized.require_hash()?,
+                        length_bits: bits,
+                    }
+                }
+                _ => {
+                    if !ops::AES_KEY_LENGTHS.contains(&bits) {
+                        return Err(error::operation("AES key length must be 128, 192 or 256"));
+                    }
+                    KeyAlgorithm::Aes {
+                        algorithm: derived_id,
+                        length_bits: bits,
+                    }
+                }
+            };
+            let derivation =
+                Derivation::prepare(&normalized, &base_key, KeyUsage::DeriveKey, bits)?;
+            Ok(async move {
+                let secret = derivation.run().await?;
+                CryptoKey::secret(key_algorithm, extractable, usages, secret).into_js(&ctx)
+            })
+        })
     }
 
     #[js_method(gc_mark)]
