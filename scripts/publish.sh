@@ -808,7 +808,7 @@ fi
 needs_engine_verify_features() {
   local crate=$1
   case "$crate" in
-    rong|rong_console|rong_assert|rong_encoding|rong_url|rong_timer|rong_cron|rong_event|rong_buffer|rong_exception|rong_abort|rong_stream|rong_fs|rong_storage|rong_http|rong_compression|rong_command|rong_redis|rong_sqlite|rong_worker|rong_s3|rong_modules|rong_cli)
+    rong|rong_console|rong_assert|rong_encoding|rong_url|rong_timer|rong_cron|rong_event|rong_buffer|rong_exception|rong_abort|rong_stream|rong_fs|rong_storage|rong_http|rong_compression|rong_command|rong_redis|rong_sqlite|rong_crypto|rong_worker|rong_s3|rong_modules|rong_cli)
       return 0
       ;;
     *)
