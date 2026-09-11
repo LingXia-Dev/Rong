@@ -316,9 +316,11 @@ interface CryptoKey {
 declare var CryptoKey: { prototype: CryptoKey };
 
 interface HmacKeyGenParams { name: 'HMAC'; hash: AlgorithmIdentifier; length?: number }
+interface HmacImportParams { name: 'HMAC'; hash: AlgorithmIdentifier; length?: number }
 interface AesKeyGenParams { name: 'AES-GCM' | 'AES-CBC'; length: AesKeyLength }
 interface AesGcmParams {
   name: 'AES-GCM';
+  /** 96-bit (12-byte) IVs only. */
   iv: BufferSource;
   additionalData?: BufferSource;
   tagLength?: 128;
@@ -333,7 +335,7 @@ interface Pbkdf2Params {
 interface HkdfParams {
   name: 'HKDF';
   salt: BufferSource;
-  info?: BufferSource;
+  info: BufferSource;
   hash: AlgorithmIdentifier;
 }
 type DeriveParams = Pbkdf2Params | HkdfParams;
@@ -349,14 +351,14 @@ interface SubtleCrypto {
   importKey(
     format: 'raw',
     keyData: BufferSource,
-    algorithm: AlgorithmIdentifier,
+    algorithm: AlgorithmIdentifier | HmacImportParams | AesKeyGenParams,
     extractable: boolean,
     keyUsages: KeyUsage[],
   ): Promise<CryptoKey>;
   importKey(
     format: 'jwk',
     keyData: JsonWebKey,
-    algorithm: AlgorithmIdentifier,
+    algorithm: AlgorithmIdentifier | HmacImportParams | AesKeyGenParams,
     extractable: boolean,
     keyUsages: KeyUsage[],
   ): Promise<CryptoKey>;

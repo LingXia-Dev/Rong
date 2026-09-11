@@ -165,6 +165,17 @@ describe("crypto.subtle.digest", () => {
     );
   });
 
+  test("accepts a DataView, including a sliced window", async () => {
+    const expected =
+      "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
+    const whole = encoder.encode("abc");
+    expect(hex(await crypto.subtle.digest("SHA-256", new DataView(whole.buffer)))).toBe(expected);
+
+    const backing = new Uint8Array([0, 0, 97, 98, 99, 0, 0]);
+    const window = new DataView(backing.buffer, 2, 3);
+    expect(hex(await crypto.subtle.digest("SHA-256", window))).toBe(expected);
+  });
+
   test("resolves with an ArrayBuffer", async () => {
     const digest = await crypto.subtle.digest("SHA-256", new Uint8Array(1));
     expect(digest instanceof ArrayBuffer).toBe(true);
@@ -246,6 +257,35 @@ describe("crypto.subtle HMAC", () => {
     expect(key.algorithm.length).toBe(512);
     const raw = await crypto.subtle.exportKey("raw", key);
     expect(raw.byteLength).toBe(64);
+  });
+
+  test("importKey honors HmacImportParams.length", async () => {
+    const raw = new Uint8Array(32);
+    const key = await crypto.subtle.importKey(
+      "raw",
+      raw,
+      { name: "HMAC", hash: "SHA-256", length: 256 },
+      true,
+      ["sign"],
+    );
+    expect(key.algorithm.length).toBe(256);
+    expect((await crypto.subtle.exportKey("raw", key)).byteLength).toBe(32);
+  });
+
+  test("importKey rejects HMAC length 0 and a truncated length with DataError", async () => {
+    const raw = new Uint8Array(32);
+    const zero = await rejects(
+      crypto.subtle.importKey("raw", raw, { name: "HMAC", hash: "SHA-256", length: 0 }, true, [
+        "sign",
+      ]),
+    );
+    expect(zero.name).toBe("DataError");
+    const truncated = await rejects(
+      crypto.subtle.importKey("raw", raw, { name: "HMAC", hash: "SHA-256", length: 128 }, true, [
+        "sign",
+      ]),
+    );
+    expect(truncated.name).toBe("DataError");
   });
 });
 
@@ -355,7 +395,7 @@ describe("crypto.subtle AES-GCM", () => {
     const error = await rejects(
       crypto.subtle.encrypt({ name: "AES-GCM", iv: new Uint8Array(16) }, key, new Uint8Array(1)),
     );
-    expect(error.name).toBe("OperationError");
+    expect(error.name).toBe("NotSupportedError");
   });
 
   test("a truncated tagLength is not supported", async () => {
@@ -557,6 +597,23 @@ describe("crypto.subtle unsupported algorithms", () => {
     );
     expect(error.name).toBe("NotSupportedError");
   });
+
+  test("encrypt of HMAC or SHA-256 is NotSupportedError, not InvalidAccessError", async () => {
+    const hmac = await crypto.subtle.importKey(
+      "raw",
+      encoder.encode("key"),
+      { name: "HMAC", hash: "SHA-256" },
+      false,
+      ["sign"],
+    );
+    const aes = await crypto.subtle.generateKey({ name: "AES-GCM", length: 128 }, false, [
+      "encrypt",
+    ]);
+    const hmacError = await rejects(crypto.subtle.encrypt("HMAC", hmac, new Uint8Array(1)));
+    expect(hmacError.name).toBe("NotSupportedError");
+    const hashError = await rejects(crypto.subtle.encrypt("SHA-256", aes, new Uint8Array(1)));
+    expect(hashError.name).toBe("NotSupportedError");
+  });
 });
 
 describe("crypto.subtle key import and export", () => {
@@ -629,6 +686,63 @@ describe("crypto.subtle key import and export", () => {
       ]),
     );
     expect(error.name).toBe("DataError");
+  });
+
+  test("a jwk whose use contradicts the algorithm is a DataError", async () => {
+    const hmac = await rejects(
+      crypto.subtle.importKey(
+        "jwk",
+        { kty: "oct", k: "AAAAAAAAAAAAAAAAAAAAAA", use: "enc" },
+        { name: "HMAC", hash: "SHA-256" },
+        true,
+        ["sign"],
+      ),
+    );
+    expect(hmac.name).toBe("DataError");
+    const aes = await rejects(
+      crypto.subtle.importKey(
+        "jwk",
+        { kty: "oct", k: "AAAAAAAAAAAAAAAAAAAAAA", use: "sig" },
+        { name: "AES-GCM" },
+        true,
+        ["encrypt"],
+      ),
+    );
+    expect(aes.name).toBe("DataError");
+  });
+
+  test("a jwk whose alg or ext is the wrong JS type is a DataError", async () => {
+    const alg = await rejects(
+      crypto.subtle.importKey(
+        "jwk",
+        { kty: "oct", k: "AAAAAAAAAAAAAAAAAAAAAA", alg: 256 },
+        { name: "HMAC", hash: "SHA-256" },
+        true,
+        ["sign"],
+      ),
+    );
+    expect(alg.name).toBe("DataError");
+    const ext = await rejects(
+      crypto.subtle.importKey(
+        "jwk",
+        { kty: "oct", k: "AAAAAAAAAAAAAAAAAAAAAA", ext: "false" },
+        { name: "HMAC", hash: "SHA-256" },
+        true,
+        ["sign"],
+      ),
+    );
+    expect(ext.name).toBe("DataError");
+  });
+
+  test("a matching jwk use is accepted", async () => {
+    const key = await crypto.subtle.importKey(
+      "jwk",
+      { kty: "oct", k: "AAAAAAAAAAAAAAAAAAAAAA", use: "sig" },
+      { name: "HMAC", hash: "SHA-256" },
+      true,
+      ["sign"],
+    );
+    expect(key.algorithm.name).toBe("HMAC");
   });
 });
 
@@ -780,6 +894,58 @@ describe("crypto.subtle derivation", () => {
     );
     expect(error.name).toBe("OperationError");
   });
+
+  test("deriveBits with length 0 returns an empty ArrayBuffer", async () => {
+    const key = await crypto.subtle.importKey("raw", encoder.encode("pw"), "PBKDF2", false, [
+      "deriveBits",
+    ]);
+    const derived = await crypto.subtle.deriveBits(
+      { name: "PBKDF2", salt: encoder.encode("s"), iterations: 1, hash: "SHA-256" },
+      key,
+      0,
+    );
+    expect(derived instanceof ArrayBuffer).toBe(true);
+    expect(derived.byteLength).toBe(0);
+  });
+
+  test("deriveBits length 0 still rejects iterations 0", async () => {
+    const key = await crypto.subtle.importKey("raw", encoder.encode("pw"), "PBKDF2", false, [
+      "deriveBits",
+    ]);
+    const error = await rejects(
+      crypto.subtle.deriveBits(
+        { name: "PBKDF2", salt: encoder.encode("s"), iterations: 0, hash: "SHA-256" },
+        key,
+        0,
+      ),
+    );
+    expect(error.name).toBe("OperationError");
+  });
+
+  test("HKDF requires info", async () => {
+    const key = await crypto.subtle.importKey("raw", encoder.encode("ikm"), "HKDF", false, [
+      "deriveBits",
+    ]);
+    const error = await rejects(
+      crypto.subtle.deriveBits({ name: "HKDF", salt: encoder.encode("s"), hash: "SHA-256" }, key, 256),
+    );
+    expect(error.name).toBe("TypeError");
+  });
+
+  test("HKDF accepts an empty info", async () => {
+    const key = await crypto.subtle.importKey("raw", bytes("0b".repeat(22)), "HKDF", false, [
+      "deriveBits",
+    ]);
+    const derived = await crypto.subtle.deriveBits(
+      { name: "HKDF", salt: new Uint8Array(0), info: new Uint8Array(0), hash: "SHA-256" },
+      key,
+      336,
+    );
+    expect(hex(derived)).toBe(
+      "8da4e775a563c18f715f802a063c5a31b8a11f5c5ee1879ec3454e5f3c738d2d" +
+        "9d201395faa4b61a96c8",
+    );
+  });
 });
 
 describe("crypto interface shape", () => {
@@ -810,5 +976,15 @@ describe("crypto interface shape", () => {
       "decrypt",
     ]);
     expect(key instanceof CryptoKey).toBe(true);
+  });
+
+  test("CryptoKey.algorithm and usages keep their identity", async () => {
+    const key = await crypto.subtle.generateKey({ name: "HMAC", hash: "SHA-256" }, true, [
+      "sign",
+      "verify",
+    ]);
+    expect(key.algorithm).toBe(key.algorithm);
+    expect(key.usages).toBe(key.usages);
+    expect(Object.isFrozen(key.usages)).toBe(true);
   });
 });

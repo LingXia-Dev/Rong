@@ -3,10 +3,9 @@
 //! `SubtleCrypto` takes an `AlgorithmIdentifier`, which is either a string or a
 //! dictionary carrying a `name` member. Every entry point normalizes that value
 //! into an [`NormalizedAlgorithm`] first, so each operation only ever matches on
-//! [`Algorithm`]. Adding RSA/ECDSA/Ed25519 later is a new match arm in the
-//! operation, not a new parsing path: the identifiers are already recognized
-//! here and rejected with `NotSupportedError` by
-//! [`NormalizedAlgorithm::require_implemented`].
+//! [`Algorithm`]. Names that are registered but unimplemented are kept in the
+//! enum so they can produce a `NotSupportedError` that names the algorithm,
+//! rather than looking like an unknown identifier.
 
 use rong::{JSObject, JSResult, JSValue};
 
@@ -23,9 +22,9 @@ pub(crate) enum Algorithm {
     AesGcm,
     Pbkdf2,
     Hkdf,
-    // Recognized but deliberately out of scope for this pass. Keeping them in
-    // the enum means an unknown name and an unimplemented name produce
-    // different, more useful messages, and adding support later is local.
+    // Registered names that this build does not implement. Keeping them in the
+    // enum means an unknown name and an unimplemented name produce different
+    // messages.
     AesCtr,
     AesKw,
     RsassaPkcs1V1_5,
@@ -85,7 +84,7 @@ impl Algorithm {
         }
     }
 
-    /// Whether this pass implements the algorithm at all.
+    /// Whether this build implements the algorithm at all.
     pub(crate) fn is_implemented(self) -> bool {
         matches!(
             self,

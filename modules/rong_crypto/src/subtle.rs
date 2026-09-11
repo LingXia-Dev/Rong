@@ -103,16 +103,23 @@ fn build_symmetric_key(
     extractable: bool,
     usages: Vec<KeyUsage>,
 ) -> JSResult<CryptoKey> {
+    let mut secret = secret;
     let key_algorithm = match algorithm {
         Algorithm::Hmac => {
             let hash = normalized.require_hash()?;
             if secret.is_empty() {
                 return Err(error::data("HMAC key material must not be empty"));
             }
-            KeyAlgorithm::Hmac {
-                hash,
-                length_bits: secret.len() * 8,
-            }
+            let data_bits = secret.len() * 8;
+            let (length_bits, truncated) = match normalized.param("length")? {
+                Some(_) => {
+                    let length = integer_param(normalized, "length")? as usize;
+                    hmac_import_length(length, data_bits, secret)?
+                }
+                None => (data_bits, secret),
+            };
+            secret = truncated;
+            KeyAlgorithm::Hmac { hash, length_bits }
         }
         Algorithm::AesCbc | Algorithm::AesGcm => {
             let length_bits = secret.len() * 8;
@@ -144,19 +151,54 @@ fn build_symmetric_key(
     ))
 }
 
+/// HMAC import steps 7–9: `length` must sit in `(dataBits - 8, dataBits]`,
+/// except that `0` is always `DataError`. The key is truncated to that many
+/// bits (only the last 1–7 bits of the final byte may be dropped).
+fn hmac_import_length(
+    length: usize,
+    data_bits: usize,
+    mut secret: Vec<u8>,
+) -> JSResult<(usize, Vec<u8>)> {
+    if length == 0 {
+        return Err(error::data("HMAC key length must not be 0"));
+    }
+    if length > data_bits {
+        return Err(error::data(format!(
+            "HMAC key length {length} is greater than the {data_bits}-bit key material"
+        )));
+    }
+    if length <= data_bits.saturating_sub(8) {
+        return Err(error::data(format!(
+            "HMAC key length {length} is too short for the {data_bits}-bit key material"
+        )));
+    }
+    let byte_len = length.div_ceil(8);
+    secret.truncate(byte_len);
+    if let Some(spare) = (8 - (length % 8)).checked_rem(8)
+        && spare != 0
+        && let Some(last) = secret.last_mut()
+    {
+        *last &= 0xff << spare;
+    }
+    Ok((length, secret))
+}
+
+fn derived_length_bytes(bits: usize) -> JSResult<usize> {
+    if !bits.is_multiple_of(8) {
+        return Err(error::operation(format!(
+            "derived length must be a multiple of 8, got {bits}"
+        )));
+    }
+    Ok(bits / 8)
+}
+
 /// The shared body of `deriveBits` and `deriveKey`.
-fn derive_bits_from(
+async fn derive_bits_from(
     normalized: &NormalizedAlgorithm,
     base_key: &CryptoKey,
     usage: KeyUsage,
     bits: usize,
 ) -> JSResult<Vec<u8>> {
-    if bits == 0 || !bits.is_multiple_of(8) {
-        return Err(error::operation(format!(
-            "derived length must be a non-zero multiple of 8, got {bits}"
-        )));
-    }
-    let out_len = bits / 8;
     let algorithm = normalized.require_implemented("deriveBits")?;
 
     match algorithm {
@@ -170,19 +212,26 @@ fn derive_bits_from(
                     "PBKDF2 'iterations' must be between 1 and 2^32 - 1",
                 ));
             }
-            Ok(ops::pbkdf2(
-                hash,
-                base_key.material(),
-                &salt,
-                iterations as u32,
-                out_len,
-            ))
+            let out_len = derived_length_bytes(bits)?;
+            if out_len == 0 {
+                return Ok(Vec::new());
+            }
+            let material = base_key.material().to_vec();
+            tokio::task::spawn_blocking(move || {
+                ops::pbkdf2(hash, &material, &salt, iterations as u32, out_len)
+            })
+            .await
+            .map_err(|error| error::operation(format!("PBKDF2 derivation task failed: {error}")))
         }
         Algorithm::Hkdf => {
             base_key.require(Algorithm::Hkdf, usage)?;
             let hash = normalized.require_hash()?;
             let salt = require_buffer_param(normalized, "salt")?;
-            let info = buffer_param(normalized, "info")?;
+            let info = require_buffer_param(normalized, "info")?;
+            let out_len = derived_length_bytes(bits)?;
+            if out_len == 0 {
+                return Ok(Vec::new());
+            }
             ops::hkdf(hash, base_key.material(), &salt, &info, out_len)
         }
         other => Err(error::not_supported(format!(
@@ -402,7 +451,7 @@ impl SubtleCrypto {
         CryptoKey::secret(key_algorithm, extractable, usages, secret).into_js(&ctx)
     }
 
-    /// `sign(algorithm, key, data)`; HMAC only in this pass.
+    /// `sign(algorithm, key, data)`; HMAC only.
     #[js_method]
     async fn sign(
         &self,
@@ -429,7 +478,7 @@ impl SubtleCrypto {
         }
     }
 
-    /// `verify(algorithm, key, signature, data)`; HMAC only in this pass.
+    /// `verify(algorithm, key, signature, data)`; HMAC only.
     ///
     /// The tag comparison runs in constant time inside [`ops::hmac_verify`].
     #[js_method]
@@ -469,17 +518,16 @@ impl SubtleCrypto {
     ) -> JSResult<JSArrayBuffer> {
         let normalized = algorithm::normalize(&algorithm)?;
         let plaintext = buffer::buffer_source(&data, "data")?;
-        let algorithm_id = normalized.require_implemented("encrypt")?;
-        key.require(algorithm_id, KeyUsage::Encrypt)?;
-
-        let ciphertext = match algorithm_id {
+        let ciphertext = match normalized.require_implemented("encrypt")? {
             Algorithm::AesGcm => {
+                key.require(Algorithm::AesGcm, KeyUsage::Encrypt)?;
                 check_gcm_tag_length(&normalized)?;
                 let iv = require_buffer_param(&normalized, "iv")?;
                 let aad = buffer_param(&normalized, "additionalData")?;
                 ops::aes_gcm_encrypt(key.material(), &iv, &aad, &plaintext)?
             }
             Algorithm::AesCbc => {
+                key.require(Algorithm::AesCbc, KeyUsage::Encrypt)?;
                 let iv = require_buffer_param(&normalized, "iv")?;
                 ops::aes_cbc_encrypt(key.material(), &iv, &plaintext)?
             }
@@ -504,17 +552,16 @@ impl SubtleCrypto {
     ) -> JSResult<JSArrayBuffer> {
         let normalized = algorithm::normalize(&algorithm)?;
         let ciphertext = buffer::buffer_source(&data, "data")?;
-        let algorithm_id = normalized.require_implemented("decrypt")?;
-        key.require(algorithm_id, KeyUsage::Decrypt)?;
-
-        let plaintext = match algorithm_id {
+        let plaintext = match normalized.require_implemented("decrypt")? {
             Algorithm::AesGcm => {
+                key.require(Algorithm::AesGcm, KeyUsage::Decrypt)?;
                 check_gcm_tag_length(&normalized)?;
                 let iv = require_buffer_param(&normalized, "iv")?;
                 let aad = buffer_param(&normalized, "additionalData")?;
                 ops::aes_gcm_decrypt(key.material(), &iv, &aad, &ciphertext)?
             }
             Algorithm::AesCbc => {
+                key.require(Algorithm::AesCbc, KeyUsage::Decrypt)?;
                 let iv = require_buffer_param(&normalized, "iv")?;
                 ops::aes_cbc_decrypt(key.material(), &iv, &ciphertext)?
             }
@@ -551,7 +598,7 @@ impl SubtleCrypto {
         }
 
         let derived =
-            derive_bits_from(&normalized, &base_key, KeyUsage::DeriveBits, bits as usize)?;
+            derive_bits_from(&normalized, &base_key, KeyUsage::DeriveBits, bits as usize).await?;
         buffer::to_array_buffer(&ctx, derived)
     }
 
@@ -584,7 +631,7 @@ impl SubtleCrypto {
         check_usages(derived_id.canonical_name(), allowed, &usages)?;
 
         let bits = derived_key_length(&derived_normalized, derived_id)?;
-        let secret = derive_bits_from(&normalized, &base_key, KeyUsage::DeriveKey, bits)?;
+        let secret = derive_bits_from(&normalized, &base_key, KeyUsage::DeriveKey, bits).await?;
         build_symmetric_key(&derived_normalized, derived_id, secret, extractable, usages)?
             .into_js(&ctx)
     }
