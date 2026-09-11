@@ -87,7 +87,13 @@ impl AbortReceiver {
                 return value;
             }
             // waits for the next change to the value
-            let _ = self.inner.changed().await;
+            if self.inner.changed().await.is_err() {
+                // The signal was dropped without aborting, so it never will. An
+                // `Err` from `changed()` is immediate, and looping on it would
+                // spin whichever task awaits this (every fetch with a signal
+                // keeps one alive for its response) at full CPU.
+                std::future::pending::<()>().await;
+            }
         }
     }
 

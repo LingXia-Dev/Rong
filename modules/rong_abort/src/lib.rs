@@ -141,6 +141,38 @@ mod tests {
     }
 
     #[test]
+    fn a_dropped_signal_parks_its_receivers_instead_of_spinning() {
+        async_run!(|ctx: JSContext| async move {
+            init(&ctx)?;
+            let signal = AbortSignal::new(&ctx);
+            let mut receiver = signal.subscribe();
+            drop(signal);
+
+            // A signal dropped without aborting never aborts. `recv()` used to
+            // loop on the closed channel, re-polled as fast as the scheduler
+            // allowed — a fetch's abort bridge then held a JS worker at full
+            // CPU. It has to park instead.
+            let polls = std::cell::Cell::new(0u32);
+            let mut recv = std::pin::pin!(receiver.recv());
+            let waited = tokio::time::timeout(
+                std::time::Duration::from_millis(50),
+                std::future::poll_fn(|cx| {
+                    polls.set(polls.get() + 1);
+                    std::future::Future::poll(recv.as_mut(), cx)
+                }),
+            )
+            .await;
+            assert!(waited.is_err(), "a dropped signal must not resolve recv()");
+            assert!(
+                polls.get() <= 2,
+                "recv() was polled {} times in 50ms",
+                polls.get()
+            );
+            Ok(())
+        });
+    }
+
+    #[test]
     fn pending_timeout_does_not_keep_context_alive() {
         let shutdown = Arc::new(AtomicBool::new(false));
         async_run!(|ctx: JSContext| async move {
