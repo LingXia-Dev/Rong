@@ -43,6 +43,7 @@ export * from './compression';
 export * from './command';
 export * from './stream';
 export * from './encoding';
+export * from './crypto';
 export * from './storage';
 export * from './http';
 export * from './sse';

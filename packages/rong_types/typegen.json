@@ -4,6 +4,7 @@
     "buffer": "curated",
     "command": "curated",
     "console": "curated",
+    "crypto": "curated",
     "encoding": "curated",
     "event": "curated",
     "exception": "curated",
