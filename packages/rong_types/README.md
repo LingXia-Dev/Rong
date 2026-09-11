@@ -11,7 +11,7 @@ TypeScript type definitions for the Rong JavaScript runtime (globals injected by
 
 - `Rong` namespace: file system, storage, runtime metadata, command APIs, timer helpers, compression helpers, and host constructors such as `RedisClient`, `S3Client`, `SQLite`, and `SSE`
 - Globals added by Rong modules include `fetch`, `assert`, `atob`, `btoa`, `Worker`, `setTimeout`, `clearTimeout`, `setInterval`, and `clearInterval`
-- Additional Web-standard globals such as `Request`, `Response`, `Headers`, `FormData`, `URL`, `ReadableStream`, `WritableStream`, `Blob`, `File`, `AbortController`, and `DOMException` are also provided when the corresponding runtime modules are enabled
+- Additional Web-standard globals such as `Request`, `Response`, `Headers`, `FormData`, `URL`, `ReadableStream`, `WritableStream`, `Blob`, `File`, `AbortController`, `crypto`, and `DOMException` are also provided when the corresponding runtime modules are enabled
 
 The type package relies on TypeScript’s DOM libs for shared Web API base types.
 
