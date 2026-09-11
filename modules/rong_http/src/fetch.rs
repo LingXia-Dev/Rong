@@ -136,16 +136,21 @@ pub async fn fetch(input: JSValue, init: Optional<RequestInit>) -> JSResult<Resp
         // must remain alive for the whole response stream lifetime. We keep it in a task, and only
         // stop it explicitly when we discard a redirect response and continue the loop.
         let (abort_bridge, abort_bridge_stop) = if let Some(r) = &mut abort_receiver {
-            let (tx, rx) = oneshot::channel::<()>();
+            let (mut tx, rx) = oneshot::channel::<()>();
             let stop = Arc::new(Notify::new());
             let stop_wait = stop.clone();
             let mut abort_rx = r.clone();
             tokio::task::spawn_local(async move {
-                tokio::select! {
-                    _ = abort_rx.recv() => {
-                        let _ = tx.send(());
-                    }
-                    _ = stop_wait.notified() => {}
+                // The transport dropping its receiver means the response is done
+                // (or gone): nothing is left to abort, so the bridge ends too
+                // instead of outliving every request that carried a signal.
+                let aborted = tokio::select! {
+                    _ = abort_rx.recv() => true,
+                    _ = stop_wait.notified() => false,
+                    _ = tx.closed() => false,
+                };
+                if aborted {
+                    let _ = tx.send(());
                 }
             });
             (Some(rx), Some(stop))
