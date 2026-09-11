@@ -16,6 +16,13 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
   manual dispatch still run it. macOS jobs prefer Xcode libclang over
   Homebrew LLVM when present.
 
+### Core
+
+- `rong` re-exports `TaskScope`. The scope methods reached embedders already,
+  being inherent on `JSContext`, but the type did not, so a scope could only
+  be opened and cancelled inside one function — never stored, which is what
+  one scope per request needs.
+
 ## [0.6.2] - 2026-09-11
 
 Independent crate and npm releases: first publish of `rong_crypto` 0.6.0,
