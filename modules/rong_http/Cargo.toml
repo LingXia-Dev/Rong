@@ -12,6 +12,10 @@ keywords.workspace = true
 categories.workspace = true
 documentation = "https://docs.rs/rong_http"
 readme = "README.md"
+
+[package.metadata.docs.rs]
+features = ["quickjs"]
+
 [dependencies]
 rong = { workspace = true }
 rong_rt = { workspace = true, default-features = false }

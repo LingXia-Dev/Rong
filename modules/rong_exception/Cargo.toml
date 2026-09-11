@@ -12,6 +12,10 @@ keywords.workspace = true
 categories.workspace = true
 documentation = "https://docs.rs/rong_exception"
 readme = "README.md"
+
+[package.metadata.docs.rs]
+features = ["quickjs"]
+
 [dependencies]
 rong = { workspace = true }
 

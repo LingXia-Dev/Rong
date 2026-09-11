@@ -6,11 +6,14 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 
 ## [Unreleased]
 
-### Crypto
+### Docs
 
-- docs.rs documents `rong_crypto` with the `quickjs` engine feature so
-  rustdoc can see `rong::JSContext`. 0.6.0's docs build failed without an
-  engine.
+- Every crate whose public API needs a JS engine now tells docs.rs to build
+  with `quickjs`. Without one, rustdoc cannot see `rong::JSContext` and the
+  build fails — which is why 14 of the module crates have a red docs.rs page
+  today. `rong_crypto` 0.6.0 → 0.6.1 so its page rebuilds; the other twelve
+  carry the metadata from their next publish onward, since docs.rs cannot
+  rebuild a version in place.
 
 ### CI
 
