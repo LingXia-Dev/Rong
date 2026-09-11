@@ -189,16 +189,14 @@ where
     }
 }
 
-/// Converts a Rust future result into JavaScript Promise resolution
-/// using the provided resolve/reject callbacks
 /// Polls a host future while its task scope is live.
 ///
 /// Resolves to `None` the first time the scope is found cancelled, so the
 /// caller can drop the future and release whatever it held — a connection, a
 /// buffer, an in-flight request — instead of carrying it to the end of the
-/// context. The flag is checked before each poll: cancellation is host-driven
-/// and cannot wake this task by itself, so an abandoned task is observed the
-/// next time something else polls it.
+/// context. Check both sides of the poll because a host future can reenter JS
+/// or host code that cancels its own scope. Aborting a task does not interrupt
+/// a poll that is already running.
 struct ScopedFuture<'a, F> {
     scope: &'a std::rc::Rc<crate::context::TaskScopeState>,
     future: std::pin::Pin<&'a mut F>,
@@ -215,10 +213,17 @@ impl<F: Future> Future for ScopedFuture<'_, F> {
         if this.scope.is_cancelled() {
             return std::task::Poll::Ready(None);
         }
-        this.future.as_mut().poll(cx).map(Some)
+        let result = this.future.as_mut().poll(cx);
+        if this.scope.is_cancelled() {
+            Poll::Ready(None)
+        } else {
+            result.map(Some)
+        }
     }
 }
 
+/// Converts a Rust future result into JavaScript Promise resolution
+/// using the provided resolve/reject callbacks.
 pub trait PromiseResolver<V: JSValueImpl> {
     fn resolve_promise(self, resolve: JSFunc<V>, reject: JSFunc<V>);
 }

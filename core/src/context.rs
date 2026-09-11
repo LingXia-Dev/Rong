@@ -10,6 +10,7 @@ use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::future::Future;
 use std::rc::{Rc, Weak};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{LazyLock, RwLock};
 
 pub(crate) mod thrown_store;
@@ -240,7 +241,6 @@ struct ContextTaskRegistry {
 struct ContextTaskRegistryInner {
     closed: std::cell::Cell<bool>,
     tasks: RefCell<Vec<tokio::task::JoinHandle<()>>>,
-    next_scope: Cell<u64>,
     current_scope: RefCell<Option<(TaskScope, Rc<TaskScopeState>)>>,
     scopes: RefCell<HashMap<TaskScope, Rc<TaskScopeState>>>,
 }
@@ -263,8 +263,12 @@ impl ContextTaskRegistry {
     }
 
     fn begin_scope(&self) -> TaskScope {
-        let id = self.inner.next_scope.get().wrapping_add(1);
-        self.inner.next_scope.set(id);
+        // Tokens may cross context (or runtime) boundaries. Never reuse an ID,
+        // including after its originating context has been dropped.
+        static NEXT_SCOPE: AtomicU64 = AtomicU64::new(0);
+        let id = NEXT_SCOPE
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |id| id.checked_add(1))
+            .expect("task scope IDs exhausted");
         let scope = TaskScope(id);
         let state = Rc::new(TaskScopeState::default());
         self.inner.scopes.borrow_mut().insert(scope, state.clone());
