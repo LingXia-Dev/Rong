@@ -203,6 +203,7 @@ Rong comes with a rich set of built-in modules:
 - **rong_event** - Event emitter and handling
 - **rong_abort** - AbortController and signals
 - **rong_encoding** - Text encoding/decoding
+- **rong_crypto** - Web Cryptography API (`crypto.subtle`)
 - **rong_assert** - Assertion utilities
 - **rong_storage** - Storage APIs
 - **rong_stream** - Stream APIs

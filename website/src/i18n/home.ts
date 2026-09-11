@@ -66,7 +66,7 @@ export const HOME: Record<Locale, HomeStrings> = {
     },
     stats: [
       ["3", "JavaScript engines"],
-      ["20", "built-in modules"],
+      ["21", "built-in modules"],
       ["1.95+", "Rust toolchain (2024 edition)"],
       ["MIT / Apache-2.0", "dual licensed"],
     ],
@@ -151,7 +151,7 @@ export const HOME: Record<Locale, HomeStrings> = {
     codeTabs: ["Embed & eval", "Worker pool", "Class bindings", "Cargo.toml", "CLI"],
     modulesHead: {
       eyebrow: "Batteries included",
-      title: "Twenty built-in modules.",
+      title: "Twenty-one built-in modules.",
       body: "Common runtime tasks ship in the box — timers, HTTP, file system, storage, workers, Redis, SQLite, S3, and more. Click a module to read its API reference.",
     },
     ecoHead: {
@@ -208,7 +208,7 @@ export const HOME: Record<Locale, HomeStrings> = {
     },
     stats: [
       ["3", "种 JavaScript 引擎"],
-      ["20", "个内置模块"],
+      ["21", "个内置模块"],
       ["1.95+", "Rust 工具链（2024 edition）"],
       ["MIT / Apache-2.0", "双重许可"],
     ],
@@ -293,7 +293,7 @@ export const HOME: Record<Locale, HomeStrings> = {
     codeTabs: ["嵌入与求值", "Worker 池", "类绑定", "Cargo.toml", "CLI"],
     modulesHead: {
       eyebrow: "开箱即用",
-      title: "二十个内置模块。",
+      title: "二十一个内置模块。",
       body: "常见的运行时任务尽在其中 —— 定时器、HTTP、文件系统、存储、worker、Redis、SQLite、S3 等。点击模块即可阅读其 API 参考。",
     },
     ecoHead: {

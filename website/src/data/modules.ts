@@ -1,4 +1,4 @@
-// The 20 built-in modules (workspace members under modules/).
+// The 21 built-in modules (workspace members under modules/).
 // Module API pages are generated from the repo's docs/api/*.md at build
 // time — see src/content.config.ts. rong_cron has no docs/api entry yet and
 // falls back to modules/rong_cron/README.md.
@@ -19,6 +19,7 @@ export const MODULES: ModuleEntry[] = [
   { name: "rong_event", desc: { en: "Event emitter & handling", zh: "事件派发与处理" } },
   { name: "rong_abort", desc: { en: "AbortController & signals", zh: "AbortController 与信号" } },
   { name: "rong_encoding", desc: { en: "Text encoding / decoding", zh: "文本编码 / 解码" } },
+  { name: "rong_crypto", desc: { en: "Web Cryptography API (crypto.subtle)", zh: "Web Cryptography API（crypto.subtle）" } },
   { name: "rong_assert", desc: { en: "Assertion utilities", zh: "断言工具" } },
   { name: "rong_exception", desc: { en: "Exception handling", zh: "异常处理" } },
   { name: "rong_storage", desc: { en: "Storage APIs", zh: "存储 API" } },
