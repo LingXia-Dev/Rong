@@ -1,6 +1,6 @@
 [package]
 name = "rong_url"
-version = "0.6.0"
+version = "0.6.1"
 edition.workspace = true
 
 description = "URL module for RongJS"
@@ -18,7 +18,7 @@ features = ["quickjs"]
 
 [dependencies]
 rong = { workspace = true }
-url = "2.5.4"
+url = "2.5.8"
 
 [features]
 # Forward JS engine features to the main rong crate

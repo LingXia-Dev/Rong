@@ -1,6 +1,6 @@
 [package]
 name = "rong_arkjs_sys"
-version = "0.6.0"
+version = "0.6.1"
 edition.workspace = true
 
 description = "ArkJS FFI bindings for RongJS"
@@ -26,4 +26,4 @@ doctest = false
 no-default-features = true
 
 [build-dependencies]
-bindgen = "0.72"
+bindgen = "0.73.2"

@@ -40,21 +40,21 @@ categories = ["api-bindings"]
 
 [workspace.dependencies]
 # Internal dependencies
-rong = { path = ".", default-features = false      , version = "0.6.0" }
+rong = { path = ".", default-features = false      , version = "0.6.2" }
 rong_core = { path = "core"      , version = "0.6.1" }
 rong_quickjs = { path = "quickjs"      , version = "0.6.0" }
-rong_quickjs_sys = { path = "quickjs/sys"      , version = "0.6.0" }
+rong_quickjs_sys = { path = "quickjs/sys"      , version = "0.6.1" }
 rong_jscore = { path = "javascriptcore"      , version = "0.6.0" }
-rong_jscore_sys = { path = "javascriptcore/sys"      , version = "0.6.0" }
+rong_jscore_sys = { path = "javascriptcore/sys"      , version = "0.6.1" }
 rong_arkjs = { path = "arkjs"      , version = "0.6.0" }
-rong_arkjs_sys = { path = "arkjs/sys"      , version = "0.6.0" }
-rong_macro = { path = "rong_macro"      , version = "0.6.0" }
+rong_arkjs_sys = { path = "arkjs/sys"      , version = "0.6.1" }
+rong_macro = { path = "rong_macro"      , version = "0.6.1" }
 rong_test = { path = "testing/rong_test", default-features = false   , version = "0.4.0" }
 rong_test_harness = { path = "testing/rong_test_harness"   , version = "0.4.0" }
 rong_test_device = { path = "testing/rong_test_device"   , version = "0.4.0" }
 rong_modules = { path = "rong_modules"      , version = "0.6.1" }
-rong_rt = { path = "rong_rt"   , default-features = false   , version = "0.6.1" }
-rong_typegen = { path = "rong_typegen", default-features = false, version = "0.6.1" }
+rong_rt = { path = "rong_rt"   , default-features = false   , version = "0.6.2" }
+rong_typegen = { path = "rong_typegen", default-features = false, version = "0.6.2" }
 
 # Module dependencies
 rong_timer = { path = "modules/rong_timer"   , default-features = false   , version = "0.6.0" }
@@ -62,68 +62,68 @@ rong_cron = { path = "modules/rong_cron"   , default-features = false   , versio
 rong_console = { path = "modules/rong_console"   , default-features = false   , version = "0.6.0" }
 rong_assert = { path = "modules/rong_assert"   , default-features = false   , version = "0.6.0" }
 rong_fs = { path = "modules/rong_fs"   , default-features = false   , version = "0.6.0" }
-rong_http = { path = "modules/rong_http"   , default-features = false   , version = "0.6.1" }
-rong_encoding = { path = "modules/rong_encoding"   , default-features = false   , version = "0.6.0" }
+rong_http = { path = "modules/rong_http"   , default-features = false   , version = "0.6.2" }
+rong_encoding = { path = "modules/rong_encoding"   , default-features = false   , version = "0.6.1" }
 rong_event = { path = "modules/rong_event"   , default-features = false   , version = "0.6.0" }
 rong_exception = { path = "modules/rong_exception"   , default-features = false   , version = "0.6.0" }
 rong_abort = { path = "modules/rong_abort"   , default-features = false   , version = "0.6.1" }
-rong_url = { path = "modules/rong_url"   , default-features = false   , version = "0.6.0" }
+rong_url = { path = "modules/rong_url"   , default-features = false   , version = "0.6.1" }
 rong_buffer = { path = "modules/rong_buffer"   , default-features = false   , version = "0.6.0" }
 rong_stream = { path = "modules/rong_stream"   , default-features = false   , version = "0.6.0" }
 rong_crypto = { path = "modules/rong_crypto"   , default-features = false   , version = "0.6.1" }
-rong_compression = { path = "modules/rong_compression"   , default-features = false   , version = "0.6.0" }
+rong_compression = { path = "modules/rong_compression"   , default-features = false   , version = "0.6.1" }
 rong_command = { path = "modules/rong_command"   , default-features = false   , version = "0.6.1" }
-rong_storage = { path = "modules/rong_storage"   , default-features = false   , version = "0.6.1" }
+rong_storage = { path = "modules/rong_storage"   , default-features = false   , version = "0.6.2" }
 rong_worker = { path = "modules/rong_worker"   , default-features = false   , version = "0.6.0" }
 rong_redis = { path = "modules/rong_redis"   , default-features = false   , version = "0.6.0" }
 rong_sqlite = { path = "modules/rong_sqlite"   , default-features = false   , version = "0.6.0" }
-rong_s3 = { path = "modules/rong_s3"   , version = "0.6.0", default-features = false }
+rong_s3 = { path = "modules/rong_s3"   , version = "0.6.1", default-features = false }
 
 # External dependencies
-tokio = { version = "1.52", features = ["rt", "rt-multi-thread", "time", "macros", "sync", "fs", "io-util", "process", "io-std"] }
+tokio = { version = "1.53", features = ["rt", "rt-multi-thread", "time", "macros", "sync", "fs", "io-util", "process", "io-std"] }
 tokio-cron-scheduler = "0.15.1"
-futures = "0.3.32"
-thiserror = "2.0.18"
+futures = "0.3.34"
+thiserror = "2.0.20"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 chrono = { version = "0.4", default-features = false, features = ["std", "clock"] }
-croner = "3.0.1"
+croner = "4.0.0"
 
 # Additional common dependencies
-http = { package = "http", version = "1.4" }
-http-body-util = "0.1.3"
-hyper = { version = "1.10.1", features = ["client", "http1"] }
+http = { package = "http", version = "1.5" }
+http-body-util = "0.1.5"
+hyper = { version = "1.11.1", features = ["client", "http1"] }
 hyper-util = { version = "0.1.20", features = ["client", "http1", "tokio"] }
-hyper-rustls = { version = "0.27.9", default-features = false, features = ["webpki-roots", "http1", "tls12"] }
+hyper-rustls = { version = "0.27.10", default-features = false, features = ["webpki-roots", "http1", "tls12"] }
 rustls = { version = "0.23", default-features = false }
-flate2 = { version = "1.1.9" }
-uuid = { version = "1.23.4", features = ["v4"] }
+flate2 = { version = "1.1.10" }
+uuid = { version = "1.26.1", features = ["v4"] }
 axum = { version = "0.8.9", features = ["http1"] }
 nix = { version = "0.31", features = ["user", "fs"] }
-syn = { version = "2.0", features = ["full"] }
+syn = { version = "3.0", features = ["full"] }
 bytes = "1.12.1"
-tokio-stream = "0.1.18"
-redis = { version = "1.3", features = ["tokio-comp", "aio"] }
+tokio-stream = "0.1.19"
+redis = { version = "1.7.0", features = ["tokio-comp", "aio"] }
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["fmt", "env-filter"] }
-smallvec = "1.15.2"
+smallvec = "1.16.1"
 
 # Cryptography primitives (RustCrypto) backing `modules/rong_crypto`
 sha1 = { version = "0.11.0", default-features = false, features = ["alloc"] }
 sha2 = { version = "0.11.0", default-features = false, features = ["alloc"] }
 hmac = { version = "0.13.0", default-features = false }
-aes = { version = "0.9.2", default-features = false }
-aes-gcm = { version = "0.11.0", default-features = false, features = ["aes", "alloc"] }
+aes = { version = "0.9.3", default-features = false }
+aes-gcm = { version = "0.11.1", default-features = false, features = ["aes", "alloc"] }
 cbc = { version = "0.2.1", default-features = false, features = ["alloc", "block-padding"] }
 pbkdf2 = { version = "0.13.0", default-features = false, features = ["hmac"] }
 hkdf = { version = "0.13.0", default-features = false }
 getrandom = { version = "0.4.3", default-features = false }
-base64 = { version = "0.22.1" }
+base64 = { version = "0.23.1" }
 
 
 [package]
 name = "rong"
-version = "0.6.1"
+version = "0.6.2"
 edition = "2024"
 
 description = "RongJS runtime and embedding API"

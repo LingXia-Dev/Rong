@@ -25,12 +25,12 @@ rong_test_harness = { path = "../../rong_test_harness" }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 log = "0.4"
-hyper = { version = "1.8.1", features = ["server", "http1"] }
+hyper = { version = "1.11.1", features = ["server", "http1"] }
 hyper-util = { version = "0.1.20", features = ["tokio"] }
-http-body-util = "0.1.3"
-tokio = { version = "1.50.0", features = ["rt-multi-thread", "macros", "net", "sync"] }
+http-body-util = "0.1.5"
+tokio = { version = "1.53.1", features = ["rt-multi-thread", "macros", "net", "sync"] }
 
 [target.'cfg(target_env = "ohos")'.dependencies]
-napi-ohos = "1.1"
-napi-derive-ohos = "1.1"
+napi-ohos = "1.2.0"
+napi-derive-ohos = "1.2.0"
 ohos_hilog = "0.1.3"

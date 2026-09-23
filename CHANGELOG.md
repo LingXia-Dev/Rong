@@ -6,6 +6,19 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 
 ## [Unreleased]
 
+### Dependencies
+
+- Refresh direct Rust dependencies across the workspace and the standalone
+  Harmony smoke test, including `syn` 3, `redb` 4.3, `redis` 1.7, `zstd` 0.14,
+  `base64` 0.23, and `dirs` 7. Adapt the macro and type generator to the
+  `syn` 3 receiver API.
+- Bump the affected Rust crates independently: `rong`, `rong_rt`,
+  `rong_typegen`, `rong_http`, and `rong_storage` to 0.6.2; and `rong_macro`,
+  `rong_quickjs_sys`, `rong_jscore_sys`, `rong_arkjs_sys`, `rong_cli`,
+  `rong_compression`, `rong_encoding`, `rong_s3`, and `rong_url` to 0.6.1.
+- Keep the S3 test fixtures on `s3s` 0.14.1, the newest release compatible
+  with the workspace's Rust 1.95 minimum.
+
 ### Docs
 
 - Every crate whose public API needs a JS engine now tells docs.rs to build

@@ -246,8 +246,9 @@ pub fn validate_js_method_signature(method: &ImplItemFn, options: &JsMethodOptio
         ));
     }
     if options.gc_mark {
-        let valid_receiver = receiver
-            .is_some_and(|receiver| receiver.reference.is_some() && receiver.mutability.is_none());
+        let valid_receiver = receiver.is_some_and(|receiver| {
+            matches!(receiver.kind, syn::ReceiverKind::Reference(_, _, None))
+        });
         let raw_params = method
             .sig
             .inputs

@@ -1,6 +1,6 @@
 [package]
 name = "rong_http"
-version = "0.6.1"
+version = "0.6.2"
 edition.workspace = true
 
 description = "HTTP module for RongJS"
@@ -28,10 +28,10 @@ rong_buffer = { workspace = true }
 flate2 = { workspace = true }
 http = { workspace = true }
 http-body-util = { workspace = true }
-http-body = "1.0"
+http-body = "1.1.0"
 hyper = { workspace = true }
 rong_url = { workspace = true }
-url = "2.5.4"
+url = "2.5.8"
 uuid = { workspace = true }
 rong_stream = { workspace = true }
 tokio-stream = { workspace = true }

@@ -176,7 +176,7 @@ pub fn class_impl(input: &ItemImpl, attr: TokenStream) -> syn::Result<TokenStrea
 
             // Handle instance methods with proper This/ThisMut mapping
             let (receiver_type, method_call) = if let Some(receiver) = method.sig.receiver() {
-                if receiver.mutability.is_some() {
+                if matches!(receiver.kind, syn::ReceiverKind::Reference(_, _, Some(_))) {
                     if is_async {
                         return Err(syn::Error::new_spanned(
                             &method.sig.ident,
