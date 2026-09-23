@@ -1,6 +1,6 @@
 [package]
 name = "rong_encoding"
-version = "0.6.0"
+version = "0.6.1"
 edition.workspace = true
 
 description = "Encoding module for RongJS"
@@ -18,7 +18,7 @@ features = ["quickjs"]
 
 [dependencies]
 rong = { workspace = true }
-base64 = "0.22.1"
+base64 = "0.23.1"
 
 [features]
 # Forward JS engine features to the main rong crate

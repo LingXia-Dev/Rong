@@ -1,6 +1,6 @@
 [package]
 name = "rong_compression"
-version = "0.6.0"
+version = "0.6.1"
 edition.workspace = true
 
 description = "Compression utilities for RongJS"
@@ -21,7 +21,7 @@ path = "src/lib.rs"
 rong = { workspace = true }
 tokio = { workspace = true }
 flate2 = { workspace = true }
-zstd = "0.13.2"
+zstd = "0.14.0"
 
 [dev-dependencies]
 rong_assert = { workspace = true }

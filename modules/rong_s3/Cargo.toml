@@ -1,6 +1,6 @@
 [package]
 name = "rong_s3"
-version = "0.6.0"
+version = "0.6.1"
 edition.workspace = true
 
 description = "S3-compatible object storage module for RongJS"
@@ -37,7 +37,7 @@ rong_test = { path = "../../testing/rong_test" }
 rong_assert = { workspace = true }
 rong_console = { workspace = true }
 rong_timer = { workspace = true }
-s3s = "0.14"
-s3s-fs = "0.14"
+s3s = "0.14.1"
+s3s-fs = "0.14.1"
 hyper-util = { version = "0.1", features = ["server-auto", "tokio"] }
 tempfile = "3"
