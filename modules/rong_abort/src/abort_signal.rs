@@ -97,7 +97,12 @@ impl AbortReceiver {
         }
     }
 
-    /// Mark the current abort reason (if any) for the GC
+    /// Mark the current abort reason (if any) for the GC.
+    ///
+    /// The watch channel holds one reference to the reason, shared by every
+    /// receiver. Call this from at most one owner per channel — marking it once
+    /// per receiver makes a QuickJS GC cycle free it early. Usually no one
+    /// needs to: the channel keeps the reason alive.
     pub fn gc_mark_with<F>(&self, mut mark_fn: F)
     where
         F: FnMut(&JSValue),

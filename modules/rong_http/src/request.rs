@@ -25,7 +25,10 @@ pub struct Request {
     pub(crate) headers: Headers,
     pub(crate) body: Option<HttpBody>,
     redirect: RequestRedirect,
-    signal: Option<AbortSignal>, // AbortSignal
+    /// The caller's AbortSignal object itself. Its reason and listeners live
+    /// in state every JS object of the signal marks; holding a Rust copy and
+    /// marking that too counted them twice in a GC cycle.
+    signal: Option<JSObject>,
     consumed: Rc<Cell<bool>>,
 }
 
@@ -42,8 +45,13 @@ impl Request {
         })
     }
 
-    pub(crate) fn abort_signal(&self) -> Option<&AbortSignal> {
-        self.signal.as_ref()
+    pub(crate) fn abort_signal(&self) -> Option<AbortSignal> {
+        self.signal.as_ref().and_then(|signal| {
+            signal
+                .borrow::<AbortSignal>()
+                .ok()
+                .map(|signal| signal.clone())
+        })
     }
 
     fn has_streaming_body(&self) -> bool {
@@ -105,7 +113,7 @@ pub(crate) struct RequestInit {
     headers: Option<Headers>,
     body: Option<JSValue>,
     redirect: Option<RequestRedirect>,
-    signal: Option<AbortSignal>, // AbortSignal
+    signal: Option<JSObject>, // AbortSignal
 }
 
 impl RequestInit {
@@ -203,14 +211,15 @@ impl TryFromJSValue for RequestInit {
                     )
                     .with_name("TypeError")
                 })?;
-                let signal = signal_obj.borrow::<AbortSignal>().map_err(|_| {
-                    HostError::new(
+                if !Class::instance_of::<AbortSignal>(&signal_obj) {
+                    return Err(HostError::new(
                         rong::error::E_INVALID_ARG,
                         "RequestInit.signal must be an AbortSignal",
                     )
                     .with_name("TypeError")
-                })?;
-                request.signal = Some(signal.clone());
+                    .into());
+                }
+                request.signal = Some(signal_obj);
             }
         }
         Ok(request)
@@ -307,7 +316,7 @@ impl Request {
     }
 
     #[js_method(getter)]
-    fn signal(&self) -> Option<AbortSignal> {
+    fn signal(&self) -> Option<JSObject> {
         self.signal.clone()
     }
 
@@ -413,12 +422,12 @@ impl Request {
     }
 
     #[js_method(gc_mark)]
-    fn gc_mark_with<F>(&self, mark_fn: F)
+    fn gc_mark_with<F>(&self, mut mark_fn: F)
     where
         F: FnMut(&JSValue),
     {
         if let Some(signal) = &self.signal {
-            signal.gc_mark_with(mark_fn);
+            mark_fn(signal.as_js_value());
         }
     }
 }
@@ -534,6 +543,41 @@ mod tests {
                 .await?;
             assert!(passed);
 
+            Ok(())
+        });
+    }
+
+    /// A Request used to mark its signal's shared reason and listeners on top
+    /// of the signal's own JS object, so a GC cycle after an abort freed them
+    /// early and QuickJS aborted on `p->ref_count > 0`.
+    #[test]
+    fn a_request_signal_survives_gc() {
+        async_run!(|ctx: JSContext| async move {
+            rong_exception::init(&ctx)?;
+            rong_abort::init(&ctx)?;
+            rong_url::init(&ctx)?;
+            crate::header::init(&ctx)?;
+            init(&ctx)?;
+
+            ctx.eval::<()>(Source::from_bytes(
+                r#"
+                    globalThis.controller = new AbortController();
+                    controller.signal.onabort = () => {};
+                    globalThis.request = new Request("https://example.com/", {
+                        signal: controller.signal,
+                    });
+                "#,
+            ))?;
+            ctx.runtime().run_gc();
+            ctx.eval::<()>(Source::from_bytes("controller.abort();"))?;
+            ctx.runtime().run_gc();
+            ctx.runtime().run_gc();
+
+            let same: bool = ctx.eval(Source::from_bytes(
+                "request.signal === controller.signal && request.signal === request.signal \
+                 && request.signal.aborted",
+            ))?;
+            assert!(same, "a Request keeps the caller's signal object");
             Ok(())
         });
     }

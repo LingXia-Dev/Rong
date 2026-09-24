@@ -540,17 +540,16 @@ impl Response {
     where
         F: FnMut(&JSValue),
     {
-        // Mark any JS values reachable from Response so the GC keeps them alive
+        // Mark the JS values this Response holds a reference of its own to:
         // - BodyKind::JS holds an HttpBody which wraps a JSValue
-        // - abort_receiver may hold a JSValue reason inside the watch channel
         // - Cached body_stream JSObject if created
+        // Not the abort reason in `abort_receiver`: the watch channel owns
+        // that one reference, and every receiver of it — a cloned Response
+        // shares the channel — marking it again made a GC cycle count it
+        // more than once and free it early. The channel keeps it alive.
         let mut mark_fn = mark_fn;
         if let Some(BodyKind::JS(js_body)) = &self.body {
             mark_fn(&js_body.0);
-        }
-
-        if let Some(receiver) = &self.abort_receiver {
-            receiver.gc_mark_with(|v| mark_fn(v));
         }
 
         if let Some(obj) = self.body_stream.borrow().as_ref() {
