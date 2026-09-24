@@ -57,7 +57,7 @@ rong_rt = { path = "rong_rt"   , default-features = false   , version = "0.6.2" 
 rong_typegen = { path = "rong_typegen", default-features = false, version = "0.6.2" }
 
 # Module dependencies
-rong_timer = { path = "modules/rong_timer"   , default-features = false   , version = "0.6.0" }
+rong_timer = { path = "modules/rong_timer"   , default-features = false   , version = "0.6.1" }
 rong_cron = { path = "modules/rong_cron"   , default-features = false   , version = "0.6.0" }
 rong_console = { path = "modules/rong_console"   , default-features = false   , version = "0.6.0" }
 rong_assert = { path = "modules/rong_assert"   , default-features = false   , version = "0.6.0" }
