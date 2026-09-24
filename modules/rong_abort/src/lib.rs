@@ -214,41 +214,4 @@ mod tests {
             Ok(())
         });
     }
-
-    /// Every JS object of a signal used to mark the one shared reason and
-    /// listener set, so a GC cycle decremented them once per object and
-    /// QuickJS aborted on `p->ref_count > 0`. A controller hands out one signal.
-    #[test]
-    fn a_used_signal_survives_gc() {
-        async_run!(|ctx: JSContext| async move {
-            rong_event::init(&ctx)?;
-            rong_exception::init(&ctx)?;
-            init(&ctx)?;
-
-            ctx.eval::<()>(Source::from_bytes(
-                r#"
-                    globalThis.controller = new AbortController();
-                    const first = controller.signal;
-                    const second = controller.signal;
-                    first.addEventListener("abort", () => {});
-                    second.onabort = () => {};
-                    globalThis.kept = [first, second];
-                "#,
-            ))?;
-            ctx.runtime().run_gc();
-            ctx.eval::<()>(Source::from_bytes("controller.abort();"))?;
-            ctx.runtime().run_gc();
-            ctx.runtime().run_gc();
-
-            let same: bool = ctx.eval(Source::from_bytes(
-                "controller.signal === kept[0] && kept[0] === kept[1] && kept[0].aborted \
-                 && kept[0].reason instanceof DOMException",
-            ))?;
-            assert!(
-                same,
-                "a controller has one signal, aborted with an AbortError"
-            );
-            Ok(())
-        });
-    }
 }

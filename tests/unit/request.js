@@ -107,6 +107,30 @@ describe("Request", () => {
     });
   });
 
+  describe("signal", () => {
+    test("keeps the caller's signal object", () => {
+      const controller = new AbortController();
+      const request = new Request("https://example.com", { signal: controller.signal });
+      expect(request.signal).toBe(controller.signal);
+      expect(request.signal).toBe(request.signal);
+    });
+
+    // The Request used to mark the signal's shared state again through its own
+    // copy: an abort and a GC then aborted the process on QuickJS.
+    test("survives a GC after its signal aborts", () => {
+      const controller = new AbortController();
+      controller.signal.onabort = () => {};
+      const request = new Request("https://example.com", { signal: controller.signal });
+      const copy = request.clone();
+      gc();
+      controller.abort();
+      gc();
+      gc();
+      expect(request.signal.aborted).toBeTruthy();
+      expect(copy.signal).toBe(controller.signal);
+    });
+  });
+
   describe("body handling", () => {
     test("should not allow body for GET/HEAD requests", () => {
       for (const method of ["GET", "HEAD"]) {

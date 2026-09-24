@@ -533,6 +533,8 @@ mod tests {
             rong_console::init(&ctx)?;
             rong_encoding::init(&ctx)?;
             rong_url::init(&ctx)?;
+            rong_exception::init(&ctx)?;
+            rong_abort::init(&ctx)?;
 
             crate::header::init(&ctx)?;
             init(&ctx)?;
@@ -543,41 +545,6 @@ mod tests {
                 .await?;
             assert!(passed);
 
-            Ok(())
-        });
-    }
-
-    /// A Request used to mark its signal's shared reason and listeners on top
-    /// of the signal's own JS object, so a GC cycle after an abort freed them
-    /// early and QuickJS aborted on `p->ref_count > 0`.
-    #[test]
-    fn a_request_signal_survives_gc() {
-        async_run!(|ctx: JSContext| async move {
-            rong_exception::init(&ctx)?;
-            rong_abort::init(&ctx)?;
-            rong_url::init(&ctx)?;
-            crate::header::init(&ctx)?;
-            init(&ctx)?;
-
-            ctx.eval::<()>(Source::from_bytes(
-                r#"
-                    globalThis.controller = new AbortController();
-                    controller.signal.onabort = () => {};
-                    globalThis.request = new Request("https://example.com/", {
-                        signal: controller.signal,
-                    });
-                "#,
-            ))?;
-            ctx.runtime().run_gc();
-            ctx.eval::<()>(Source::from_bytes("controller.abort();"))?;
-            ctx.runtime().run_gc();
-            ctx.runtime().run_gc();
-
-            let same: bool = ctx.eval(Source::from_bytes(
-                "request.signal === controller.signal && request.signal === request.signal \
-                 && request.signal.aborted",
-            ))?;
-            assert!(same, "a Request keeps the caller's signal object");
             Ok(())
         });
     }
