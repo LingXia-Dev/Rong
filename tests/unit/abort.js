@@ -104,6 +104,43 @@ describe("AbortSignal", () => {
     });
   });
 
+  // A signal's reason and listeners are shared by every JS object of it and
+  // marked by each. These run a GC while the signal is alive: an over-marked
+  // value aborts the process on QuickJS (`p->ref_count > 0`).
+  describe("Garbage collection", () => {
+    test("controller.signal is one object", () => {
+      const controller = new AbortController();
+      expect(controller.signal).toBe(controller.signal);
+    });
+
+    test("a signal with listeners survives a GC before and after abort", () => {
+      const controller = new AbortController();
+      const signal = controller.signal;
+      let heard = 0;
+      signal.addEventListener("abort", () => heard++);
+      signal.onabort = () => heard++;
+      gc();
+      controller.abort();
+      gc();
+      gc();
+      expect(heard).toBe(2);
+      expect(controller.signal).toBe(signal);
+      expect(signal.aborted).toBeTruthy();
+      expect(signal.reason).toBeInstanceOf(DOMException);
+    });
+
+    test("an aborted any() signal survives a GC", () => {
+      const controller = new AbortController();
+      const combined = AbortSignal.any([controller.signal]);
+      combined.onabort = () => {};
+      gc();
+      controller.abort("stop");
+      gc();
+      expect(combined.aborted).toBeTruthy();
+      expect(combined.reason).toBe("stop");
+    });
+  });
+
   describe("Error handling", () => {
     test("should throw if aborted with string reason", () => {
       const signal = AbortSignal.abort("Test reason");

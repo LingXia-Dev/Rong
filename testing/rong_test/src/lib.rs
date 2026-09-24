@@ -81,6 +81,14 @@ const TEST_RUNTIME_JS: &str = include_str!("../../../packages/test/src/runtime.j
 
 impl<'a> UnitJSRunner<'a> {
     async fn load_runtime(ctx: &JSContext) -> JSResult<()> {
+        // `gc()` runs a full collection now, including QuickJS's cycle pass.
+        // Values that live only through Rust-held state are traversed only
+        // there, so a mis-marked value surfaces while the test still holds it
+        // instead of being freed quietly by reference counting at the end.
+        ctx.global().set(
+            "gc",
+            JSFunc::new(ctx, |ctx: JSContext| ctx.runtime().run_gc())?,
+        )?;
         ctx.eval_async::<()>(Source::from_bytes(TEST_RUNTIME_JS))
             .await
     }
