@@ -6,6 +6,47 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 
 ## [Unreleased]
 
+## [0.6.4] - 2026-09-24
+
+Independent crate releases: `rong_abort` 0.6.2, `rong_http` 0.6.3, and
+`rong_quickjs` 0.6.1.
+
+### Abort
+
+- A used `AbortSignal` no longer crashes QuickJS at the next GC. Every JS
+  object of a signal marked the signal's shared reason and listeners, and a
+  signal had several — `controller.signal` built one per read, `abort()`
+  another — so a cycle pass freed them early and the process aborted on
+  `p->ref_count > 0`. `AbortController` now creates its signal object once;
+  `controller.signal` returns that same object every time, as the platform
+  requires.
+- `AbortReceiver::gc_mark_with` is deprecated: the watch channel owns the
+  reason, and marking it per receiver freed it early.
+
+### HTTP
+
+- A `Request` keeps the caller's `AbortSignal` object (`request.signal` is
+  `init.signal`) and marks only it, instead of marking the signal's shared
+  state again through a copy. A `Response` no longer marks the abort reason
+  its watch channel owns, which a cloned `Response` shares.
+- `fetch` rejects with a `TypeError` when a request's signal cannot be read,
+  instead of running without its abort wiring.
+
+### QuickJS
+
+- `run_gc` no longer prints `run gc` in debug builds.
+
+### Testing
+
+- The test host can provide `gc`, which the runtime exposes as `test.gc()`
+  beside `test.args` and `test.attach`. `UnitJSRunner` provides it, so a case
+  can collect while it still holds the objects it checks — the only moment a
+  QuickJS cycle pass traverses them.
+
+## [0.6.3] - 2026-09-23
+
+Independent crate releases of the dependency refresh below.
+
 ### Dependencies
 
 - Refresh direct Rust dependencies across the workspace and the standalone
