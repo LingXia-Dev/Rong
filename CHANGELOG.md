@@ -6,6 +6,25 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 
 ## [Unreleased]
 
+## [0.6.5] - 2026-09-24
+
+Independent crate release: `rong_timer` 0.6.1.
+
+### Timer
+
+- `setTimeout` no longer drops callbacks. When a one-shot timer expired, its
+  expiry was queued for the context thread, but the task that started the
+  timer could unregister it first, so the callback was skipped without a
+  trace. It happened most with a zero delay (an
+  `await new Promise((r) => setTimeout(r, 0))` loop hung within a few
+  thousand iterations) and when many timers were due together. Once the
+  expiry is queued, only the callback dispatcher removes the entry, after it
+  runs the callback. `clearTimeout` still wins over a queued expiry.
+- Jobs queued by a `setTimeout` or `setInterval` callback, such as the
+  reactions to a promise it resolves, now run right after the callback. On
+  QuickJS they waited for the worker's periodic job pump (up to 50 ms), so
+  each `await` on a timer took that long.
+
 ## [0.6.4] - 2026-09-24
 
 Independent crate releases: `rong_abort` 0.6.2, `rong_http` 0.6.3, and
