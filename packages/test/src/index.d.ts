@@ -42,6 +42,8 @@ export interface TestFunction {
   skip(name: string, run?: TestCallback): void;
   args?: unknown;
   attach?: (name: string, artifact: unknown) => void | Promise<void>;
+  /** Collect garbage now, if the host can; see `RongTestHost.gc`. */
+  gc?: () => void;
 }
 
 export interface Matchers<T> {
@@ -76,6 +78,12 @@ export interface RongTestController {
 export interface RongTestHost {
   args?: unknown;
   attach?: (name: string, artifact: unknown) => void | Promise<void>;
+  /**
+   * Run a full garbage collection now. A test calls it while it still holds
+   * the values it wants collected around; the framework assigns it no other
+   * meaning.
+   */
+  gc?: () => void;
   report?: (event: TestEvent) => void | Promise<void>;
 }
 

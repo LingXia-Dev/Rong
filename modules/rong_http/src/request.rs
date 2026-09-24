@@ -45,13 +45,16 @@ impl Request {
         })
     }
 
-    pub(crate) fn abort_signal(&self) -> Option<AbortSignal> {
-        self.signal.as_ref().and_then(|signal| {
-            signal
-                .borrow::<AbortSignal>()
-                .ok()
-                .map(|signal| signal.clone())
-        })
+    pub(crate) fn abort_signal(&self) -> JSResult<Option<AbortSignal>> {
+        let Some(signal) = &self.signal else {
+            return Ok(None);
+        };
+        // A failed borrow would otherwise run the fetch with no abort wiring.
+        let signal = signal.borrow::<AbortSignal>().map_err(|_| {
+            HostError::new(rong::error::E_INVALID_ARG, "Request.signal is not usable")
+                .with_name("TypeError")
+        })?;
+        Ok(Some(signal.clone()))
     }
 
     fn has_streaming_body(&self) -> bool {

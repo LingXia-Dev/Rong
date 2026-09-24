@@ -174,14 +174,17 @@ globalThis.__RONG_TEST_HOST__ = {
   attach: async (name, artifact) => {
     // Store an artifact in the host.
   },
+  gc: () => {
+    // Collect garbage now, if the engine can.
+  },
   report: async (event) => {
     // Receive case_started and case_finished events.
   },
 };
 ```
 
-The runtime exposes `args` and `attach` as `test.args` and `test.attach`.
-Their meaning is defined by the host, not by Rong.
+The runtime exposes `args`, `attach`, and `gc` as `test.args`, `test.attach`,
+and `test.gc`. Their meaning is defined by the host, not by Rong.
 
 The host remains responsible for discovering files, transforming TypeScript,
 loading modules, enforcing deadlines, interrupting execution, capturing
@@ -193,6 +196,11 @@ timers, coverage, or browser emulation.
 
 Rong's JavaScript suites under `tests/unit` use the same globals and runtime.
 The Rust `UnitJSRunner` creates the context, loads the shared runtime, evaluates
-the selected suite, and runs its registered cases. Use the Cargo and engine
+the selected suite, and runs its registered cases. It provides `test.gc()`,
+which runs the engine's full collection. Call it inside a case while the case
+still holds the objects under test: a class that marks a value it does not own
+crashes QuickJS only when a cycle pass traverses the live object, and objects
+dropped at the end of a case are freed by reference counting before any pass
+sees them. On JavaScriptCore and ArkJS it does nothing. Use the Cargo and engine
 commands in the [repository testing guide](../internals/testing.md) to execute
 those suites.
