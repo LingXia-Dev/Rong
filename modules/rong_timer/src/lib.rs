@@ -66,9 +66,9 @@ impl TimerCancellation {
     }
 }
 
-struct AbortOnDrop(JoinHandle<()>);
+struct AbortOnDrop<T>(JoinHandle<T>);
 
-impl Drop for AbortOnDrop {
+impl<T> Drop for AbortOnDrop<T> {
     fn drop(&mut self) {
         self.0.abort();
     }
@@ -131,6 +131,7 @@ impl TimerRegistry {
             return;
         };
         let registry = self.clone();
+        let runtime = ctx.runtime().clone();
 
         ctx.spawn_task(async move {
             while let Some(tick) = rx.recv().await {
@@ -150,6 +151,10 @@ impl TimerRegistry {
                     if result.is_err() && repeat {
                         registry.cancel_timer(tick.id);
                     }
+                    // Run the jobs the callback queued, such as the reactions
+                    // to a promise it resolved, before the next timer, as a
+                    // microtask checkpoint after each task would.
+                    runtime.run_pending_jobs();
                 }
 
                 tick.pending.send_replace(false);
@@ -213,11 +218,34 @@ impl TimerRegistry {
 struct TimerRegistration {
     registry: TimerRegistry,
     id: u32,
+    armed: bool,
+}
+
+impl TimerRegistration {
+    fn new(registry: TimerRegistry, id: u32) -> Self {
+        Self {
+            registry,
+            id,
+            armed: true,
+        }
+    }
+
+    /// Hand the entry over to the tick receiver without unregistering it.
+    ///
+    /// Once a one-shot timer's tick is queued, the receiver owns the entry: it
+    /// runs the callback and removes the entry, or skips the tick when
+    /// `clearTimeout` removed the entry first. Unregistering here instead would
+    /// race the receiver and drop the callback.
+    fn disarm(mut self) {
+        self.armed = false;
+    }
 }
 
 impl Drop for TimerRegistration {
     fn drop(&mut self) {
-        self.registry.cancel_timer(self.id);
+        if self.armed {
+            self.registry.cancel_timer(self.id);
+        }
     }
 }
 
@@ -278,30 +306,34 @@ fn set_timeout_with_repeat(
                     tokio::select! {
                         result = pending_rx.changed() => {
                             if result.is_err() {
-                                return;
+                                return false;
                             }
                         }
-                        _ = TimerCancellation::cancelled(&mut cancel_rx) => return,
+                        _ = TimerCancellation::cancelled(&mut cancel_rx) => return false,
                     }
                 }
             }
-            return;
+            return false;
         }
 
         if delay > 0 {
             tokio::select! {
                 _ = tokio::time::sleep(Duration::from_millis(delay)) => {}
-                _ = TimerCancellation::cancelled(&mut cancel_rx) => return,
+                _ = TimerCancellation::cancelled(&mut cancel_rx) => return false,
             }
         }
-        send_tick();
+        send_tick()
     };
 
-    let registration = TimerRegistration { registry, id };
+    let registration = TimerRegistration::new(registry, id);
     ctx.spawn_task(async move {
-        let _registration = registration;
         let mut task = AbortOnDrop(RongExecutor::global().spawn(run_timer));
-        let _ = (&mut task.0).await;
+        // `true` means a one-shot timer queued its tick; the receiver now owns
+        // the entry. Otherwise (an interval that stopped, a cancelled or
+        // failed timer) unregister it here.
+        if matches!((&mut task.0).await, Ok(true)) {
+            registration.disarm();
+        }
     });
 
     id
@@ -412,6 +444,82 @@ mod tests {
         for unit in ["timer.js", "sleep.js"] {
             run_unit_suite(unit);
         }
+    }
+
+    #[test]
+    fn test_timer_reliability() {
+        run_unit_suite("timer_reliability.js");
+    }
+
+    #[test]
+    fn one_shot_timers_due_together_all_fire_and_unregister() {
+        async_run!(|ctx: JSContext| async move {
+            init(&ctx)?;
+            let registry = TimerRegistry::ensure(&ctx);
+
+            let fired = Rc::new(AtomicI32::new(0));
+            let fired_clone = fired.clone();
+            ctx.global().set(
+                "hit",
+                JSFunc::new(&ctx, move || {
+                    fired_clone.fetch_add(1, Ordering::SeqCst);
+                }),
+            )?;
+
+            const COUNT: i32 = 10_000;
+            ctx.eval::<()>(Source::from_bytes(format!(
+                "for (let i = 0; i < {COUNT}; i++) setTimeout(hit, i % 2);"
+            )))?;
+            // Let the host executor queue every tick before the context thread
+            // handles any, so wrappers and the receiver race for each entry.
+            std::thread::sleep(Duration::from_millis(50));
+
+            let deadline = Instant::now() + Duration::from_secs(20);
+            while fired.load(Ordering::SeqCst) < COUNT && Instant::now() < deadline {
+                sleep(Duration::from_millis(5)).await;
+            }
+            assert_eq!(fired.load(Ordering::SeqCst), COUNT, "lost one-shot timers");
+
+            // Wrappers that have not run yet still hold their (disarmed) guards.
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while !lock_poison(&registry.inner.timers).is_empty() && Instant::now() < deadline {
+                sleep(Duration::from_millis(5)).await;
+            }
+            assert!(
+                lock_poison(&registry.inner.timers).is_empty(),
+                "fired one-shot timers must unregister"
+            );
+            assert_eq!(fired.load(Ordering::SeqCst), COUNT, "a timer fired twice");
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn clear_timeout_with_queued_tick_never_fires() {
+        async_run!(|ctx: JSContext| async move {
+            init(&ctx)?;
+            let registry = TimerRegistry::ensure(&ctx);
+
+            let fired = Rc::new(AtomicI32::new(0));
+            let fired_clone = fired.clone();
+            ctx.global().set(
+                "hit",
+                JSFunc::new(&ctx, move || {
+                    fired_clone.fetch_add(1, Ordering::SeqCst);
+                }),
+            )?;
+
+            let id: u32 = ctx.eval(Source::from_bytes("setTimeout(hit, 0)"))?;
+            // Block the context thread so the host executor queues the tick
+            // before anything on this thread handles it.
+            std::thread::sleep(Duration::from_millis(50));
+            ctx.eval::<()>(Source::from_bytes(format!("clearTimeout({id})")))?;
+
+            sleep(Duration::from_millis(50)).await;
+            assert_eq!(fired.load(Ordering::SeqCst), 0, "a cleared timer fired");
+            assert!(lock_poison(&registry.inner.timers).is_empty());
+            Ok(())
+        });
     }
 
     #[test]

@@ -69,10 +69,7 @@ async fn sleep_async(ctx: JSContext, delay: Optional<JSValue>) -> JSResult<()> {
     let timer_id = registry.next_id();
     let (cancel, mut cancel_rx) = TimerCancellation::new();
     registry.register_timer(timer_id, cancel);
-    let _registration = TimerRegistration {
-        registry,
-        id: timer_id,
-    };
+    let _registration = TimerRegistration::new(registry, timer_id);
 
     tokio::select! {
         _ = sleep(Duration::from_millis(delay)) => Ok(()),
