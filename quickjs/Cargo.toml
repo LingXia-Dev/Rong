@@ -1,6 +1,6 @@
 [package]
 name = "rong_quickjs"
-version = "0.6.0"
+version = "0.6.1"
 edition.workspace = true
 
 description = "QuickJS backend for RongJS"
