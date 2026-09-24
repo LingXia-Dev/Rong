@@ -120,7 +120,7 @@ pub async fn fetch(input: JSValue, init: Optional<RequestInit>) -> JSResult<Resp
     grant_network_access(&domain)?;
 
     // Get abort signal if present
-    let mut abort_receiver = request.abort_signal().map(|signal| signal.subscribe());
+    let mut abort_receiver = request.abort_signal()?.map(|signal| signal.subscribe());
 
     let mut redirect_count = 0;
     const MAX_REDIRECTS: u32 = 20;

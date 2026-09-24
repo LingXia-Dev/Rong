@@ -122,10 +122,10 @@ describe("Request", () => {
       controller.signal.onabort = () => {};
       const request = new Request("https://example.com", { signal: controller.signal });
       const copy = request.clone();
-      gc();
+      test.gc();
       controller.abort();
-      gc();
-      gc();
+      test.gc();
+      test.gc();
       expect(request.signal.aborted).toBeTruthy();
       expect(copy.signal).toBe(controller.signal);
     });

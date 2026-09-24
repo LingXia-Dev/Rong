@@ -35,11 +35,14 @@ A host may define this object before loading the runtime:
 globalThis.__RONG_TEST_HOST__ = {
   args: { locale: "en" },
   attach: async (name, artifact) => {},
+  gc: () => {},
   report: async (event) => {},
 };
 ```
 
-`args` and `attach` become `test.args` and `test.attach`. The optional reporter
+`args`, `attach`, and `gc` become `test.args`, `test.attach`, and `test.gc`.
+`test.gc()` asks the host to collect garbage now, where it can; a test calls
+it while it still holds the objects it is checking. The optional reporter
 receives `case_started` and `case_finished` events. The framework assigns no
 meaning to host arguments or artifacts.
 

@@ -83,6 +83,7 @@
   };
   test.args = host ? host.args : undefined;
   if (host && typeof host.attach === "function") test.attach = host.attach;
+  if (host && typeof host.gc === "function") test.gc = host.gc;
 
   function beforeEach(callback) {
     assertRegistering("beforeEach");

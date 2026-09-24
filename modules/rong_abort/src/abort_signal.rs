@@ -8,6 +8,10 @@ use tokio::sync::watch;
 // The AbortSignal interface represents a signal object that allows you to communicate
 // with an asynchronous operation (such as a fetch request) and abort it if required
 // via an AbortController object
+/// One JS object per signal: the reason and listeners in `inner` are marked by
+/// that object alone. Never make a second one from a clone of this value
+/// (`Class::instance(signal.clone())`) — two objects marking the same state
+/// make a QuickJS GC cycle free it early. Hold the `JSObject` instead.
 #[js_class(clone)]
 pub struct AbortSignal {
     inner: Rc<Mutex<AbortSignalInner>>,
@@ -100,9 +104,12 @@ impl AbortReceiver {
     /// Mark the current abort reason (if any) for the GC.
     ///
     /// The watch channel holds one reference to the reason, shared by every
-    /// receiver. Call this from at most one owner per channel — marking it once
-    /// per receiver makes a QuickJS GC cycle free it early. Usually no one
-    /// needs to: the channel keeps the reason alive.
+    /// receiver, so marking it per receiver makes a QuickJS GC cycle free it
+    /// early. The channel keeps the reason alive; no owner needs to mark it.
+    #[deprecated(
+        since = "0.6.2",
+        note = "the watch channel owns the reason; marking it per receiver frees it early"
+    )]
     pub fn gc_mark_with<F>(&self, mut mark_fn: F)
     where
         F: FnMut(&JSValue),

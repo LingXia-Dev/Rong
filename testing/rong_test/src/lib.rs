@@ -81,14 +81,16 @@ const TEST_RUNTIME_JS: &str = include_str!("../../../packages/test/src/runtime.j
 
 impl<'a> UnitJSRunner<'a> {
     async fn load_runtime(ctx: &JSContext) -> JSResult<()> {
-        // `gc()` runs a full collection now, including QuickJS's cycle pass.
-        // Values that live only through Rust-held state are traversed only
-        // there, so a mis-marked value surfaces while the test still holds it
-        // instead of being freed quietly by reference counting at the end.
-        ctx.global().set(
+        // `test.gc()` runs a full collection now, including QuickJS's cycle
+        // pass, so a value marked by the wrong owners surfaces while the test
+        // still holds it; after the test, reference counting frees it without
+        // the cycle pass ever seeing it. A no-op on engines without a GC hook.
+        let host = JSObject::new(ctx);
+        host.set(
             "gc",
             JSFunc::new(ctx, |ctx: JSContext| ctx.runtime().run_gc())?,
         )?;
+        ctx.global().set("__RONG_TEST_HOST__", host)?;
         ctx.eval_async::<()>(Source::from_bytes(TEST_RUNTIME_JS))
             .await
     }
