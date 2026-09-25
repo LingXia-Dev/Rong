@@ -11,6 +11,7 @@ use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
+use std::time::Duration;
 
 const RONG_VERSION: &str = env!("CARGO_PKG_VERSION");
 const RONG_REVISION: Option<&str> = option_env!("RONG_GIT_REVISION");
@@ -49,6 +50,24 @@ pub trait JSRuntimeImpl {
     /// - The exact behavior depends on the underlying JavaScript engine implementation.
     /// - Use this judiciously as it may impact performance.
     fn run_gc(&self);
+
+    /// Runs the engine's own deferred work that is due on this thread and
+    /// returns how long until it should be called again.
+    ///
+    /// # Key Notes
+    /// - Some engines schedule work on the thread's event loop instead of
+    ///   doing it inline. JavaScriptCore on Apple platforms runs its timed
+    ///   garbage collection and heap sweeping from the thread's CFRunLoop,
+    ///   which Rong's workers never run otherwise.
+    /// - `None` (the default): the engine schedules no such work, and the
+    ///   caller never needs to call this again.
+    /// - `Some(delay)`: call again within `delay`. `Duration::MAX` means
+    ///   nothing is scheduled yet. Work can be scheduled later, even from
+    ///   another thread, so callers keep calling at a bounded interval.
+    /// - Rong's workers call this between tasks, never while JavaScript runs.
+    fn run_engine_timers(&self) -> Option<Duration> {
+        None
+    }
 
     /// Install the shared interruption flag into the engine.
     ///
@@ -133,8 +152,18 @@ impl<R: JSRuntimeImpl + 'static> JSRuntime<R> {
     /// - This method triggers a garbage collection cycle to reclaim unused memory.
     /// - The exact behavior depends on the underlying JavaScript engine implementation.
     /// - Use this judiciously as it may impact performance.
+    /// - QuickJS runs a full collection, including its cycle pass. On
+    ///   JavaScriptCore and ArkJS this does nothing: JavaScriptCore has no
+    ///   public synchronous collection and collects on its own schedule, which
+    ///   Rong's workers drive (see [`JSRuntimeImpl::run_engine_timers`]).
     pub fn run_gc(&self) {
         self.inner.run_gc();
+    }
+
+    /// Runs the engine's deferred work that is due on this thread. See
+    /// [`JSRuntimeImpl::run_engine_timers`].
+    pub(crate) fn run_engine_timers(&self) -> Option<Duration> {
+        self.inner.run_engine_timers()
     }
 
     /// The `Send + Sync` handle other threads use to abort JavaScript

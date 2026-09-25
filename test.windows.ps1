@@ -244,6 +244,14 @@ function Run-AllCoreTests([string]$EngineName, [string[]]$CoreTests) {
     }
     & cargo test @testArgs
     Record-SuiteResult -Name "Core integration tests on $EngineName" -ExitCode $LASTEXITCODE
+
+    Log-Info "Running rong_core unit tests ($EngineName)"
+    $unitArgs = @("-p", "rong_core", "--lib", "--quiet")
+    if (-not $script:FailFast) {
+        $unitArgs += "--no-fail-fast"
+    }
+    & cargo test @unitArgs
+    Record-SuiteResult -Name "rong_core unit tests on $EngineName" -ExitCode $LASTEXITCODE
 }
 
 function Run-AllModuleTests([string]$EngineName, [string[]]$ModuleTests) {

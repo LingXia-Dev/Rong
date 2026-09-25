@@ -672,6 +672,10 @@ async fn run_pinned_worker_loop<E, K, S>(
             } else {
                 None
             };
+            let engine_timers = crate::worker_thread::EngineTimers::start(
+                &js_runtime,
+                info_span!(parent: &worker_span, "rong.pinned_engine_timers", worker_id = worker_id),
+            );
 
             type TaskJoinHandle<K, S> = tokio::task::JoinHandle<
                 Result<(JSResult<Box<dyn Any + Send>>, K, Option<S>), Aborted>,
@@ -784,6 +788,9 @@ async fn run_pinned_worker_loop<E, K, S>(
                         current_task_join = None;
                         current_task_abort = None;
                         current_task_span = None;
+                        if let Some(timers) = &engine_timers {
+                            timers.wake();
+                        }
                         if inflight_tasks.fetch_sub(1, Ordering::SeqCst) == 1 {
                             idle_notify.notify_waiters();
                             any_worker_idle.notify_one();
@@ -810,6 +817,12 @@ async fn run_pinned_worker_loop<E, K, S>(
 
             if let Some(handle) = microtask_runner {
                 handle.abort();
+            }
+            // Stop the engine's timers while the runtime is still alive: the
+            // loop holds a runtime handle, and the engine's timers must be
+            // torn down on this thread before the runtime is.
+            if let Some(timers) = engine_timers {
+                timers.stop().await;
             }
 
             if inflight_tasks.load(Ordering::SeqCst) == 0 {

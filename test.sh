@@ -334,6 +334,13 @@ run_all_core_tests() {
     else
         record_suite_result "Core integration tests on $engine" 1 || true
     fi
+
+    log_info "Running rong_core unit tests ($engine)"
+    if run_cargo_test -p rong_core --lib --quiet "${extra[@]}"; then
+        record_suite_result "rong_core unit tests on $engine" 0
+    else
+        record_suite_result "rong_core unit tests on $engine" 1 || true
+    fi
 }
 
 run_all_module_tests() {
