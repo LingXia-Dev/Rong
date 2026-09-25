@@ -6,6 +6,42 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 
 ## [Unreleased]
 
+## [0.6.6] - 2026-09-24
+
+Independent crate releases: `rong_core` 0.6.2, `rong_jscore` 0.6.1, and
+`rong` 0.6.3.
+
+### JavaScriptCore
+
+- Workers now reclaim dropped contexts and idle garbage on Apple's system
+  framework. JavaScriptCore runs its full collections, its heap sweeping and
+  its other deferred work from timers on the thread's CFRunLoop, which Rong's
+  workers never ran, so a dropped context stayed allocated, along with most
+  garbage that allocation-driven eden collections do not free. Shared and
+  pinned workers now service those timers while idle and right after each
+  task, using public CoreFoundation API only. A retired context goes within
+  seconds instead of never.
+- Source/JSCOnly builds are unchanged: their timers run on WebKit's own run
+  loop, which Rong cannot drive, so dropped contexts there still wait for
+  allocation to trigger a full collection. The `rong_jscore` README says so.
+- An embedder that runs a JavaScriptCore runtime on its own thread, outside
+  Rong's workers, must run that thread's CFRunLoop to get the same effect.
+- `JSRuntime::run_gc` documents that it does nothing on JavaScriptCore and
+  ArkJS.
+
+### Engine interface
+
+- `JSRuntimeImpl` gains `run_engine_timers`, defaulting to `None` (no
+  deferred work), so existing engine implementations are unaffected.
+
+### Testing
+
+- `tests/gc.rs` checks that shared and pinned workers reclaim dropped
+  contexts, counting host-object drops, and that an idle worker collects
+  garbage in a live context, watching WeakRefs (`tests/unit/gc.js`). Both run
+  on QuickJS and on Apple's JavaScriptCore.
+- The test scripts also run `rong_core`'s unit tests.
+
 ## [0.6.5] - 2026-09-24
 
 Independent crate release: `rong_timer` 0.6.1.
