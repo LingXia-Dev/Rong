@@ -1,5 +1,10 @@
 mod class;
 mod context;
+// Only Apple's system framework is known to schedule JSC's timers on the
+// thread's CFRunLoop. Source/JSCOnly builds, even on Apple targets, keep the
+// engine default.
+#[cfg(all(target_vendor = "apple", not(jsc_source)))]
+mod run_loop;
 mod runtime;
 mod value;
 

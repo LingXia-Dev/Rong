@@ -78,8 +78,22 @@ impl JSRuntimeImpl for JSCRuntime {
         self.raw
     }
 
-    // JavaScriptCore  GC works on Conext level, not runtime
+    // JavaScriptCore has no public synchronous collection. It collects on
+    // its own schedule, from timers that `run_engine_timers` services on
+    // Apple's system framework.
     fn run_gc(&self) {}
+
+    /// Apple's system framework runs JSC's collection timers, sweeper and
+    /// deferred work on the VM thread's CFRunLoop. Always `Some`: timers get
+    /// armed after the first call, so the caller must keep calling.
+    ///
+    /// Source/JSCOnly builds keep the default `None`: WebKit's JSCOnly port
+    /// runs these timers on WTF's run loop, which the C API cannot drive, so
+    /// retired contexts there wait for allocation-driven collections.
+    #[cfg(all(target_vendor = "apple", not(jsc_source)))]
+    fn run_engine_timers(&self) -> Option<std::time::Duration> {
+        Some(crate::run_loop::run_due_timers())
+    }
 
     /// Source builds always install preemption. System-framework builds remain
     /// cooperative-only unless `interrupt-spi` is explicitly enabled.
