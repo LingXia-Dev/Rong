@@ -46,7 +46,7 @@ rong_quickjs = { path = "quickjs"      , version = "0.6.1" }
 rong_quickjs_sys = { path = "quickjs/sys"      , version = "0.6.1" }
 rong_jscore = { path = "javascriptcore"      , version = "0.6.1" }
 rong_jscore_sys = { path = "javascriptcore/sys"      , version = "0.6.1" }
-rong_arkjs = { path = "arkjs"      , version = "0.6.0" }
+rong_arkjs = { path = "arkjs"      , version = "0.6.1" }
 rong_arkjs_sys = { path = "arkjs/sys"      , version = "0.6.1" }
 rong_macro = { path = "rong_macro"      , version = "0.6.1" }
 rong_test = { path = "testing/rong_test", default-features = false   , version = "0.4.0" }
