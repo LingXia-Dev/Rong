@@ -6,6 +6,20 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 
 ## [Unreleased]
 
+## [0.6.7] - 2026-09-29
+
+Independent crate release: `rong_arkjs` 0.6.1.
+
+### ArkJS
+
+- `new AbortController()` no longer crashes HarmonyOS. Inside a JS
+  constructor, every class instance built from Rust reused the constructor's
+  `this`, so the AbortSignal that the controller's constructor creates took
+  over the controller's object, and the controller's own data went to an
+  orphan object the GC freed. Reading `controller.signal` then used freed
+  memory. An instance of another class built inside a constructor now gets
+  its own object.
+
 ## [0.6.6] - 2026-09-24
 
 Independent crate releases: `rong_core` 0.6.2, `rong_jscore` 0.6.1, and
