@@ -28,9 +28,11 @@ impl JSObjectOps for ArkJSValue {
             // If we're inside generic_constructor (JS `new Class(...)`), wrap data
             // onto the existing this_arg rather than creating a second instance.
             // JSVM ignores constructor return values — it always uses this_arg.
-            let constructor_this = crate::class::CONSTRUCTOR_THIS.get();
-            let instance = if !constructor_this.is_null() {
-                crate::class::CONSTRUCTOR_THIS.set(std::ptr::null_mut());
+            let (constructor_this, constructing) = crate::class::CONSTRUCTOR_THIS.get();
+            let class_key = crate::class::get_finalizer_by_constructor(&constructor)
+                .map_or(0, |finalizer| finalizer as usize);
+            let instance = if !constructor_this.is_null() && constructing == class_key {
+                crate::class::CONSTRUCTOR_THIS.set((std::ptr::null_mut(), 0));
                 constructor_this
             } else {
                 // Called from Rust (not from a JS constructor). Create a new instance.
