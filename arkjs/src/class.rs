@@ -43,10 +43,12 @@ thread_local! {
     /// make_instance will handle wrapping native data afterwards.
     pub(crate) static MAKE_INSTANCE: Cell<bool> = const { Cell::new(false) };
 
-    /// When inside generic_constructor (JS `new Class()`), holds the current `this_arg`.
-    /// make_instance checks this to wrap data onto the existing instance instead of
-    /// creating a second one (JSVM ignores constructor return values).
-    pub(crate) static CONSTRUCTOR_THIS: Cell<arkjs::JSVM_Value> = const { Cell::new(std::ptr::null_mut()) };
+    /// When inside generic_constructor (JS `new Class()`), holds the current `this_arg`
+    /// and the class being constructed, keyed by its finalizer. make_instance wraps
+    /// data onto that `this` instead of creating a second instance (JSVM ignores
+    /// constructor return values), but only for that class: an instance of another
+    /// class built inside the constructor needs its own object.
+    pub(crate) static CONSTRUCTOR_THIS: Cell<(arkjs::JSVM_Value, usize)> = const { Cell::new((std::ptr::null_mut(), 0)) };
 
 }
 
@@ -184,12 +186,14 @@ where
 
         // Store this_arg so make_instance wraps data onto it instead of
         // creating a second instance (JSVM ignores constructor return values).
-        CONSTRUCTOR_THIS.set(this_arg);
+        // Restore the outer value afterwards: constructors can nest.
+        let class_key = finalizer::<JC> as *const std::ffi::c_void as usize;
+        let outer = CONSTRUCTOR_THIS.replace((this_arg, class_key));
 
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             <JC as JSClassExt<ArkJSValue>>::construct_value(&ctx, this, args)
         }));
-        CONSTRUCTOR_THIS.set(ptr::null_mut());
+        CONSTRUCTOR_THIS.set(outer);
 
         match result {
             Ok(Ok(value)) => {
