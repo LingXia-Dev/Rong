@@ -6,6 +6,19 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 
 ## [Unreleased]
 
+## [0.6.8] - 2026-09-29
+
+Independent crate release: `rong_arkjs` 0.6.2.
+
+### ArkJS
+
+- A class instance that Rust keeps stays the same object. Instances built
+  from Rust came back as bare local handles, so once the creating call
+  returned, a kept one pointed at whatever reused its slot:
+  `controller.signal` returned an unrelated object with no
+  `addEventListener`, and cloning it could crash. Instances now hold a
+  reference like every other value Rust keeps.
+
 ## [0.6.7] - 2026-09-29
 
 Independent crate release: `rong_arkjs` 0.6.1.
