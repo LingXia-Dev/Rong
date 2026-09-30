@@ -84,7 +84,9 @@ impl JSObjectOps for ArkJSValue {
                 }
             }
 
-            ArkJSValue::from_owned_raw(ctx.to_raw(), instance).with_object()
+            // Rust keeps instances (a field, a registry), so hold a reference:
+            // a bare local handle goes stale when this callback's scope closes.
+            ArkJSValue::from_borrowed_raw(ctx.to_raw(), instance).with_object()
         }
     }
 
