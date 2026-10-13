@@ -87,6 +87,14 @@ let response = rong_rt::http::scope_network_owner(
 .await?;
 ```
 
-Events for one request share a `NetworkRequestId` and end with exactly one
-`RequestEnd`. Body chunks are teed from the connection, never buffered.
-Without the feature the hooks are not compiled.
+Events for one request share a `NetworkRequestId`: `RequestStart` first,
+request-body chunks, `ResponseHead`, response-body chunks, and exactly one
+`RequestEnd` last. `RequestStart` runs on the sender's thread (the JS thread for
+`fetch`); the rest run on executor threads. A redirect hop's
+`RequestStart::redirected_from` names the previous hop, whose head carries the
+status and `Location`. Guard-denied requests end with
+`NetworkOutcome::Blocked`. Body chunks are teed from the connection, never
+buffered. Without the feature the hooks are not compiled.
+
+The observer tests need a TLS backend feature to build a client:
+`cargo test -p rong_rt --features tls-aws-lc,network-observer`.

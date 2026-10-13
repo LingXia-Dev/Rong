@@ -9,7 +9,7 @@ use tokio::sync::oneshot;
 use crate::client::{
     HttpBody, RequestTimeouts, send_request_with_shared_abort, shared_abort_signal,
 };
-use crate::observer::{HopId, NetworkRequestKind, OwnerCapture, redirect, tag_request};
+use crate::observer::{HopId, NetworkRequestKind, OwnerCapture, tag_request};
 use tokio::time::{Duration, Instant};
 
 const DEFAULT_DOWNLOAD_SMALL_THRESHOLD: usize = 64 * 1024;
@@ -237,12 +237,10 @@ async fn download_resource(
         if redirect_count >= MAX_DOWNLOAD_REDIRECTS {
             return finalize_sink(sink_opt, Err("too many redirects".to_string()));
         }
-        let next_url = match redirect_target(&current_url, &resp.headers) {
+        current_url = match redirect_target(&current_url, &resp.headers) {
             Ok(url) => url,
             Err(e) => return finalize_sink(sink_opt, Err(e)),
         };
-        redirect(hop, resp.status, &current_url, &next_url);
-        current_url = next_url;
         redirect_count += 1;
     };
 

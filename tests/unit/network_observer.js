@@ -1,10 +1,17 @@
 // Driven by rong_http's `test_network_observer` (feature `network-observer`):
-// `__setNetworkOwner(name)` sets this context's owner ("" clears it) and
-// `__observedRequests(owner, urlContains)` returns the recorded traces as JSON.
+// `__setNetworkOwner(name)` sets this context's owner ("" clears it),
+// `__denyHost(host)` installs an access guard denying that host ("" denies
+// none), and `__observedRequests(owner, urlContains)` returns the recorded
+// traces as JSON.
 
 async function observed(owner, count, urlContains = "") {
   for (let i = 0; i < 300; i++) {
     const list = JSON.parse(__observedRequests(owner, urlContains));
+    for (const trace of list) {
+      if (trace.orderError !== null) {
+        throw new Error(`trace ${trace.url}: ${trace.orderError}`);
+      }
+    }
     if (list.length >= count && list.every((t) => t.outcome !== null)) {
       return list;
     }
@@ -84,13 +91,15 @@ describe("network observer", () => {
       assert.equal(hops[i].redirectedFrom, i === 0 ? null : hops[i - 1].id);
     }
     for (let i = 0; i < 3; i++) {
+      // A hop's head carries the redirect: status plus Location.
       assert.equal(hops[i].status, 302);
-      expect(hops[i].redirects).toEqual([
-        { status: 302, from: hops[i].url, to: hops[i + 1].url },
-      ]);
+      assert.equal(
+        new URL(hops[i].location, hops[i].url).href,
+        new URL(hops[i + 1].url).href,
+      );
     }
     assert.equal(hops[3].status, 200);
-    expect(hops[3].redirects).toEqual([]);
+    assert.equal(hops[3].location, null);
     assert.equal(hops[3].outcome, "completed");
   });
 
@@ -174,5 +183,48 @@ describe("network observer", () => {
     const [cleared] = await observed("", 1, "phase=cleared");
     assert.equal(cleared.owner, null);
     assert.equal(cleared.kind, "fetch");
+  });
+
+  test("reports guard-denied requests as blocked", async () => {
+    __setNetworkOwner("js-blocked");
+    __denyHost("blocked.invalid");
+    try {
+      let caught = null;
+      try {
+        await fetch("http://blocked.invalid/direct");
+      } catch (error) {
+        caught = error;
+      }
+      assert.equal(caught !== null, true);
+
+      caught = null;
+      try {
+        await fetch(`${TEST_SERVER_URL}/redirect-blocked`);
+      } catch (error) {
+        caught = error;
+      }
+      assert.equal(caught !== null, true);
+
+      caught = null;
+      try {
+        new Rong.SSE("http://blocked.invalid/sse");
+      } catch (error) {
+        caught = error;
+      }
+      assert.equal(caught !== null, true);
+    } finally {
+      __denyHost("");
+    }
+
+    const BLOCKED = "blocked: E_PERMISSION_DENIED: denied by policy";
+    const traces = await observed("js-blocked", 4);
+    expect(traces.map((t) => [t.kind, t.url, t.outcome])).toEqual([
+      ["fetch", "http://blocked.invalid/direct", BLOCKED],
+      ["fetch", `${TEST_SERVER_URL}/redirect-blocked`, "completed"],
+      ["fetch", "http://blocked.invalid/next", BLOCKED],
+      ["sse", "http://blocked.invalid/sse", BLOCKED],
+    ]);
+    assert.equal(traces[2].redirectedFrom, traces[1].id);
+    assert.equal(traces[0].status, null);
   });
 });

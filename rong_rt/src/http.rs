@@ -19,10 +19,10 @@ use crate::client::{self, RequestTimeouts};
 pub use crate::client::{HttpBody, HttpResponse};
 #[cfg(feature = "network-observer")]
 pub use crate::observer::{
-    NetworkEvent, NetworkObserver, NetworkOutcome, NetworkOwner, NetworkRedirect,
-    NetworkRequestEnd, NetworkRequestId, NetworkRequestKind, NetworkRequestStart,
-    NetworkRequestTag, NetworkResponseHead, current_network_owner, network_observer_installed,
-    notify_network_redirect, scope_network_owner, set_network_observer, sync_scope_network_owner,
+    NetworkEvent, NetworkObserver, NetworkOutcome, NetworkOwner, NetworkRequestEnd,
+    NetworkRequestId, NetworkRequestKind, NetworkRequestStart, NetworkRequestTag,
+    NetworkResponseHead, current_network_owner, network_observer_installed, notify_network_blocked,
+    scope_network_owner, set_network_observer, sync_scope_network_owner,
 };
 pub use http::Uri;
 
@@ -202,8 +202,11 @@ fn check_network_access(
     request: &HttpRequest<BoxBody<Bytes, Error>>,
     guard: Option<&dyn NetworkAccessGuard>,
 ) -> Result<(), HttpError> {
-    if let Some(guard) = guard {
-        guard.check_access(request.uri())?;
+    if let Some(guard) = guard
+        && let Err(err) = guard.check_access(request.uri())
+    {
+        crate::observer::blocked(request, err.message());
+        return Err(err);
     }
     Ok(())
 }

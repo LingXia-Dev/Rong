@@ -129,10 +129,44 @@ struct Trace {
     request_body: Vec<u8>,
     body: Vec<u8>,
     chunks: usize,
-    redirects: Vec<NetworkRedirect>,
     end: Option<NetworkRequestEnd>,
     /// Event kinds in arrival order, for ordering assertions.
     order: Vec<&'static str>,
+}
+
+/// Events seen so far must be a prefix of: start, request chunks, head,
+/// response chunks, end.
+fn check_order(t: &Trace) {
+    let rank = |kind: &str| match kind {
+        "start" => 0,
+        "request_chunk" => 1,
+        "head" => 2,
+        "chunk" => 3,
+        "end" => 4,
+        _ => unreachable!(),
+    };
+    assert_eq!(
+        t.order.first(),
+        Some(&"start"),
+        "start must come first: {t:#?}"
+    );
+    assert_eq!(
+        t.order.iter().filter(|k| **k == "start").count(),
+        1,
+        "{t:#?}"
+    );
+    assert!(
+        t.order.iter().filter(|k| **k == "head").count() <= 1,
+        "{t:#?}"
+    );
+    assert!(
+        t.order.windows(2).all(|w| rank(w[0]) <= rank(w[1])),
+        "events out of order: {:?}",
+        t.order
+    );
+    if t.end.is_some() {
+        assert_eq!(t.order.last(), Some(&"end"), "end must come last: {t:#?}");
+    }
 }
 
 impl Recording {
@@ -170,19 +204,17 @@ impl Recording {
                     t.chunks += 1;
                     t.order.push("chunk");
                 }
-                NetworkEvent::Redirect(e) => {
-                    let t = slot(&mut traces, e.id);
-                    t.redirects.push(e.clone());
-                    t.order.push("redirect");
-                }
                 NetworkEvent::RequestEnd(e) => {
                     let t = slot(&mut traces, e.id);
+                    assert!(t.end.is_none(), "second RequestEnd: {:#?}", t);
                     t.end = Some(e.clone());
                     t.order.push("end");
                 }
             }
         }
-        traces.into_iter().map(|(_, t)| t).collect()
+        let traces: Vec<_> = traces.into_iter().map(|(_, t)| t).collect();
+        traces.iter().for_each(check_order);
+        traces
     }
 
     /// Traces whose request path starts with `path`, in start order.
@@ -558,14 +590,14 @@ fn download_redirect_chain_reports_hops_in_order() {
             assert_eq!(start.kind, NetworkRequestKind::Download);
             let previous = (i > 0).then(|| traces[i - 1].start.as_ref().unwrap().id);
             assert_eq!(start.redirected_from, previous);
+            let head = t.head.as_ref().unwrap();
             if i < 3 {
-                let redirect = &t.redirects[..];
-                assert_eq!(redirect.len(), 1);
-                assert_eq!(redirect[0].status, StatusCode::FOUND);
-                assert_eq!(redirect[0].from, start.uri);
-                assert_eq!(redirect[0].to, traces[i + 1].start.as_ref().unwrap().uri);
+                // The hop's head carries everything a redirect event would.
+                assert_eq!(head.status, StatusCode::FOUND);
+                let next = traces[i + 1].start.as_ref().unwrap();
+                assert_eq!(head.headers[header::LOCATION], next.uri.path());
             } else {
-                assert!(t.redirects.is_empty());
+                assert_eq!(head.status, StatusCode::OK);
                 assert_eq!(t.body, b"hello");
             }
         }
@@ -767,5 +799,113 @@ fn in_flight_request_keeps_reporting_after_observer_removal() {
             traces[0].end.as_ref().unwrap().outcome,
             NetworkOutcome::Completed
         );
+    });
+}
+
+struct DenyAll;
+
+impl crate::http::NetworkAccessGuard for DenyAll {
+    fn check_access(&self, _uri: &Uri) -> Result<(), crate::http::HttpError> {
+        Err(crate::http::HttpError::access_denied("denied by policy"))
+    }
+}
+
+#[test]
+fn guard_denied_requests_report_blocked() {
+    let installed = Installed::new();
+    run(async {
+        let addr = spawn_server().await;
+        let deny = || Arc::new(DenyAll) as Arc<dyn crate::http::NetworkAccessGuard>;
+        let dir = tempfile::tempdir().unwrap();
+        let upload_path = dir.path().join("payload.bin");
+        std::fs::write(&upload_path, b"payload").unwrap();
+
+        scope_network_owner(owner("blocked"), async {
+            let err = send(
+                get_request(&format!("http://{addr}/small?send")),
+                RequestOptions::new().with_network_access_guard(deny()),
+            )
+            .await
+            .err()
+            .expect("guard must deny");
+            assert_eq!(err.kind(), crate::http::HttpErrorKind::AccessDenied);
+
+            crate::http::scope_network_access_guard(deny(), async {
+                crate::download::download(
+                    crate::download::DownloadOptions::new(
+                        format!("http://{addr}/small?download"),
+                        dir.path().join("out.txt"),
+                    ),
+                    None,
+                )
+                .await
+                .unwrap_err();
+                crate::upload::upload(
+                    crate::upload::UploadOptions::new(
+                        format!("http://{addr}/upload?upload"),
+                        &upload_path,
+                    ),
+                    None,
+                )
+                .await
+                .unwrap_err();
+                let options =
+                    crate::sse::SseConnectOptions::new(format!("http://{addr}/sse?sse")).unwrap();
+                let mut conn = crate::sse::connect_sse(options, None).unwrap();
+                conn.opened().await.unwrap_err();
+            })
+            .await;
+        })
+        .await;
+
+        let traces = installed
+            .recording
+            .ended(4, |r| r.for_owner("blocked"))
+            .await;
+        assert_eq!(traces.len(), 4);
+        let mut kinds = Vec::new();
+        for t in &traces {
+            let start = t.start.as_ref().unwrap();
+            assert_eq!(t.order, ["start", "end"]);
+            assert_eq!(start.uri.port_u16(), Some(addr.port()));
+            assert_eq!(
+                t.end.as_ref().unwrap().outcome,
+                NetworkOutcome::Blocked("denied by policy".to_string())
+            );
+            kinds.push((start.kind, start.uri.query().unwrap().to_string()));
+        }
+        assert_eq!(
+            kinds,
+            [
+                (NetworkRequestKind::Other, "send".to_string()),
+                (NetworkRequestKind::Download, "download".to_string()),
+                (NetworkRequestKind::Upload, "upload".to_string()),
+                (NetworkRequestKind::Sse, "sse".to_string()),
+            ]
+        );
+    });
+}
+
+#[test]
+fn upload_body_size_falls_back_to_content_length() {
+    let installed = Installed::new();
+    run(async {
+        let addr = spawn_server().await;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("sized.bin");
+        std::fs::write(&path, vec![1u8; 1234]).unwrap();
+        scope_network_owner(owner("sized"), async {
+            crate::upload::upload(
+                crate::upload::UploadOptions::new(format!("http://{addr}/upload"), &path),
+                None,
+            )
+            .await
+            .unwrap();
+        })
+        .await;
+        let traces = installed.recording.ended(1, |r| r.for_owner("sized")).await;
+        let start = traces[0].start.as_ref().unwrap();
+        assert_eq!(start.body_size, Some(1234));
+        assert!(start.started_at_system <= std::time::SystemTime::now());
     });
 }

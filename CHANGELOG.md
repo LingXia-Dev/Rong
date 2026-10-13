@@ -12,9 +12,16 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
   `rong_modules`: `rong_rt::http::set_network_observer` receives every
   request sent through the shared client (`fetch`, `Rong.SSE`, download,
   upload, and direct `rong_rt::http` calls) as start, request-body chunk,
-  response head, response-body chunk, redirect, and end events under one
-  request id. Body chunks are the bytes off the connection, teed without
+  response head, response-body chunk, and exactly one end event under one
+  request id. A redirect hop links to the previous one through
+  `redirected_from`; the previous hop's head carries the status and
+  `Location`. Body chunks are the bytes off the connection, teed without
   buffering, so what the app receives is unchanged.
+- A request denied by a network access guard reports a start and an end with
+  `NetworkOutcome::Blocked`, including `fetch` redirects the guard rejects.
+- One request's events may arrive on different threads: the start on the
+  sender's thread (the JS thread for `fetch`), the rest on executor threads.
+  Callbacks must hand off and never block.
 - Each request carries an owner: `rong_rt::http::scope_network_owner` (or
   `sync_scope_network_owner`) for Rust callers, `rong_http::set_network_owner`
   for a JS context's `fetch` and `Rong.SSE`. It is captured when the request
