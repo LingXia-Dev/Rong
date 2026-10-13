@@ -11,6 +11,7 @@ use tokio_stream::{StreamExt as _, wrappers::ReceiverStream};
 
 use crate::client;
 use crate::formdata::FormData;
+use crate::observer::FetchOwner;
 use crate::request::{Request, RequestInit};
 use crate::response::Response;
 use crate::security::grant_network_access;
@@ -109,7 +110,11 @@ async fn to_hyper_request(request: &Request) -> JSResult<HttpRequest<BoxBody<Byt
     })
 }
 
-pub async fn fetch(input: JSValue, init: Optional<RequestInit>) -> JSResult<Response> {
+pub async fn fetch(
+    ctx: JSContext,
+    input: JSValue,
+    init: Optional<RequestInit>,
+) -> JSResult<Response> {
     // Create Request object from input and init
     let mut request = Request::new(input, init).map_err(|e| {
         HostError::new(rong::error::E_INVALID_ARG, e.to_string()).with_name("TypeError")
@@ -124,10 +129,12 @@ pub async fn fetch(input: JSValue, init: Optional<RequestInit>) -> JSResult<Resp
 
     let mut redirect_count = 0;
     const MAX_REDIRECTS: u32 = 20;
+    let mut observed = FetchOwner::new(&ctx);
 
     loop {
         // Convert Request to hyper::Request without cloning the whole Request object.
-        let hyper_request = to_hyper_request(&request).await?;
+        let mut hyper_request = to_hyper_request(&request).await?;
+        observed.tag(&mut hyper_request);
         let orig_method = hyper_request.method().clone();
         let orig_uri = hyper_request.uri().clone();
 
@@ -331,6 +338,8 @@ pub async fn fetch(input: JSValue, init: Optional<RequestInit>) -> JSResult<Resp
                             request.headers.delete("content-type".to_string())?;
                             request.headers.delete("transfer-encoding".to_string())?;
                         }
+
+                        observed.redirect(net_resp.status, &orig_uri, &request.url);
 
                         // Discard the redirect response and continue.
                         // If it was streaming, notify the abort bridge to stop background reads.
@@ -745,6 +754,228 @@ mod tests {
 
             Ok(())
         });
+    }
+
+    #[cfg(feature = "network-observer")]
+    mod observed {
+        use rong_rt::http::{NetworkEvent, NetworkObserver, NetworkOutcome, NetworkRequestKind};
+        use std::collections::BTreeMap;
+        use std::sync::{Arc, Mutex};
+
+        #[derive(Default)]
+        pub(super) struct Recording(pub(super) Mutex<Vec<NetworkEvent>>);
+
+        impl NetworkObserver for Recording {
+            fn on_event(&self, event: NetworkEvent) {
+                self.0.lock().unwrap().push(event);
+            }
+        }
+
+        #[derive(Default)]
+        struct Trace {
+            owner: Option<String>,
+            value: serde_json::Map<String, serde_json::Value>,
+            body: Vec<u8>,
+            chunks: usize,
+            request_bytes: usize,
+            redirects: Vec<serde_json::Value>,
+        }
+
+        /// Traces for `owner` ("" = no owner) whose URL contains `url_contains`,
+        /// as JSON in request start order.
+        pub(super) fn traces_json(
+            recording: &Arc<Recording>,
+            owner: &str,
+            url_contains: &str,
+        ) -> String {
+            let events = recording.0.lock().unwrap();
+            let mut traces: BTreeMap<u64, Trace> = BTreeMap::new();
+            for event in events.iter() {
+                match event {
+                    NetworkEvent::RequestStart(e) => {
+                        let t = traces.entry(e.id.as_u64()).or_default();
+                        t.owner = e.owner.as_ref().map(|o| o.as_str().to_string());
+                        let kind = match e.kind {
+                            NetworkRequestKind::Fetch => "fetch",
+                            NetworkRequestKind::Sse => "sse",
+                            NetworkRequestKind::Download => "download",
+                            NetworkRequestKind::Upload => "upload",
+                            _ => "other",
+                        };
+                        let v = &mut t.value;
+                        v.insert("id".into(), e.id.as_u64().into());
+                        v.insert("owner".into(), t.owner.clone().into());
+                        v.insert("kind".into(), kind.into());
+                        v.insert("method".into(), e.method.as_str().into());
+                        v.insert("url".into(), e.uri.to_string().into());
+                        v.insert(
+                            "redirectedFrom".into(),
+                            e.redirected_from.map(|id| id.as_u64()).into(),
+                        );
+                        v.insert("bodySize".into(), e.body_size.into());
+                    }
+                    NetworkEvent::RequestBodyChunk { id, chunk } => {
+                        traces.entry(id.as_u64()).or_default().request_bytes += chunk.len();
+                    }
+                    NetworkEvent::ResponseHead(e) => {
+                        let v = &mut traces.entry(e.id.as_u64()).or_default().value;
+                        v.insert("status".into(), e.status.as_u16().into());
+                        let header = |name: &str| {
+                            e.headers
+                                .get(name)
+                                .and_then(|h| h.to_str().ok())
+                                .map(String::from)
+                        };
+                        v.insert("contentEncoding".into(), header("content-encoding").into());
+                        v.insert(
+                            "contentLength".into(),
+                            header("content-length")
+                                .and_then(|h| h.parse::<u64>().ok())
+                                .into(),
+                        );
+                    }
+                    NetworkEvent::ResponseBodyChunk { id, chunk } => {
+                        let t = traces.entry(id.as_u64()).or_default();
+                        t.body.extend_from_slice(chunk);
+                        t.chunks += 1;
+                    }
+                    NetworkEvent::Redirect(e) => {
+                        traces.entry(e.id.as_u64()).or_default().redirects.push(
+                            serde_json::json!({
+                                "status": e.status.as_u16(),
+                                "from": e.from.to_string(),
+                                "to": e.to.to_string(),
+                            }),
+                        );
+                    }
+                    NetworkEvent::RequestEnd(e) => {
+                        let v = &mut traces.entry(e.id.as_u64()).or_default().value;
+                        let outcome = match &e.outcome {
+                            NetworkOutcome::Completed => "completed".to_string(),
+                            NetworkOutcome::Failed(message) => format!("failed: {message}"),
+                            NetworkOutcome::Aborted => "aborted".to_string(),
+                            NetworkOutcome::Dropped => "dropped".to_string(),
+                            _ => "other".to_string(),
+                        };
+                        v.insert("outcome".into(), outcome.into());
+                        v.insert("endBytes".into(), e.response_bytes.into());
+                    }
+                    _ => {}
+                }
+            }
+            let wanted_owner = (!owner.is_empty()).then(|| owner.to_string());
+            let list: Vec<_> = traces
+                .into_values()
+                .filter(|t| t.value.contains_key("url") && t.owner == wanted_owner)
+                .filter(|t| {
+                    t.value["url"]
+                        .as_str()
+                        .is_some_and(|url| url.contains(url_contains))
+                })
+                .map(|mut t| {
+                    let v = &mut t.value;
+                    for key in [
+                        "status",
+                        "outcome",
+                        "contentEncoding",
+                        "contentLength",
+                        "endBytes",
+                    ] {
+                        v.entry(key).or_insert(serde_json::Value::Null);
+                    }
+                    v.insert("responseBytes".into(), t.body.len().into());
+                    v.insert("chunks".into(), t.chunks.into());
+                    v.insert("requestBytes".into(), t.request_bytes.into());
+                    v.insert(
+                        "firstBytes".into(),
+                        t.body
+                            .iter()
+                            .take(2)
+                            .map(|b| format!("{b:02x}"))
+                            .collect::<String>()
+                            .into(),
+                    );
+                    v.insert(
+                        "bodyText".into(),
+                        String::from_utf8_lossy(&t.body[..t.body.len().min(4096)])
+                            .into_owned()
+                            .into(),
+                    );
+                    v.insert("redirects".into(), t.redirects.into());
+                    serde_json::Value::Object(t.value)
+                })
+                .collect();
+            serde_json::Value::Array(list).to_string()
+        }
+    }
+
+    #[cfg(feature = "network-observer")]
+    #[test]
+    fn test_network_observer() {
+        use rong_rt::http::{NetworkOwner, set_network_observer};
+
+        let recording = std::sync::Arc::new(observed::Recording::default());
+        set_network_observer(Some(recording.clone()));
+
+        async_run!(|ctx: JSContext| async move {
+            rong_assert::init(&ctx)?;
+            rong_console::init(&ctx)?;
+            rong_encoding::init(&ctx)?;
+            rong_url::init(&ctx)?;
+            rong_timer::init(&ctx)?;
+            rong_abort::init(&ctx)?;
+            rong_exception::init(&ctx)?;
+            rong_stream::init(&ctx)?;
+            crate::init(&ctx)?;
+
+            let addr = match start_test_server().await {
+                Ok(addr) => addr,
+                Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
+                    eprintln!("skipping network observer tests: cannot bind: {}", e);
+                    return Ok(());
+                }
+                Err(e) => {
+                    return Err(HostError::new(
+                        rong::error::E_INTERNAL,
+                        format!("failed to start test server: {}", e),
+                    )
+                    .into());
+                }
+            };
+            let closed = std::net::TcpListener::bind("127.0.0.1:0")
+                .and_then(|listener| listener.local_addr())
+                .map_err(|e| HostError::new(rong::error::E_INTERNAL, e.to_string()))?;
+            ctx.global()
+                .set("TEST_SERVER_URL", format!("http://{}", addr))?;
+            ctx.global()
+                .set("CLOSED_URL", format!("http://{}/", closed))?;
+
+            ctx.global().set(
+                "__setNetworkOwner",
+                JSFunc::new(&ctx, |ctx: JSContext, owner: String| {
+                    crate::set_network_owner(
+                        &ctx,
+                        (!owner.is_empty()).then(|| NetworkOwner::new(owner)),
+                    );
+                })?,
+            )?;
+            let traces = recording.clone();
+            ctx.global().set(
+                "__observedRequests",
+                JSFunc::new(&ctx, move |owner: String, url_contains: String| {
+                    observed::traces_json(&traces, &owner, &url_contains)
+                })?,
+            )?;
+
+            let passed = UnitJSRunner::load_script(&ctx, "network_observer.js")
+                .await?
+                .run()
+                .await?;
+            assert!(passed);
+            Ok(())
+        });
+
+        set_network_observer(None);
     }
 
     #[test]

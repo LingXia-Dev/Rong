@@ -66,6 +66,8 @@ arkjs = [
 ]
 tls-aws-lc = ["rong_rt/tls-aws-lc"]
 tls-ring = ["rong_rt/tls-ring"]
+# Report fetch/SSE traffic to `rong_rt`'s network observer.
+network-observer = ["rong_rt/network-observer"]
 
 [dev-dependencies]
 rong_test = { path = "../../testing/rong_test", features = ["http"] }
