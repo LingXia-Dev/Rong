@@ -148,6 +148,8 @@ elif [ "${ENGINE}" = "arkjs" ]; then
 fi
 
 cargo clippy ${workspace_args} --lib --bins --tests --no-default-features --features "${engine_features}" -- -D warnings
+# The opt-in network observer adds code paths the default feature set skips.
+cargo clippy -p rong_rt -p rong_http --lib --tests --no-default-features --features "${engine_features},network-observer" -- -D warnings
 '''
 
 [tasks.clippy-engine-windows]
@@ -188,6 +190,10 @@ if ($env:ENGINE -eq "quickjs") {
 } else {
     throw "Unsupported ENGINE '$($env:ENGINE)'"
 }
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+# The opt-in network observer adds code paths the default feature set skips.
+& cargo clippy -p rong_rt -p rong_http --lib --tests "--no-default-features" "--features=$engineFeatures,network-observer" -- -D warnings
+exit $LASTEXITCODE
 ''',
 ]
 
