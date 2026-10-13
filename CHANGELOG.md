@@ -28,6 +28,15 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
   starts, so it survives the hop to the I/O executor and every redirect.
 - Without the feature nothing is compiled in; with it and no observer
   installed, a request pays one atomic load.
+- Body chunks arrive as `NetworkBodyChunk { id, chunk, at }`, where `at` is
+  the monotonic instant the chunk was observed.
+- `NetworkRequestTag::insert_into` attaches a kind and owner to a request
+  sent with `rong_rt::http::send*`, which otherwise reports kind `Other`.
+- Observers can be unit-tested with synthetic events:
+  `NetworkRequestStart::new`, `NetworkResponseHead::new`,
+  `NetworkBodyChunk::new`, `NetworkRequestEnd::new`, and
+  `NetworkRequestId::from_u64` build every event; `NetworkEvent::id` returns
+  the request an event belongs to.
 
 ## [0.6.8] - 2026-09-29
 

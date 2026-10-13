@@ -19,10 +19,10 @@ use crate::client::{self, RequestTimeouts};
 pub use crate::client::{HttpBody, HttpResponse};
 #[cfg(feature = "network-observer")]
 pub use crate::observer::{
-    NetworkEvent, NetworkObserver, NetworkOutcome, NetworkOwner, NetworkRequestEnd,
-    NetworkRequestId, NetworkRequestKind, NetworkRequestStart, NetworkRequestTag,
-    NetworkResponseHead, current_network_owner, network_observer_installed, notify_network_blocked,
-    scope_network_owner, set_network_observer, sync_scope_network_owner,
+    NetworkBodyChunk, NetworkEvent, NetworkObserver, NetworkOutcome, NetworkOwner,
+    NetworkRequestEnd, NetworkRequestId, NetworkRequestKind, NetworkRequestStart,
+    NetworkRequestTag, NetworkResponseHead, current_network_owner, network_observer_installed,
+    notify_network_blocked, scope_network_owner, set_network_observer, sync_scope_network_owner,
 };
 pub use http::Uri;
 

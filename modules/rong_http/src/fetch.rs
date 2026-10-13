@@ -857,10 +857,10 @@ mod tests {
                         );
                         v.insert("bodySize".into(), e.body_size.into());
                     }
-                    NetworkEvent::RequestBodyChunk { id, chunk } => {
-                        let t = traces.entry(id.as_u64()).or_default();
+                    NetworkEvent::RequestBodyChunk(c) => {
+                        let t = traces.entry(c.id.as_u64()).or_default();
                         t.order.push(1);
-                        t.request_bytes += chunk.len();
+                        t.request_bytes += c.chunk.len();
                     }
                     NetworkEvent::ResponseHead(e) => {
                         let t = traces.entry(e.id.as_u64()).or_default();
@@ -882,10 +882,10 @@ mod tests {
                                 .into(),
                         );
                     }
-                    NetworkEvent::ResponseBodyChunk { id, chunk } => {
-                        let t = traces.entry(id.as_u64()).or_default();
+                    NetworkEvent::ResponseBodyChunk(c) => {
+                        let t = traces.entry(c.id.as_u64()).or_default();
                         t.order.push(3);
-                        t.body.extend_from_slice(chunk);
+                        t.body.extend_from_slice(&c.chunk);
                         t.chunks += 1;
                     }
                     NetworkEvent::RequestEnd(e) => {
