@@ -120,16 +120,25 @@ pub async fn fetch(
         HostError::new(rong::error::E_INVALID_ARG, e.to_string()).with_name("TypeError")
     })?;
 
+    let mut observed = FetchOwner::new(&ctx);
+
     // Domain check for initial URL
     let domain = request.domain()?;
-    grant_network_access(&domain)?;
+    if let Err(e) = grant_network_access(&domain) {
+        observed.blocked(
+            &request.method,
+            &request.url,
+            request.headers.as_header_map(),
+            &e.to_string(),
+        );
+        return Err(e);
+    }
 
     // Get abort signal if present
     let mut abort_receiver = request.abort_signal()?.map(|signal| signal.subscribe());
 
     let mut redirect_count = 0;
     const MAX_REDIRECTS: u32 = 20;
-    let mut observed = FetchOwner::new(&ctx);
 
     loop {
         // Convert Request to hyper::Request without cloning the whole Request object.
@@ -303,6 +312,14 @@ pub async fn fetch(
                             if let Some(stop) = abort_bridge_stop.as_ref() {
                                 stop.notify_one();
                             }
+                            if let Ok(uri) = next_url.as_str().parse::<http::Uri>() {
+                                observed.blocked(
+                                    &request.method,
+                                    &uri,
+                                    request.headers.as_header_map(),
+                                    &e.to_string(),
+                                );
+                            }
                             return Err(e);
                         }
 
@@ -338,8 +355,6 @@ pub async fn fetch(
                             request.headers.delete("content-type".to_string())?;
                             request.headers.delete("transfer-encoding".to_string())?;
                         }
-
-                        observed.redirect(net_resp.status, &orig_uri, &request.url);
 
                         // Discard the redirect response and continue.
                         // If it was streaming, notify the abort bridge to stop background reads.
@@ -498,6 +513,14 @@ mod tests {
         }
     }
 
+    async fn test_redirect_blocked() -> impl IntoResponse {
+        AxumResponse::builder()
+            .status(302)
+            .header("Location", "http://blocked.invalid/next")
+            .body(Body::empty())
+            .unwrap()
+    }
+
     async fn test_303() -> impl IntoResponse {
         AxumResponse::builder()
             .status(303)
@@ -617,6 +640,7 @@ mod tests {
             .route("/large", get(test_large))
             .route("/headers", get(test_headers))
             .route("/redirect", get(test_redirect))
+            .route("/redirect-blocked", get(test_redirect_blocked))
             .route("/303", put(test_303)) // PUT request receiving 303 -> GET /ip
             .route("/sse/basic", get(test_sse_basic))
             .route("/sse/reconnect", get(test_sse_reconnect))
@@ -778,7 +802,25 @@ mod tests {
             body: Vec<u8>,
             chunks: usize,
             request_bytes: usize,
-            redirects: Vec<serde_json::Value>,
+            /// Event ranks in arrival order: start 0, request chunk 1, head 2,
+            /// response chunk 3, end 4.
+            order: Vec<u8>,
+        }
+
+        /// Why `order` is not a prefix of start, request chunks, head,
+        /// response chunks, end — or `None` if it is.
+        fn order_error(order: &[u8]) -> Option<String> {
+            let count = |rank| order.iter().filter(|r| **r == rank).count();
+            if order.first() != Some(&0) || count(0) != 1 {
+                return Some(format!("start must come first, once: {order:?}"));
+            }
+            if count(2) > 1 || count(4) > 1 {
+                return Some(format!("duplicate head or end: {order:?}"));
+            }
+            if order.windows(2).any(|w| w[0] > w[1]) {
+                return Some(format!("events out of order: {order:?}"));
+            }
+            None
         }
 
         /// Traces for `owner` ("" = no owner) whose URL contains `url_contains`,
@@ -794,6 +836,7 @@ mod tests {
                 match event {
                     NetworkEvent::RequestStart(e) => {
                         let t = traces.entry(e.id.as_u64()).or_default();
+                        t.order.push(0);
                         t.owner = e.owner.as_ref().map(|o| o.as_str().to_string());
                         let kind = match e.kind {
                             NetworkRequestKind::Fetch => "fetch",
@@ -815,10 +858,14 @@ mod tests {
                         v.insert("bodySize".into(), e.body_size.into());
                     }
                     NetworkEvent::RequestBodyChunk { id, chunk } => {
-                        traces.entry(id.as_u64()).or_default().request_bytes += chunk.len();
+                        let t = traces.entry(id.as_u64()).or_default();
+                        t.order.push(1);
+                        t.request_bytes += chunk.len();
                     }
                     NetworkEvent::ResponseHead(e) => {
-                        let v = &mut traces.entry(e.id.as_u64()).or_default().value;
+                        let t = traces.entry(e.id.as_u64()).or_default();
+                        t.order.push(2);
+                        let v = &mut t.value;
                         v.insert("status".into(), e.status.as_u16().into());
                         let header = |name: &str| {
                             e.headers
@@ -827,6 +874,7 @@ mod tests {
                                 .map(String::from)
                         };
                         v.insert("contentEncoding".into(), header("content-encoding").into());
+                        v.insert("location".into(), header("location").into());
                         v.insert(
                             "contentLength".into(),
                             header("content-length")
@@ -836,25 +884,20 @@ mod tests {
                     }
                     NetworkEvent::ResponseBodyChunk { id, chunk } => {
                         let t = traces.entry(id.as_u64()).or_default();
+                        t.order.push(3);
                         t.body.extend_from_slice(chunk);
                         t.chunks += 1;
                     }
-                    NetworkEvent::Redirect(e) => {
-                        traces.entry(e.id.as_u64()).or_default().redirects.push(
-                            serde_json::json!({
-                                "status": e.status.as_u16(),
-                                "from": e.from.to_string(),
-                                "to": e.to.to_string(),
-                            }),
-                        );
-                    }
                     NetworkEvent::RequestEnd(e) => {
-                        let v = &mut traces.entry(e.id.as_u64()).or_default().value;
+                        let t = traces.entry(e.id.as_u64()).or_default();
+                        t.order.push(4);
+                        let v = &mut t.value;
                         let outcome = match &e.outcome {
                             NetworkOutcome::Completed => "completed".to_string(),
                             NetworkOutcome::Failed(message) => format!("failed: {message}"),
                             NetworkOutcome::Aborted => "aborted".to_string(),
                             NetworkOutcome::Dropped => "dropped".to_string(),
+                            NetworkOutcome::Blocked(reason) => format!("blocked: {reason}"),
                             _ => "other".to_string(),
                         };
                         v.insert("outcome".into(), outcome.into());
@@ -879,6 +922,7 @@ mod tests {
                         "outcome",
                         "contentEncoding",
                         "contentLength",
+                        "location",
                         "endBytes",
                     ] {
                         v.entry(key).or_insert(serde_json::Value::Null);
@@ -901,7 +945,7 @@ mod tests {
                             .into_owned()
                             .into(),
                     );
-                    v.insert("redirects".into(), t.redirects.into());
+                    v.insert("orderError".into(), order_error(&t.order).into());
                     serde_json::Value::Object(t.value)
                 })
                 .collect();
@@ -957,6 +1001,25 @@ mod tests {
                         &ctx,
                         (!owner.is_empty()).then(|| NetworkOwner::new(owner)),
                     );
+                })?,
+            )?;
+            struct DenyHost(String);
+            impl crate::NetworkAccessGuard for DenyHost {
+                fn check_access(&self, domain: &str) -> JSResult<()> {
+                    if domain == self.0 {
+                        Err(
+                            HostError::new(rong::error::E_PERMISSION_DENIED, "denied by policy")
+                                .into(),
+                        )
+                    } else {
+                        Ok(())
+                    }
+                }
+            }
+            ctx.global().set(
+                "__denyHost",
+                JSFunc::new(&ctx, |host: String| {
+                    crate::set_network_access_guard(Box::new(DenyHost(host)));
                 })?,
             )?;
             let traces = recording.clone();

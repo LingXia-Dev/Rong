@@ -9,10 +9,10 @@
 pub use enabled::*;
 
 #[cfg(feature = "network-observer")]
-pub(crate) use enabled::{HopId, OwnerCapture, Recorder, redirect, tag_request};
+pub(crate) use enabled::{HopId, OwnerCapture, Recorder, blocked, tag_request};
 
 #[cfg(not(feature = "network-observer"))]
-pub(crate) use disabled::{HopId, OwnerCapture, Recorder, redirect, tag_request};
+pub(crate) use disabled::{HopId, OwnerCapture, Recorder, blocked, tag_request};
 
 /// Which runtime API issued a request.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -39,7 +39,7 @@ mod enabled {
     use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
     use std::sync::{Arc, RwLock};
     use std::task::{Context, Poll};
-    use std::time::{Duration, Instant};
+    use std::time::{Duration, Instant, SystemTime};
 
     tokio::task_local! {
         static NETWORK_OWNER: NetworkOwner;
@@ -51,9 +51,15 @@ mod enabled {
 
     /// Receives network events from every request in the process.
     ///
-    /// Callbacks run inline on the thread that drives the request (usually the
-    /// runtime's I/O executor) and must be cheap and non-blocking: hand the
-    /// event to a channel with `try_send` and do the work elsewhere.
+    /// Callbacks run inline and must be cheap and non-blocking: hand the event
+    /// to a channel with `try_send` and do the work elsewhere. Events for one
+    /// request may arrive on different threads: `RequestStart` on the sender's
+    /// thread (the JS thread for `fetch`), the rest on executor threads.
+    ///
+    /// Per request: `RequestStart` comes first and exactly one `RequestEnd`
+    /// comes last. Request-body chunks precede `ResponseHead` unless the server
+    /// answers before reading the whole body, and `ResponseHead` precedes
+    /// response-body chunks.
     pub trait NetworkObserver: Send + Sync + 'static {
         fn on_event(&self, event: NetworkEvent);
     }
@@ -63,9 +69,13 @@ mod enabled {
     /// A request keeps reporting to the observer that saw it start, so its
     /// events stay paired even if the observer is swapped mid-flight.
     pub fn set_network_observer(observer: Option<Arc<dyn NetworkObserver>>) {
-        let mut slot = OBSERVER.write().unwrap_or_else(|e| e.into_inner());
-        INSTALLED.store(observer.is_some(), Ordering::Release);
-        *slot = observer;
+        let previous = {
+            let mut slot = OBSERVER.write().unwrap_or_else(|e| e.into_inner());
+            INSTALLED.store(observer.is_some(), Ordering::Release);
+            std::mem::replace(&mut *slot, observer)
+        };
+        // The old observer's Drop may be arbitrary; run it outside the lock.
+        drop(previous);
     }
 
     /// Whether an observer is currently installed.
@@ -165,11 +175,13 @@ mod enabled {
     /// Requests without one get a fresh id, kind `Other`, and the owner of the
     /// scope that sends them.
     #[derive(Clone, Debug)]
+    #[non_exhaustive]
     pub struct NetworkRequestTag {
         pub id: NetworkRequestId,
         pub owner: Option<NetworkOwner>,
         pub kind: NetworkRequestKind,
-        /// The previous hop when this request follows a redirect.
+        /// The previous hop when this request follows a redirect; that hop's
+        /// `ResponseHead` carries the redirect status and `Location`.
         pub redirected_from: Option<NetworkRequestId>,
     }
 
@@ -205,9 +217,11 @@ mod enabled {
         pub method: Method,
         pub uri: Uri,
         pub headers: HeaderMap,
-        /// Exact request body length, or `None` for a streamed body.
+        /// Body length from the body itself or its `content-length` header;
+        /// `None` for a stream of unknown length.
         pub body_size: Option<u64>,
         pub started_at: Instant,
+        pub started_at_system: SystemTime,
     }
 
     #[derive(Clone, Debug)]
@@ -220,16 +234,6 @@ mod enabled {
         pub time_to_first_byte: Duration,
     }
 
-    #[derive(Clone, Debug)]
-    #[non_exhaustive]
-    pub struct NetworkRedirect {
-        /// The hop that answered with the redirect.
-        pub id: NetworkRequestId,
-        pub status: StatusCode,
-        pub from: Uri,
-        pub to: Uri,
-    }
-
     #[derive(Clone, Debug, PartialEq, Eq)]
     #[non_exhaustive]
     pub enum NetworkOutcome {
@@ -240,6 +244,8 @@ mod enabled {
         Aborted,
         /// The caller dropped the response before its end.
         Dropped,
+        /// A network access guard denied the request; nothing was sent.
+        Blocked(String),
     }
 
     #[derive(Clone, Debug)]
@@ -269,22 +275,8 @@ mod enabled {
             id: NetworkRequestId,
             chunk: Bytes,
         },
-        Redirect(NetworkRedirect),
         /// Always the last event for a started request.
         RequestEnd(NetworkRequestEnd),
-    }
-
-    /// Report a followed redirect. Callers that run their own redirect loop
-    /// (such as `fetch`) emit this between hops.
-    pub fn notify_network_redirect(id: NetworkRequestId, status: StatusCode, from: &Uri, to: &Uri) {
-        if let Some(observer) = current_observer() {
-            observer.on_event(NetworkEvent::Redirect(NetworkRedirect {
-                id,
-                status,
-                from: from.clone(),
-                to: to.clone(),
-            }));
-        }
     }
 
     /// Hop id threaded through crate-internal redirect loops.
@@ -310,11 +302,59 @@ mod enabled {
         HopId(Some(id))
     }
 
-    pub(crate) fn redirect(hop: HopId, status: StatusCode, from: &str, to: &str) {
-        let Some(id) = hop.0 else { return };
-        if let (Ok(from), Ok(to)) = (from.parse::<Uri>(), to.parse::<Uri>()) {
-            notify_network_redirect(id, status, &from, &to);
+    fn content_length<B>(request: &http::Request<B>) -> Option<u64> {
+        request
+            .headers()
+            .get(http::header::CONTENT_LENGTH)
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.parse().ok())
+    }
+
+    fn start_event<B>(
+        request: &http::Request<B>,
+        body_size: Option<u64>,
+        started: Instant,
+    ) -> NetworkRequestStart {
+        let tag = request
+            .extensions()
+            .get::<NetworkRequestTag>()
+            .cloned()
+            .unwrap_or_else(|| NetworkRequestTag::new(NetworkRequestKind::Other));
+        NetworkRequestStart {
+            id: tag.id,
+            owner: tag.owner,
+            kind: tag.kind,
+            redirected_from: tag.redirected_from,
+            method: request.method().clone(),
+            uri: request.uri().clone(),
+            headers: request.headers().clone(),
+            body_size: body_size.or_else(|| content_length(request)),
+            started_at: started,
+            started_at_system: SystemTime::now(),
         }
+    }
+
+    /// Report a request that a network access guard denied before sending:
+    /// `RequestStart` then `RequestEnd` with [`NetworkOutcome::Blocked`].
+    /// Owner, kind, and hop come from the request's [`NetworkRequestTag`].
+    pub fn notify_network_blocked<B>(request: &http::Request<B>, reason: &str) {
+        let Some(observer) = current_observer() else {
+            return;
+        };
+        let started = Instant::now();
+        let start = start_event(request, None, started);
+        let id = start.id;
+        observer.on_event(NetworkEvent::RequestStart(start));
+        observer.on_event(NetworkEvent::RequestEnd(NetworkRequestEnd {
+            id,
+            outcome: NetworkOutcome::Blocked(reason.to_string()),
+            response_bytes: 0,
+            duration: started.elapsed(),
+        }));
+    }
+
+    pub(crate) fn blocked<B>(request: &http::Request<B>, reason: &str) {
+        notify_network_blocked(request, reason);
     }
 
     /// Owner captured on the calling side, re-entered on the executor.
@@ -350,24 +390,10 @@ mod enabled {
             let Some(observer) = current_observer() else {
                 return Self(None);
             };
-            let tag = request
-                .extensions()
-                .get::<NetworkRequestTag>()
-                .cloned()
-                .unwrap_or_else(|| NetworkRequestTag::new(NetworkRequestKind::Other));
             let started = Instant::now();
-            let id = tag.id;
-            observer.on_event(NetworkEvent::RequestStart(NetworkRequestStart {
-                id,
-                owner: tag.owner,
-                kind: tag.kind,
-                redirected_from: tag.redirected_from,
-                method: request.method().clone(),
-                uri: request.uri().clone(),
-                headers: request.headers().clone(),
-                body_size: request.body().size_hint().exact(),
-                started_at: started,
-            }));
+            let start = start_event(request, request.body().size_hint().exact(), started);
+            let id = start.id;
+            observer.on_event(NetworkEvent::RequestStart(start));
             let body = std::mem::replace(
                 request.body_mut(),
                 http_body_util::Empty::new().map_err(|e| match e {}).boxed(),
@@ -503,7 +529,7 @@ mod disabled {
     }
 
     #[inline(always)]
-    pub(crate) fn redirect(_hop: HopId, _status: http::StatusCode, _from: &str, _to: &str) {}
+    pub(crate) fn blocked<B>(_request: &http::Request<B>, _reason: &str) {}
 
     pub(crate) struct OwnerCapture;
 

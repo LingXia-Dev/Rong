@@ -34,7 +34,10 @@ impl SSE {
         let host = parsed
             .host_str()
             .ok_or_else(|| type_error("url must contain a valid host"))?;
-        grant_network_access(host)?;
+        if let Err(e) = grant_network_access(host) {
+            crate::observer::sse_blocked(&ctx, &url, &e.to_string());
+            return Err(e);
+        }
 
         let mut headers = Vec::new();
         let mut reconnect_opts = rong_rt::sse::SseReconnectOptions::default();
