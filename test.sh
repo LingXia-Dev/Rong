@@ -406,6 +406,19 @@ run_specific_test() {
     return 1
 }
 
+# The network observer is opt-in; cover rong_rt's client and rong_http with it on.
+run_network_observer_tests() {
+    local engine=$1
+    local feature_set
+    feature_set="$(feature_set_for "$engine"),network-observer"
+    log_info "Running network observer tests ($engine)"
+    if run_cargo_test -p rong_rt -p rong_http --no-default-features --features="$feature_set" --quiet; then
+        record_suite_result "Network observer tests on $engine" 0
+    else
+        record_suite_result "Network observer tests on $engine" 1 || true
+    fi
+}
+
 print_summary() {
     echo -e "\n${BLUE}================================${NC}"
     echo -e "${BLUE}  Test Summary${NC}"
@@ -494,10 +507,12 @@ for engine in "${ENGINES[@]}"; do
     elif [[ "$MODULES_ONLY" == true ]]; then
         # Run only module tests
         run_all_module_tests "$engine"
+        run_network_observer_tests "$engine"
     else
         # Run all tests
         run_all_core_tests "$engine"
         run_all_module_tests "$engine"
+        run_network_observer_tests "$engine"
         # Source/JSCOnly builds already force preemption. Re-run only Apple's
         # system-framework shape with its explicit private-SPI opt-in.
         if [[ "$engine" == "jscore" ]] && host_is_apple && [[ -z "${RONG_JSC_SOURCE:-}" ]]; then

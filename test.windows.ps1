@@ -294,6 +294,15 @@ function Run-AllModuleTests([string]$EngineName, [string[]]$ModuleTests) {
     }
 }
 
+# The network observer is opt-in; cover rong_rt's client and rong_http with it on.
+function Run-NetworkObserverTests([string]$EngineName) {
+    Log-Info "Running network observer tests ($EngineName)"
+    $featureSet = "$(Get-FeatureSet $EngineName),network-observer"
+    $testArgs = @("-p", "rong_rt", "-p", "rong_http", "--no-default-features", "--features=$featureSet", "--quiet")
+    & cargo test @testArgs
+    Record-SuiteResult -Name "Network observer tests on $EngineName" -ExitCode $LASTEXITCODE
+}
+
 function Run-SpecificTest([string]$TestName, [string]$EngineName, [string[]]$CoreTests, [string[]]$ModuleTests) {
     if ($CoreTests -contains $TestName) {
         Run-CoreTest -TestName $TestName -EngineName $EngineName
@@ -358,9 +367,11 @@ foreach ($engineName in $engines) {
         Run-AllCoreTests -EngineName $engineName -CoreTests $coreTests
     } elseif ($Modules) {
         Run-AllModuleTests -EngineName $engineName -ModuleTests $moduleTests
+        Run-NetworkObserverTests -EngineName $engineName
     } else {
         Run-AllCoreTests -EngineName $engineName -CoreTests $coreTests
         Run-AllModuleTests -EngineName $engineName -ModuleTests $moduleTests
+        Run-NetworkObserverTests -EngineName $engineName
     }
 }
 
