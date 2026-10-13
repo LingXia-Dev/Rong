@@ -9,6 +9,7 @@ use tokio::sync::oneshot;
 use crate::client::{
     HttpBody, RequestTimeouts, send_request_with_shared_abort, shared_abort_signal,
 };
+use crate::observer::{HopId, NetworkRequestKind, OwnerCapture, redirect, tag_request};
 use tokio::time::{Duration, Instant};
 
 const DEFAULT_DOWNLOAD_SMALL_THRESHOLD: usize = 64 * 1024;
@@ -135,12 +136,14 @@ fn request_download_inner(
     let url = url.into();
     let dest = dest.into();
     let network_access_guard = crate::http::current_network_access_guard();
+    let owner = OwnerCapture::capture();
     crate::RongExecutor::global().spawn(async move {
-        let res = crate::http::scope_network_access_guard_opt(
-            network_access_guard,
-            download_resource(&url, &dest, abort_rx, sink, timeouts, resume),
-        )
-        .await;
+        let res = owner
+            .scope(crate::http::scope_network_access_guard_opt(
+                network_access_guard,
+                download_resource(&url, &dest, abort_rx, sink, timeouts, resume),
+            ))
+            .await;
         let _ = completion_tx.send(res);
     });
 
@@ -197,15 +200,17 @@ async fn download_resource(
     let small_threshold = DEFAULT_DOWNLOAD_SMALL_THRESHOLD;
     let mut current_url = url.to_string();
     let mut redirect_count = 0usize;
+    let mut hop = HopId::FIRST;
     let abort_signal = shared_abort_signal(abort_rx);
     let request_deadline = timeouts
         .request_timeout
         .map(|timeout| Instant::now() + timeout);
     let resp = loop {
-        let request = match build_download_request(&current_url, resume_offset) {
+        let mut request = match build_download_request(&current_url, resume_offset) {
             Ok(request) => request,
             Err(e) => return finalize_sink(sink_opt, Err(e)),
         };
+        hop = tag_request(&mut request, NetworkRequestKind::Download, hop);
         if let Err(err) = crate::http::check_current_network_access(&request) {
             return finalize_sink(sink_opt, Err(err.to_string()));
         }
@@ -232,10 +237,12 @@ async fn download_resource(
         if redirect_count >= MAX_DOWNLOAD_REDIRECTS {
             return finalize_sink(sink_opt, Err("too many redirects".to_string()));
         }
-        current_url = match redirect_target(&current_url, &resp.headers) {
+        let next_url = match redirect_target(&current_url, &resp.headers) {
             Ok(url) => url,
             Err(e) => return finalize_sink(sink_opt, Err(e)),
         };
+        redirect(hop, resp.status, &current_url, &next_url);
+        current_url = next_url;
         redirect_count += 1;
     };
 

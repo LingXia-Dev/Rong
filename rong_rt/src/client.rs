@@ -22,6 +22,8 @@ use tokio::sync::{mpsc, oneshot};
 use tokio::time::{Duration, Instant, timeout};
 use tower_service::Service;
 
+use crate::observer::Recorder;
+
 pub const DEFAULT_BLOCKING_BODY_LIMIT: usize = 512 * 1024;
 pub const DEFAULT_STREAM_COALESCE_TARGET: usize = 512 * 1024;
 pub const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
@@ -139,6 +141,11 @@ static CLIENT: OnceLock<Mutex<Option<CachedClient>>> = OnceLock::new();
 static PROXY_CONFIG: OnceLock<RwLock<Option<ProxyConfig>>> = OnceLock::new();
 #[cfg(test)]
 static TEST_GUARD: OnceLock<Mutex<()>> = OnceLock::new();
+
+fn fail(mut recorder: Recorder, message: String) -> String {
+    recorder.fail(&message);
+    message
+}
 
 async fn forward_or_buffer_chunk(
     tx: &mpsc::Sender<Result<Bytes, String>>,
@@ -379,7 +386,7 @@ pub async fn send_request_with_coalesce(
 }
 
 pub(crate) async fn send_request_with_shared_abort(
-    request: HttpRequest<BoxBody<Bytes, Error>>,
+    mut request: HttpRequest<BoxBody<Bytes, Error>>,
     small_threshold: usize,
     abort_signal: Option<AbortSignal>,
     stream_coalesce_target: usize,
@@ -387,6 +394,7 @@ pub(crate) async fn send_request_with_shared_abort(
 ) -> Result<HttpResponse, String> {
     let request_timeout = timeouts.request_timeout.unwrap_or(DEFAULT_REQUEST_TIMEOUT);
     let client = client(timeouts)?;
+    let recorder = Recorder::start(&mut request);
     let join = crate::RongExecutor::global().spawn(async move {
         process_request(
             client,
@@ -395,6 +403,7 @@ pub(crate) async fn send_request_with_shared_abort(
             stream_coalesce_target,
             abort_signal,
             request_timeout,
+            recorder,
         )
         .await
     });
@@ -410,27 +419,30 @@ async fn process_request(
     stream_coalesce_target: usize,
     abort_signal: Option<AbortSignal>,
     request_timeout: Duration,
+    mut recorder: Recorder,
 ) -> Result<HttpResponse, String> {
     const READ_FRAME_TIMEOUT: Duration = Duration::from_secs(120);
     let request_deadline = Instant::now().checked_add(request_timeout);
 
-    let resp = if let Some(signal) = abort_signal.as_ref() {
+    let sent = if let Some(signal) = abort_signal.as_ref() {
         tokio::select! {
-            res = timeout(request_timeout, client.request(req)) => match res {
-                Ok(Ok(r)) => r,
-                Ok(Err(e)) => return Err(format!("request failed: {}", e)),
-                Err(_) => return Err("request timeout".to_string()),
-            },
-            _ = signal.cancelled() => return Err("aborted".to_string()),
+            res = timeout(request_timeout, client.request(req)) => Some(res),
+            _ = signal.cancelled() => None,
         }
     } else {
-        match timeout(request_timeout, client.request(req)).await {
-            Ok(Ok(r)) => r,
-            Ok(Err(e)) => return Err(format!("request failed: {}", e)),
-            Err(_) => return Err("request timeout".to_string()),
+        Some(timeout(request_timeout, client.request(req)).await)
+    };
+    let resp = match sent {
+        Some(Ok(Ok(r))) => r,
+        Some(Ok(Err(e))) => return Err(fail(recorder, format!("request failed: {}", e))),
+        Some(Err(_)) => return Err(fail(recorder, "request timeout".to_string())),
+        None => {
+            recorder.abort();
+            return Err("aborted".to_string());
         }
     };
     let (parts, mut body) = resp.into_parts();
+    recorder.response_head(&parts);
 
     let cl = parts
         .headers
@@ -443,40 +455,43 @@ async fn process_request(
         let mut buf = Vec::with_capacity(cl);
         loop {
             let (frame_timeout, request_limited) =
-                body_frame_timeout(request_deadline, READ_FRAME_TIMEOUT)?;
-            if let Some(signal) = abort_signal.as_ref() {
+                match body_frame_timeout(request_deadline, READ_FRAME_TIMEOUT) {
+                    Ok(timeout) => timeout,
+                    Err(err) => return Err(fail(recorder, err)),
+                };
+            let read = if let Some(signal) = abort_signal.as_ref() {
                 tokio::select! {
-                    maybe = timeout(frame_timeout, body.frame()) => {
-                        match maybe {
-                            Ok(Some(Ok(frame))) => {
-                                if let Some(data) = frame.data_ref() { buf.extend_from_slice(data); }
-                                if buf.len() > small { return Err("body exceeded small threshold".to_string()); }
-                            }
-                            Ok(Some(Err(e))) => return Err(format!("read frame: {}", e)),
-                            Ok(None) => break,
-                            Err(_) if request_limited => return Err("request timeout".to_string()),
-                            Err(_) => return Err("read timeout".to_string()),
-                        }
-                    }
-                    _ = signal.cancelled() => return Err("aborted".to_string()),
+                    maybe = timeout(frame_timeout, body.frame()) => Some(maybe),
+                    _ = signal.cancelled() => None,
                 }
             } else {
-                match timeout(frame_timeout, body.frame()).await {
-                    Ok(Some(Ok(frame))) => {
-                        if let Some(data) = frame.data_ref() {
-                            buf.extend_from_slice(data);
-                        }
-                        if buf.len() > small {
-                            return Err("body exceeded small threshold".to_string());
-                        }
+                Some(timeout(frame_timeout, body.frame()).await)
+            };
+            match read {
+                Some(Ok(Some(Ok(frame)))) => {
+                    if let Some(data) = frame.data_ref() {
+                        recorder.chunk(data);
+                        buf.extend_from_slice(data);
                     }
-                    Ok(Some(Err(e))) => return Err(format!("read frame: {}", e)),
-                    Ok(None) => break,
-                    Err(_) if request_limited => return Err("request timeout".to_string()),
-                    Err(_) => return Err("read timeout".to_string()),
+                    if buf.len() > small {
+                        return Err(fail(recorder, "body exceeded small threshold".to_string()));
+                    }
+                }
+                Some(Ok(Some(Err(e)))) => {
+                    return Err(fail(recorder, format!("read frame: {}", e)));
+                }
+                Some(Ok(None)) => break,
+                Some(Err(_)) if request_limited => {
+                    return Err(fail(recorder, "request timeout".to_string()));
+                }
+                Some(Err(_)) => return Err(fail(recorder, "read timeout".to_string())),
+                None => {
+                    recorder.abort();
+                    return Err("aborted".to_string());
                 }
             }
         }
+        recorder.complete();
         return Ok(HttpResponse {
             status: parts.status,
             headers: parts.headers,
@@ -501,62 +516,70 @@ async fn process_request(
             bytes::BytesMut::with_capacity(coalesce_target)
         };
         let mut aborted = false;
+        let mut error = None;
+        let mut dropped = false;
         loop {
             let (frame_timeout, request_limited) =
                 match body_frame_timeout(request_deadline, READ_FRAME_TIMEOUT) {
                     Ok(timeout) => timeout,
                     Err(err) => {
-                        let _ = tx.send(Err(err)).await;
+                        error = Some(err);
                         break;
                     }
                 };
-            if let Some(signal) = abort_signal.as_ref() {
+            let read = if let Some(signal) = abort_signal.as_ref() {
                 tokio::select! {
-                    maybe = timeout(frame_timeout, body.frame()) => {
-                        match maybe {
-                            Ok(Some(Ok(frame))) => {
-                                if let Ok(data) = frame.into_data()
-                                    && !forward_or_buffer_chunk(&tx, &mut buf, data, coalesce_target).await
-                                {
-                                    break;
-                                }
-                            }
-                            Ok(Some(Err(e))) => { let _ = tx.send(Err(format!("read frame: {}", e))).await; break; }
-                            Ok(None) => break,
-                            Err(_) if request_limited => { let _ = tx.send(Err("request timeout".to_string())).await; break; }
-                            Err(_) => { let _ = tx.send(Err("read timeout".to_string())).await; break; }
-                        }
-                    }
-                    _ = signal.cancelled() => { let _ = tx.send(Err("aborted".to_string())).await; aborted = true; break; }
+                    maybe = timeout(frame_timeout, body.frame()) => Some(maybe),
+                    _ = signal.cancelled() => None,
                 }
             } else {
-                match timeout(frame_timeout, body.frame()).await {
-                    Ok(Some(Ok(frame))) => {
-                        if let Ok(data) = frame.into_data()
-                            && !forward_or_buffer_chunk(&tx, &mut buf, data, coalesce_target).await
-                        {
+                Some(timeout(frame_timeout, body.frame()).await)
+            };
+            match read {
+                Some(Ok(Some(Ok(frame)))) => {
+                    if let Ok(data) = frame.into_data() {
+                        recorder.chunk(&data);
+                        if !forward_or_buffer_chunk(&tx, &mut buf, data, coalesce_target).await {
+                            dropped = true;
                             break;
                         }
                     }
-                    Ok(Some(Err(e))) => {
-                        let _ = tx.send(Err(format!("read frame: {}", e))).await;
-                        break;
-                    }
-                    Ok(None) => break,
-                    Err(_) if request_limited => {
-                        let _ = tx.send(Err("request timeout".to_string())).await;
-                        break;
-                    }
-                    Err(_) => {
-                        let _ = tx.send(Err("read timeout".to_string())).await;
-                        break;
-                    }
+                }
+                Some(Ok(Some(Err(e)))) => {
+                    error = Some(format!("read frame: {}", e));
+                    break;
+                }
+                Some(Ok(None)) => break,
+                Some(Err(_)) if request_limited => {
+                    error = Some("request timeout".to_string());
+                    break;
+                }
+                Some(Err(_)) => {
+                    error = Some("read timeout".to_string());
+                    break;
+                }
+                None => {
+                    aborted = true;
+                    break;
                 }
             }
         }
-        if !aborted && !buf.is_empty() {
+        if aborted {
+            recorder.abort();
+            let _ = tx.send(Err("aborted".to_string())).await;
+            return;
+        }
+        let failed = error.is_some();
+        if let Some(err) = error {
+            recorder.fail(&err);
+            let _ = tx.send(Err(err)).await;
+        }
+        if !buf.is_empty() {
             let out = buf.split().freeze();
-            let _ = tx.send(Ok(out)).await;
+            dropped |= tx.send(Ok(out)).await.is_err();
+        }
+        if !failed && !dropped {
+            recorder.complete();
         }
     });
     tokio::task::spawn(async move {

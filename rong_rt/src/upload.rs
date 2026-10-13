@@ -15,6 +15,7 @@ use tokio_stream::StreamExt as _;
 use tokio_stream::wrappers::ReceiverStream;
 
 use crate::client::{HttpBody, RequestTimeouts, send_request_with_timeout};
+use crate::observer::{HopId, NetworkRequestKind, OwnerCapture, tag_request};
 
 const UPLOAD_CHUNK_SIZE: usize = 64 * 1024;
 const UPLOAD_BODY_CHAN_CAP: usize = 16;
@@ -197,13 +198,15 @@ pub fn request_upload(
         mpsc::channel::<Result<UploadEvent, String>>(UPLOAD_EVENT_CHAN_CAP);
     let (cancel_tx, cancel_rx) = oneshot::channel::<()>();
     let network_access_guard = crate::http::current_network_access_guard();
+    let owner = OwnerCapture::capture();
 
     crate::RongExecutor::global().spawn(async move {
-        crate::http::scope_network_access_guard_opt(
-            network_access_guard,
-            run_upload_worker(options, abort_rx, cancel_rx, events_tx),
-        )
-        .await;
+        owner
+            .scope(crate::http::scope_network_access_guard_opt(
+                network_access_guard,
+                run_upload_worker(options, abort_rx, cancel_rx, events_tx),
+            ))
+            .await;
     });
 
     Ok(UploadTask {
@@ -255,13 +258,14 @@ async fn run_upload_worker(
     let (body_tx, body_rx) = mpsc::channel::<Result<Bytes, Error>>(UPLOAD_BODY_CHAN_CAP);
     let body_stream = ReceiverStream::new(body_rx).map(|item| item.map(Frame::data));
     let request_body: BoxBody<Bytes, Error> = StreamBody::new(body_stream).boxed();
-    let request = match build_request(&options, total_bytes, request_body) {
+    let mut request = match build_request(&options, total_bytes, request_body) {
         Ok(req) => req,
         Err(e) => {
             let _ = events_tx.send(Err(e)).await;
             return;
         }
     };
+    tag_request(&mut request, NetworkRequestKind::Upload, HopId::FIRST);
     if let Err(err) = crate::http::check_current_network_access(&request) {
         let _ = events_tx
             .send(Err(format!("upload request failed: {}", err)))
