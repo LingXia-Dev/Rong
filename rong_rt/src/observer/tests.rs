@@ -15,7 +15,7 @@ use std::convert::Infallible;
 use std::io::Write;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex, MutexGuard};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tokio::sync::oneshot;
 
 // The observer slot is process-wide; tests that install one take turns.
@@ -129,6 +129,8 @@ struct Trace {
     request_body: Vec<u8>,
     body: Vec<u8>,
     chunks: usize,
+    request_chunk_times: Vec<Instant>,
+    response_chunk_times: Vec<Instant>,
     end: Option<NetworkRequestEnd>,
     /// Event kinds in arrival order, for ordering assertions.
     order: Vec<&'static str>,
@@ -167,6 +169,22 @@ fn check_order(t: &Trace) {
     if t.end.is_some() {
         assert_eq!(t.order.last(), Some(&"end"), "end must come last: {t:#?}");
     }
+    check_chunk_times(t);
+}
+
+/// Chunk stamps rise per direction and fall within start..end.
+fn check_chunk_times(t: &Trace) {
+    let Some(start) = &t.start else { return };
+    let end = t.end.as_ref().map(|e| start.started_at + e.duration);
+    for times in [&t.request_chunk_times, &t.response_chunk_times] {
+        assert!(times.windows(2).all(|w| w[0] <= w[1]), "{t:#?}");
+        for at in times {
+            assert!(*at >= start.started_at, "chunk before start: {t:#?}");
+            if let Some(end) = end {
+                assert!(*at <= end, "chunk after end: {t:#?}");
+            }
+        }
+    }
 }
 
 impl Recording {
@@ -188,9 +206,10 @@ impl Recording {
                     t.start = Some(e.clone());
                     t.order.push("start");
                 }
-                NetworkEvent::RequestBodyChunk { id, chunk } => {
-                    let t = slot(&mut traces, *id);
-                    t.request_body.extend_from_slice(chunk);
+                NetworkEvent::RequestBodyChunk(c) => {
+                    let t = slot(&mut traces, c.id);
+                    t.request_body.extend_from_slice(&c.chunk);
+                    t.request_chunk_times.push(c.at);
                     t.order.push("request_chunk");
                 }
                 NetworkEvent::ResponseHead(e) => {
@@ -198,9 +217,10 @@ impl Recording {
                     t.head = Some(e.clone());
                     t.order.push("head");
                 }
-                NetworkEvent::ResponseBodyChunk { id, chunk } => {
-                    let t = slot(&mut traces, *id);
-                    t.body.extend_from_slice(chunk);
+                NetworkEvent::ResponseBodyChunk(c) => {
+                    let t = slot(&mut traces, c.id);
+                    t.body.extend_from_slice(&c.chunk);
+                    t.response_chunk_times.push(c.at);
                     t.chunks += 1;
                     t.order.push("chunk");
                 }
@@ -419,6 +439,42 @@ fn request_body_is_reported() {
         assert_eq!(start.headers[header::CONTENT_TYPE], "application/json");
         assert_eq!(t.request_body, payload);
         assert_eq!(t.body, payload);
+        assert!(!t.request_chunk_times.is_empty());
+        let head_at = start.started_at + t.head.as_ref().unwrap().time_to_first_byte;
+        assert!(t.request_chunk_times.iter().all(|at| *at <= head_at));
+    });
+}
+
+#[test]
+fn chunk_stamps_follow_arrival_time() {
+    let installed = Installed::new();
+    run(async {
+        let addr = spawn_server().await;
+        let response = scope_network_owner(owner("stamped"), async {
+            send_stream(
+                get_request(&format!("http://{addr}/slow/4")),
+                RequestOptions::new(),
+            )
+            .await
+        })
+        .await
+        .unwrap();
+        collect_body(response.body).await.unwrap();
+
+        let traces = installed
+            .recording
+            .ended(1, |r| r.for_owner("stamped"))
+            .await;
+        let t = &traces[0];
+        let times = &t.response_chunk_times;
+        assert_eq!(times.len(), t.chunks);
+        assert!(times.len() >= 2, "{t:#?}");
+        // The server sleeps 30 ms per chunk; the stamps must show it.
+        assert!(
+            *times.last().unwrap() - times[0]
+                >= Duration::from_millis(20 * (times.len() as u64 - 1)),
+            "{times:?}"
+        );
     });
 }
 
@@ -696,7 +752,7 @@ fn explicit_tag_overrides_scope_owner() {
         let tag =
             NetworkRequestTag::new(NetworkRequestKind::Fetch).with_owner(Some(owner("tagged")));
         let id = tag.id;
-        request.extensions_mut().insert(tag);
+        tag.insert_into(&mut request);
         scope_network_owner(owner("scope"), async {
             send(request, RequestOptions::new()).await.unwrap();
         })

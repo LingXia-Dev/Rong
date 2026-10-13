@@ -104,6 +104,12 @@ mod enabled {
             Self(NEXT_ID.fetch_add(1, Ordering::Relaxed))
         }
 
+        /// An id with a chosen value, for building synthetic events in tests.
+        /// It is not reserved: real requests may reuse it.
+        pub fn from_u64(id: u64) -> Self {
+            Self(id)
+        }
+
         pub fn as_u64(self) -> u64 {
             self.0
         }
@@ -205,6 +211,12 @@ mod enabled {
             self.redirected_from = from;
             self
         }
+
+        /// Attach this tag to `request`, so a plain `http::send*` reports
+        /// this kind and owner instead of `Other` and the scope's owner.
+        pub fn insert_into<B>(self, request: &mut http::Request<B>) {
+            request.extensions_mut().insert(self);
+        }
     }
 
     #[derive(Clone, Debug)]
@@ -224,6 +236,30 @@ mod enabled {
         pub started_at_system: SystemTime,
     }
 
+    impl NetworkRequestStart {
+        /// A start event stamped now, with no owner, hop, headers, or body
+        /// size. Assign the public fields to fill in the rest.
+        pub fn new(
+            id: NetworkRequestId,
+            kind: NetworkRequestKind,
+            method: Method,
+            uri: Uri,
+        ) -> Self {
+            Self {
+                id,
+                owner: None,
+                kind,
+                redirected_from: None,
+                method,
+                uri,
+                headers: HeaderMap::new(),
+                body_size: None,
+                started_at: Instant::now(),
+                started_at_system: SystemTime::now(),
+            }
+        }
+    }
+
     #[derive(Clone, Debug)]
     #[non_exhaustive]
     pub struct NetworkResponseHead {
@@ -232,6 +268,41 @@ mod enabled {
         pub version: Version,
         pub headers: HeaderMap,
         pub time_to_first_byte: Duration,
+    }
+
+    impl NetworkResponseHead {
+        pub fn new(
+            id: NetworkRequestId,
+            status: StatusCode,
+            version: Version,
+            headers: HeaderMap,
+            time_to_first_byte: Duration,
+        ) -> Self {
+            Self {
+                id,
+                status,
+                version,
+                headers,
+                time_to_first_byte,
+            }
+        }
+    }
+
+    /// Body bytes for a [`NetworkEvent::RequestBodyChunk`] or
+    /// [`NetworkEvent::ResponseBodyChunk`].
+    #[derive(Clone, Debug)]
+    #[non_exhaustive]
+    pub struct NetworkBodyChunk {
+        pub id: NetworkRequestId,
+        pub chunk: Bytes,
+        /// When the chunk was observed, before the observer was called.
+        pub at: Instant,
+    }
+
+    impl NetworkBodyChunk {
+        pub fn new(id: NetworkRequestId, chunk: Bytes, at: Instant) -> Self {
+            Self { id, chunk, at }
+        }
     }
 
     #[derive(Clone, Debug, PartialEq, Eq)]
@@ -259,24 +330,46 @@ mod enabled {
         pub duration: Duration,
     }
 
+    impl NetworkRequestEnd {
+        pub fn new(
+            id: NetworkRequestId,
+            outcome: NetworkOutcome,
+            response_bytes: u64,
+            duration: Duration,
+        ) -> Self {
+            Self {
+                id,
+                outcome,
+                response_bytes,
+                duration,
+            }
+        }
+    }
+
     #[derive(Clone, Debug)]
     #[non_exhaustive]
     pub enum NetworkEvent {
         RequestStart(NetworkRequestStart),
         /// Request body bytes as the connection pulls them.
-        RequestBodyChunk {
-            id: NetworkRequestId,
-            chunk: Bytes,
-        },
+        RequestBodyChunk(NetworkBodyChunk),
         ResponseHead(NetworkResponseHead),
         /// Response body bytes as the connection delivers them, before the
         /// caller sees them and before any content decoding.
-        ResponseBodyChunk {
-            id: NetworkRequestId,
-            chunk: Bytes,
-        },
+        ResponseBodyChunk(NetworkBodyChunk),
         /// Always the last event for a started request.
         RequestEnd(NetworkRequestEnd),
+    }
+
+    impl NetworkEvent {
+        /// The request this event belongs to.
+        pub fn id(&self) -> NetworkRequestId {
+            match self {
+                Self::RequestStart(e) => e.id,
+                Self::RequestBodyChunk(c) | Self::ResponseBodyChunk(c) => c.id,
+                Self::ResponseHead(e) => e.id,
+                Self::RequestEnd(e) => e.id,
+            }
+        }
     }
 
     /// Hop id threaded through crate-internal redirect loops.
@@ -345,12 +438,12 @@ mod enabled {
         let start = start_event(request, None, started);
         let id = start.id;
         observer.on_event(NetworkEvent::RequestStart(start));
-        observer.on_event(NetworkEvent::RequestEnd(NetworkRequestEnd {
+        observer.on_event(NetworkEvent::RequestEnd(NetworkRequestEnd::new(
             id,
-            outcome: NetworkOutcome::Blocked(reason.to_string()),
-            response_bytes: 0,
-            duration: started.elapsed(),
-        }));
+            NetworkOutcome::Blocked(reason.to_string()),
+            0,
+            started.elapsed(),
+        )));
     }
 
     pub(crate) fn blocked<B>(request: &http::Request<B>, reason: &str) {
@@ -429,10 +522,13 @@ mod enabled {
         pub(crate) fn chunk(&mut self, chunk: &Bytes) {
             if let Some(active) = &mut self.0 {
                 active.response_bytes += chunk.len() as u64;
-                active.observer.on_event(NetworkEvent::ResponseBodyChunk {
-                    id: active.id,
-                    chunk: chunk.clone(),
-                });
+                active
+                    .observer
+                    .on_event(NetworkEvent::ResponseBodyChunk(NetworkBodyChunk::new(
+                        active.id,
+                        chunk.clone(),
+                        Instant::now(),
+                    )));
             }
         }
 
@@ -487,10 +583,12 @@ mod enabled {
                 && let Some(data) = frame.data_ref()
                 && !data.is_empty()
             {
-                self.observer.on_event(NetworkEvent::RequestBodyChunk {
-                    id: self.id,
-                    chunk: data.clone(),
-                });
+                self.observer
+                    .on_event(NetworkEvent::RequestBodyChunk(NetworkBodyChunk::new(
+                        self.id,
+                        data.clone(),
+                        Instant::now(),
+                    )));
             }
             poll
         }

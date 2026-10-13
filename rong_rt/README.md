@@ -94,7 +94,21 @@ request-body chunks, `ResponseHead`, response-body chunks, and exactly one
 `RequestStart::redirected_from` names the previous hop, whose head carries the
 status and `Location`. Guard-denied requests end with
 `NetworkOutcome::Blocked`. Body chunks are teed from the connection, never
-buffered. Without the feature the hooks are not compiled.
+buffered. Each chunk is a `NetworkBodyChunk` whose `at` is the monotonic
+instant it was observed, taken before the observer is called. Without the
+feature the hooks are not compiled.
+
+A plain `rong_rt::http::send*` reports kind `Other` and the scope's owner; tag
+the request to say otherwise:
+
+```rust
+NetworkRequestTag::new(NetworkRequestKind::Download).insert_into(&mut request);
+```
+
+To unit-test an observer, build events with `NetworkRequestStart::new`,
+`NetworkResponseHead::new`, `NetworkBodyChunk::new`, `NetworkRequestEnd::new`,
+and `NetworkRequestId::from_u64`; the payload types are `#[non_exhaustive]`, so
+set any remaining public fields after construction.
 
 The observer tests need a TLS backend feature to build a client:
 `cargo test -p rong_rt --features tls-aws-lc,network-observer`.
