@@ -6,6 +6,11 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 
 ## [Unreleased]
 
+## [0.6.9] - 2026-10-13
+
+Independent crate releases: `rong_rt` 0.6.3, `rong_http` 0.6.4, and
+`rong_modules` 0.6.2.
+
 ### HTTP
 
 - New opt-in `network-observer` feature on `rong_rt`, `rong_http`, and
