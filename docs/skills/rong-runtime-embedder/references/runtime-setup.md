@@ -59,7 +59,10 @@ rong_modules = { version = "0.6", default-features = false, features = [
 For a JSC source build, select `jscore-source` on `rong` and `jscore` on
 `rong_modules`; source selection and `jscore-interrupt` are engine-level
 features on `rong`. Forward the same TLS backend through `rong_modules` when
-network-capable modules are enabled.
+network-capable modules are enabled. Add `network-observer` to receive every
+HTTP request's events through `rong_rt::http::set_network_observer`, with
+`rong_http::set_network_owner` attributing a context's `fetch`/`Rong.SSE`; keep
+it out of release builds unless needed.
 
 ```rust
 rong_modules::init(&ctx, ["console", "timer"])?;
