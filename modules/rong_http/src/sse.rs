@@ -28,7 +28,7 @@ pub struct SSE {
 #[js_class]
 impl SSE {
     #[js_method(constructor)]
-    fn new(_ctx: JSContext, url: String, options: Optional<JSObject>) -> JSResult<Self> {
+    fn new(ctx: JSContext, url: String, options: Optional<JSObject>) -> JSResult<Self> {
         let parsed =
             url::Url::parse(&url).map_err(|e| type_error(format!("invalid url: {}", e)))?;
         let host = parsed
@@ -132,7 +132,10 @@ impl SSE {
             Some(close_rx)
         };
 
-        let rt_conn = rong_rt::sse::connect_sse(rt_options, merged_abort_rx).map_err(|e| {
+        let rt_conn = crate::observer::with_context_owner(&ctx, || {
+            rong_rt::sse::connect_sse(rt_options, merged_abort_rx)
+        })
+        .map_err(|e| {
             HostError::new(rong::error::E_IO, format!("failed to connect SSE: {}", e))
                 .with_name("TypeError")
         })?;

@@ -6,6 +6,22 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 
 ## [Unreleased]
 
+### HTTP
+
+- New opt-in `network-observer` feature on `rong_rt`, `rong_http`, and
+  `rong_modules`: `rong_rt::http::set_network_observer` receives every
+  request sent through the shared client (`fetch`, `Rong.SSE`, download,
+  upload, and direct `rong_rt::http` calls) as start, request-body chunk,
+  response head, response-body chunk, redirect, and end events under one
+  request id. Body chunks are the bytes off the connection, teed without
+  buffering, so what the app receives is unchanged.
+- Each request carries an owner: `rong_rt::http::scope_network_owner` (or
+  `sync_scope_network_owner`) for Rust callers, `rong_http::set_network_owner`
+  for a JS context's `fetch` and `Rong.SSE`. It is captured when the request
+  starts, so it survives the hop to the I/O executor and every redirect.
+- Without the feature nothing is compiled in; with it and no observer
+  installed, a request pays one atomic load.
+
 ## [0.6.8] - 2026-09-29
 
 Independent crate release: `rong_arkjs` 0.6.2.
