@@ -56,3 +56,37 @@ Rule of thumb:
 
 - shorten `connect_timeout` when you want to fail fast before the connection is established
 - shorten `request_timeout` when the whole request/response lifecycle should be bounded
+
+## Network observer
+
+Enable the `network-observer` feature to see every request sent through the
+shared HTTP client, including `fetch` and `Rong.SSE` from `rong_http`:
+
+```rust
+use std::sync::Arc;
+
+use rong_rt::http::{NetworkEvent, NetworkObserver, NetworkOwner};
+
+struct Log;
+
+impl NetworkObserver for Log {
+    fn on_event(&self, event: NetworkEvent) {
+        // Runs on the I/O thread: hand off, never block.
+        let _ = event;
+    }
+}
+
+rong_rt::http::set_network_observer(Some(Arc::new(Log)));
+
+// Attribute Rust-side requests; `rong_http::set_network_owner` does the same
+// for a JS context.
+let response = rong_rt::http::scope_network_owner(
+    NetworkOwner::new("sync-service"),
+    rong_rt::http::send(request, rong_rt::http::RequestOptions::new()),
+)
+.await?;
+```
+
+Events for one request share a `NetworkRequestId` and end with exactly one
+`RequestEnd`. Body chunks are teed from the connection, never buffered.
+Without the feature the hooks are not compiled.

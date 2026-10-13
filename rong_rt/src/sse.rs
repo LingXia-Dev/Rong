@@ -12,6 +12,7 @@ use tokio::sync::{mpsc, oneshot};
 use tokio_stream::wrappers::ReceiverStream;
 
 use crate::client::{self, HttpBody, RequestTimeouts};
+use crate::observer::{HopId, NetworkRequestKind, OwnerCapture, tag_request};
 
 // SSE is latency-sensitive; forward frames immediately instead of waiting for body coalescing.
 const SSE_STREAM_COALESCE_TARGET: usize = 0;
@@ -272,13 +273,15 @@ pub fn connect_sse(
     let (close_tx, close_rx) = oneshot::channel::<()>();
     let (opened_tx, opened_rx) = oneshot::channel::<Result<String, String>>();
     let network_access_guard = crate::http::current_network_access_guard();
+    let owner = OwnerCapture::capture();
 
     crate::RongExecutor::global().spawn(async move {
-        crate::http::scope_network_access_guard_opt(
-            network_access_guard,
-            run_sse_worker(options, abort_rx, close_rx, events_tx, Some(opened_tx)),
-        )
-        .await;
+        owner
+            .scope(crate::http::scope_network_access_guard_opt(
+                network_access_guard,
+                run_sse_worker(options, abort_rx, close_rx, events_tx, Some(opened_tx)),
+            ))
+            .await;
     });
 
     Ok(SseConnection {
@@ -328,7 +331,7 @@ async fn run_sse_worker(
     );
 
     loop {
-        let req = match build_sse_request(&options, last_event_id.as_deref()) {
+        let mut req = match build_sse_request(&options, last_event_id.as_deref()) {
             Ok(v) => v,
             Err(e) => {
                 complete_initial_open(&mut opened_tx, Err(e.clone()));
@@ -336,6 +339,7 @@ async fn run_sse_worker(
                 break;
             }
         };
+        tag_request(&mut req, NetworkRequestKind::Sse, HopId::FIRST);
         if let Err(err) = crate::http::check_current_network_access(&req) {
             let message = format!("sse request failed: {}", err);
             complete_initial_open(&mut opened_tx, Err(message.clone()));

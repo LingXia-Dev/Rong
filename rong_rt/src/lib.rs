@@ -2,6 +2,7 @@ mod client;
 pub mod download;
 mod executor;
 pub mod http;
+mod observer;
 pub mod sse;
 pub mod upload;
 pub mod user_agent;

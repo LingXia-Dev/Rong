@@ -36,8 +36,12 @@ tower-service = "0.3"
 axum = { workspace = true }
 tokio = { workspace = true, features = ["net"] }
 tempfile = "3"
+flate2 = { workspace = true }
 
 [features]
 default = []
+# Process-wide request/response observer (`http::set_network_observer`).
+# Off by default so release builds carry no hooks.
+network-observer = []
 tls-aws-lc = ["hyper-rustls/aws-lc-rs", "rustls/aws_lc_rs"]
 tls-ring = ["hyper-rustls/ring", "rustls/ring"]
