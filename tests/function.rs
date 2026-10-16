@@ -41,10 +41,44 @@ fn function_with_optional() {
                 .unwrap(),
             10
         );
+        // An explicit `undefined` is the same as an omitted argument.
+        assert_eq!(
+            ctx.eval::<i32>(Source::from_bytes(b"add_optional(7, undefined)"))
+                .unwrap(),
+            7
+        );
         assert_eq!(
             ctx.eval::<i32>(Source::from_bytes(b"add_optional.length"))
                 .unwrap(),
             1
+        );
+        Ok(())
+    });
+}
+
+#[test]
+fn function_with_optional_object_accepts_undefined() {
+    run(|ctx| {
+        let func =
+            JSFunc::new(ctx, |opts: Optional<JSObject>| opts.is_some())?.name("has_options")?;
+        ctx.global().set("has_options", func)?;
+
+        assert!(
+            !ctx.eval::<bool>(Source::from_bytes(b"has_options()"))
+                .unwrap()
+        );
+        assert!(
+            !ctx.eval::<bool>(Source::from_bytes(b"has_options(undefined)"))
+                .unwrap()
+        );
+        assert!(
+            ctx.eval::<bool>(Source::from_bytes(b"has_options({})"))
+                .unwrap()
+        );
+        // Anything else that is not an object still fails conversion.
+        assert!(
+            ctx.eval::<bool>(Source::from_bytes(b"has_options(1)"))
+                .is_err()
         );
         Ok(())
     });
@@ -116,6 +150,11 @@ fn function_with_optional_and_rest() {
             ctx.eval::<i32>(Source::from_bytes(b"complex_add(1, 2, 3, 4)"))
                 .unwrap(),
             10
+        );
+        assert_eq!(
+            ctx.eval::<i32>(Source::from_bytes(b"complex_add(1, undefined, 3)"))
+                .unwrap(),
+            4
         );
         assert_eq!(
             ctx.eval::<i32>(Source::from_bytes(b"complex_add.length"))
