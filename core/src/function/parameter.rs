@@ -345,15 +345,22 @@ where
 
 impl<T, V> GetParam<V> for Optional<T>
 where
-    V: JSValueImpl,
+    V: JSValueImpl + JSTypeOf,
     T: FromJSValue<V>,
 {
     type Kind = OptionalKind<T>;
 
+    /// An explicit `undefined` is an omitted argument, as in JS default
+    /// parameters: `f(undefined)` and `f()` both yield `Optional(None)`.
     fn get_param(accessor: &mut ParamsAccessor<V>) -> JSResult<Self> {
         match accessor.next_arg() {
-            Some(v) => T::from_js_value(accessor.ctx, JSValue::from_raw(accessor.ctx, v))
-                .map(|t| Optional(Some(t))),
+            Some(v) => {
+                let value = JSValue::from_raw(accessor.ctx, v);
+                if value.is_undefined() {
+                    return Ok(Optional(None));
+                }
+                T::from_js_value(accessor.ctx, value).map(|t| Optional(Some(t)))
+            }
             None => Ok(Optional(None)),
         }
     }

@@ -6,6 +6,13 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 
 ## [Unreleased]
 
+### Functions
+
+- `Optional<T>` parameters treat an explicit `undefined` as an omitted
+  argument, as JS default parameters do: `f(undefined)` now yields
+  `Optional(None)` instead of converting `undefined` to `T` (which failed with
+  `Not JS Object` for object parameters such as options bags).
+
 ## [0.6.9] - 2026-10-13
 
 Independent crate releases: `rong_rt` 0.6.3, `rong_http` 0.6.4, and
