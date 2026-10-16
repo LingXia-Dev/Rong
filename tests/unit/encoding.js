@@ -58,8 +58,14 @@ describe("TextDecoder", () => {
   test("should throw TypeError if input is not a Uint8Array", () => {
     const decoder = new TextDecoder();
     expect(() => decoder.decode(null)).toThrow(TypeError);
-    expect(() => decoder.decode(undefined)).toThrow(TypeError);
     expect(() => decoder.decode("hello")).toThrow(TypeError);
+  });
+
+  test("should treat undefined input as omitted", () => {
+    // `input` is optional in the WHATWG Encoding spec: decode(undefined) === decode().
+    const decoder = new TextDecoder();
+    expect(decoder.decode(undefined)).toBe("");
+    expect(decoder.decode()).toBe("");
   });
 
   test("should handle invalid UTF-8 sequences", () => {
