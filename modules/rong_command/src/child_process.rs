@@ -543,7 +543,10 @@ fn build_command(
 /// Helper to parse args from Optional<JSValue>
 fn parse_args(args: &Optional<JSValue>) -> JSResult<Vec<String>> {
     if let Some(ref args_val) = args.0 {
-        if args_val.is_null() {
+        // Keep the undefined check: `Optional` folds an undefined argument into
+        // `None` only from rong_core 0.6.3 on, and Rust callers can still build
+        // `Optional(Some(undefined))` by hand.
+        if args_val.is_null() || args_val.is_undefined() {
             return Ok(vec![]);
         }
         if let Some(arr) = args_val

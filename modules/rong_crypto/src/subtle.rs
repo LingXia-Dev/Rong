@@ -678,9 +678,12 @@ impl SubtleCrypto {
         let promise_ctx = ctx.clone();
         dispatch(&promise_ctx, || {
             let normalized = algorithm::normalize(&algorithm)?;
+            // Keep the undefined check: `Optional` folds an undefined argument into
+            // `None` only from rong_core 0.6.3 on, and Rust callers can still build
+            // `Optional(Some(undefined))` by hand.
             let length = length
                 .0
-                .filter(|value| !value.is_null())
+                .filter(|value| !value.is_undefined() && !value.is_null())
                 .ok_or_else(|| error::operation("deriveBits requires a length in bits"))?;
             let bits = derived_bits_length(length)?;
             let derivation =
