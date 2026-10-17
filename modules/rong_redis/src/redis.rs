@@ -737,7 +737,10 @@ fn subscribe_abort_receiver_from_options(
     let Some(options) = options.0.as_ref() else {
         return Ok(None);
     };
-    if options.is_null() {
+    // Keep the undefined check: `Optional` folds an undefined argument into
+    // `None` only from rong_core 0.6.3 on, and Rust callers can still build
+    // `Optional(Some(undefined))` by hand.
+    if options.is_undefined() || options.is_null() {
         return Ok(None);
     }
     let options = options.clone().into_object().ok_or_else(|| {

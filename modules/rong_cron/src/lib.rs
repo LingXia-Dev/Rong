@@ -141,7 +141,10 @@ fn relative_date_ms(value: Optional<JSValue>) -> JSResult<f64> {
         return Ok(Utc::now().timestamp_millis() as f64);
     };
 
-    if value.is_null() {
+    // Keep the undefined check: `Optional` folds an undefined argument into
+    // `None` only from rong_core 0.6.3 on, and Rust callers can still build
+    // `Optional(Some(undefined))` by hand.
+    if value.is_undefined() || value.is_null() {
         return Ok(Utc::now().timestamp_millis() as f64);
     }
 
