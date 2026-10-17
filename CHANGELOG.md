@@ -6,6 +6,13 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 
 ## [Unreleased]
 
+## [0.6.10] - 2026-10-17
+
+Independent crate releases: `rong_core` 0.6.3, `rong_event` 0.6.1, and
+`rong_abort` 0.6.3. An explicit `undefined` passed to an optional host API
+parameter now behaves like an omitted argument. Other crates pick up the
+`rong_core` change through their existing `^0.6` requirement.
+
 ### Functions
 
 - `Optional<T>` parameters treat an explicit `undefined` as an omitted
