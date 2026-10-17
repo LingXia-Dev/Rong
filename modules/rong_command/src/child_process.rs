@@ -543,7 +543,7 @@ fn build_command(
 /// Helper to parse args from Optional<JSValue>
 fn parse_args(args: &Optional<JSValue>) -> JSResult<Vec<String>> {
     if let Some(ref args_val) = args.0 {
-        if args_val.is_null() || args_val.is_undefined() {
+        if args_val.is_null() {
             return Ok(vec![]);
         }
         if let Some(arr) = args_val

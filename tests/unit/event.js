@@ -123,6 +123,20 @@ describe("EventEmitter", () => {
       expect(callCount1).toEqual(0);
       expect(callCount2).toEqual(0);
     });
+
+    test("removeAllListeners(undefined) only targets the event named \"undefined\"", () => {
+      // Node semantics: only `arguments.length === 0` clears every listener.
+      // An explicit undefined coerces to the event name "undefined".
+      let kept = 0;
+      let coerced = 0;
+      emitter.on("test1", () => kept++);
+      emitter.on(undefined, () => coerced++);
+      emitter.removeAllListeners(undefined);
+      emitter.emit("test1");
+      emitter.emit(undefined);
+      expect(kept).toEqual(1);
+      expect(coerced).toEqual(0);
+    });
   });
 
   describe("Event emission", () => {

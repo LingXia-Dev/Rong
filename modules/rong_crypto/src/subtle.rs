@@ -680,7 +680,7 @@ impl SubtleCrypto {
             let normalized = algorithm::normalize(&algorithm)?;
             let length = length
                 .0
-                .filter(|value| !value.is_undefined() && !value.is_null())
+                .filter(|value| !value.is_null())
                 .ok_or_else(|| error::operation("deriveBits requires a length in bits"))?;
             let bits = derived_bits_length(length)?;
             let derivation =

@@ -369,10 +369,18 @@ where
         Ok(this.0.clone())
     }
 
-    fn remove_all_listeners(this: This<JSObject>, key: Optional<EventKey>) -> JSResult<()> {
+    /// Takes the raw argument list rather than `Optional<EventKey>` because
+    /// `Optional` folds an explicit `undefined` into "omitted". Node clears
+    /// every listener only when `arguments.length === 0`; an explicit
+    /// `undefined` names the event `"undefined"`, as `on(undefined, fn)` does.
+    fn remove_all_listeners(this: This<JSObject>, args: Rest<JSValue>) -> JSResult<()> {
+        let key = match args.0.into_iter().next() {
+            Some(value) => Some(value.to_rust::<EventKey>()?),
+            None => None,
+        };
         let target = this.borrow::<Self>()?;
         let events = target.get_event_emitter();
-        events.remove_all_listeners(key.0)?;
+        events.remove_all_listeners(key)?;
         Ok(())
     }
 

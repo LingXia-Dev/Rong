@@ -36,6 +36,33 @@ describe("AbortSignal", () => {
       expect(signal.reason).toBe(reason);
     });
 
+    test("abort(undefined) behaves like abort() with no reason", () => {
+      const omitted = AbortSignal.abort();
+      const explicit = AbortSignal.abort(undefined);
+      expect(explicit.aborted).toBeTruthy();
+      expect(explicit.reason).toBe(omitted.reason);
+
+      const controller = new AbortController();
+      controller.abort(undefined);
+      expect(controller.signal.aborted).toBeTruthy();
+      expect(controller.signal.reason).toBeInstanceOf(DOMException);
+      expect(controller.signal.reason.name).toBe("AbortError");
+    });
+
+    test("abort(null) keeps null as the reason", () => {
+      const signal = AbortSignal.abort(null);
+      expect(signal.aborted).toBeTruthy();
+      expect(signal.reason).toBe(null);
+    });
+
+    test("reason setter stores the assigned value, including undefined", () => {
+      const signal = new AbortController().signal;
+      signal.reason = "first";
+      expect(signal.reason).toBe("first");
+      signal.reason = undefined;
+      expect(signal.reason).toBeUndefined();
+    });
+
     test("should create signal from multiple signals with any()", () => {
       const controller1 = new AbortController();
       const controller2 = new AbortController();

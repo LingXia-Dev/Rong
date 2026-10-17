@@ -158,12 +158,13 @@ impl AbortSignal {
         inner.reason.clone()
     }
 
+    /// A setter always receives exactly one value, so this takes a plain
+    /// `JSValue`: `signal.reason = undefined` stores `undefined` rather than
+    /// being folded into "omitted" by `Optional`.
     #[js_method(setter, rename = "reason")]
-    pub(crate) fn set_reason(&self, reason: Optional<JSValue>) {
+    pub(crate) fn set_reason(&self, reason: JSValue) {
         let mut inner = self.lock_inner();
-        if let Some(r) = reason.0 {
-            inner.reason = r;
-        }
+        inner.reason = reason;
     }
 
     #[js_method(rename = "throwIfAborted")]
@@ -236,7 +237,7 @@ impl AbortSignal {
     #[js_method]
     fn abort(ctx: JSContext, reason: Optional<JSValue>) -> JSResult<AbortSignal> {
         let signal = Self::new(&ctx);
-        signal.set_reason(reason);
+        signal.set_reason(reason.0.unwrap_or_else(|| JSValue::undefined(&ctx)));
         {
             let mut inner = signal
                 .inner

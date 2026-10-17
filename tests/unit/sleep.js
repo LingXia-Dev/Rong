@@ -47,6 +47,23 @@ describe("Rong.sleep", () => {
     assert.ok(elapsed >= 0 && elapsed < 50, "past Date should resolve quickly");
   });
 
+  test("treats an undefined delay as omitted", async () => {
+    let start = Date.now();
+    await Rong.sleep(undefined);
+    let elapsed = Date.now() - start;
+    assert.ok(elapsed >= 0 && elapsed < 50, "sleep(undefined) should resolve quickly");
+
+    start = Date.now();
+    await Rong.sleep();
+    elapsed = Date.now() - start;
+    assert.ok(elapsed >= 0 && elapsed < 50, "sleep() should resolve quickly");
+
+    start = Date.now();
+    Rong.sleepSync(undefined);
+    elapsed = Date.now() - start;
+    assert.ok(elapsed >= 0 && elapsed < 50, "sleepSync(undefined) should return quickly");
+  });
+
   test("throws for invalid async sleep input", async () => {
     try {
       await Rong.sleep("100");
