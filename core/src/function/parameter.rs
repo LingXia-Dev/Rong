@@ -81,6 +81,16 @@ pub struct JSClassRef<T, V: JSValueImpl>(JSObject<V>, PhantomData<T>);
 /// - Does not count towards required parameter count
 /// - Can appear anywhere in the parameter list
 ///
+/// # Semantics
+/// - An omitted argument and an explicit `undefined` both yield `None`, as
+///   with JS default parameters: `f()` and `f(undefined)` are the same call.
+/// - `null` is a value, not an omission: it is passed to `T`'s conversion and
+///   fails for types that reject it (such as objects).
+/// - The argument slot is still consumed, so positional parameters after an
+///   `Optional` are unaffected.
+/// - To tell `f(undefined)` from `f()` (rare; `arguments.length` semantics),
+///   take `Rest<JSValue>` instead and inspect its length.
+///
 /// # Example
 /// ```ignore
 /// use rong_core::function::parameter::Optional;

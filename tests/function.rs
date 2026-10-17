@@ -80,6 +80,11 @@ fn function_with_optional_object_accepts_undefined() {
             ctx.eval::<bool>(Source::from_bytes(b"has_options(1)"))
                 .is_err()
         );
+        // `null` is a value, not an omission: it still goes through `T`.
+        assert!(
+            ctx.eval::<bool>(Source::from_bytes(b"has_options(null)"))
+                .is_err()
+        );
         Ok(())
     });
 }

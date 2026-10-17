@@ -141,7 +141,7 @@ fn relative_date_ms(value: Optional<JSValue>) -> JSResult<f64> {
         return Ok(Utc::now().timestamp_millis() as f64);
     };
 
-    if value.is_undefined() || value.is_null() {
+    if value.is_null() {
         return Ok(Utc::now().timestamp_millis() as f64);
     }
 

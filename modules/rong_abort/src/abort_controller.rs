@@ -32,7 +32,7 @@ impl AbortController {
                 //only once
                 return Ok(());
             }
-            abort.set_reason(reason);
+            abort.set_reason(reason.0.unwrap_or_else(|| JSValue::undefined(&ctx)));
         }
         AbortSignal::broadcast_abort(&ctx, This(self.signal.clone()))
     }

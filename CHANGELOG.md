@@ -11,7 +11,17 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 - `Optional<T>` parameters treat an explicit `undefined` as an omitted
   argument, as JS default parameters do: `f(undefined)` now yields
   `Optional(None)` instead of converting `undefined` to `T` (which failed with
-  `Not JS Object` for object parameters such as options bags).
+  `Not JS Object` for object parameters such as options bags). `null` is
+  unchanged and still goes through `T`'s conversion. This applies to every
+  host API with an `Optional` parameter; for example `Rong.sleep(undefined)`
+  now resolves immediately like `Rong.sleep()` instead of throwing. The
+  `GetParam` impl for `Optional<T>` now requires `V: JSTypeOf`, which every
+  bundled engine already satisfies.
+- `AbortSignal.prototype.reason`'s setter stores the assigned value even when
+  it is `undefined`.
+- `EventEmitter.prototype.removeAllListeners(undefined)` keeps removing only
+  the listeners of the event named `"undefined"`, as in Node; only a call
+  with no arguments clears every listener.
 
 ## [0.6.9] - 2026-10-13
 
