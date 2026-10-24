@@ -6,10 +6,14 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 
 ## [Unreleased]
 
-For releases of `rong_core` 0.6.4, `rong_quickjs` 0.6.2, `rong_worker` 0.6.1,
-`rong_command` 0.6.2, and `rong_stream` 0.6.1. `rong_quickjs` and
-`rong_worker` need `rong_core` 0.6.4 for `JSRuntimeImpl::THREAD_STACK_SIZE`,
-so publish `rong_core` first.
+## [0.6.11] - 2026-10-24
+
+Crate releases: `rong_core` 0.6.4, `rong_quickjs` 0.6.2, `rong_worker` 0.6.1,
+`rong_command` 0.6.2, and `rong_stream` 0.6.1. QuickJS sizes its stack limit
+from the thread it runs on and asks for 8 MiB worker threads, and spawning
+many tasks at once is no longer quadratic. `rong_quickjs` and `rong_worker`
+need `rong_core` 0.6.4 for the new `JSRuntimeImpl::THREAD_STACK_SIZE`. Other
+crates pick up the changes through their existing `^0.6` requirements.
 
 ### Runtime
 
