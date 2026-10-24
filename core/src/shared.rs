@@ -754,7 +754,7 @@ fn initialize_workers<E: JSEngine + 'static>(
 
         let thread_any_worker_idle = any_worker_idle.clone();
         let run_span = worker_span.clone();
-        let handle = crate::worker_thread::spawn_js_worker_thread(
+        let handle = crate::worker_thread::spawn_js_worker_thread::<E, _, _>(
             worker_id,
             format!("worker-{worker_id}"),
             worker_span.clone(),

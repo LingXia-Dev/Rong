@@ -36,9 +36,10 @@ static ACTIVE_DETACHED_WORKER_THREADS: AtomicUsize = AtomicUsize::new(0);
 static TOTAL_DETACHED_WORKER_THREADS: AtomicUsize = AtomicUsize::new(0);
 
 const WORKER_TERMINATION_GRACE: Duration = Duration::from_secs(1);
-/// Same as rong's own JS worker threads: room for debug builds' large host
-/// futures; the engine sizes its stack limit from the thread.
-const WORKER_THREAD_STACK_SIZE: usize = 8 * 1024 * 1024;
+/// Stack for a worker's thread: what the engine asks for, as rong's own JS
+/// worker threads use, or Rust's default.
+const WORKER_THREAD_STACK_SIZE: Option<usize> =
+    <<RongJS as JSEngine>::Runtime as rong_core::engine::JSRuntimeImpl>::THREAD_STACK_SIZE;
 
 /// Process-level accounting for worker threads that outlived their termination
 /// grace period.
@@ -383,8 +384,11 @@ impl Worker {
         let (thread_exit_tx, thread_exit) = watch::channel(false);
 
         // Spawn a dedicated OS thread with its own tokio runtime + JS runtime.
-        let thread_handle = std::thread::Builder::new()
-            .stack_size(WORKER_THREAD_STACK_SIZE)
+        let mut thread_builder = std::thread::Builder::new();
+        if let Some(stack_size) = WORKER_THREAD_STACK_SIZE {
+            thread_builder = thread_builder.stack_size(stack_size);
+        }
+        let thread_handle = thread_builder
             .spawn(move || {
                 let _exit = WorkerThreadExit {
                     stopped: thread_stopped_worker,

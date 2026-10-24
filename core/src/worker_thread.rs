@@ -14,11 +14,6 @@ thread_local! {
     static CURRENT_WORKER_ID: Cell<Option<usize>> = const { Cell::new(None) };
 }
 
-/// Stack for each JS worker thread. Rust's 2 MiB default leaves little room
-/// once debug builds poll large host futures on top of JavaScript frames;
-/// engines that check their own depth size their limit from the thread.
-const JS_WORKER_STACK_SIZE: usize = 8 * 1024 * 1024;
-
 /// Shortest wait between two runs of the engine's deferred work, so work that
 /// is due again right away cannot spin the worker.
 const ENGINE_TIMERS_MIN_WAIT: Duration = Duration::from_millis(10);
@@ -94,7 +89,9 @@ pub(crate) fn in_worker_thread() -> bool {
     CURRENT_WORKER_ID.with(|slot| slot.get()).is_some()
 }
 
-pub(crate) fn spawn_js_worker_thread<F, Fut>(
+/// Spawns a worker thread for engine `E`, with the stack it asks for (see
+/// [`JSRuntimeImpl::THREAD_STACK_SIZE`]).
+pub(crate) fn spawn_js_worker_thread<E, F, Fut>(
     worker_id: usize,
     thread_name: String,
     worker_span: Span,
@@ -104,12 +101,16 @@ pub(crate) fn spawn_js_worker_thread<F, Fut>(
     run: F,
 ) -> std::thread::JoinHandle<()>
 where
+    E: crate::JSEngine,
     F: FnOnce(std::sync::mpsc::Sender<Result<(), String>>) -> Fut + Send + 'static,
     Fut: Future<Output = ()> + 'static,
 {
+    let mut builder = std::thread::Builder::new();
+    if let Some(stack_size) = <E::Runtime as JSRuntimeImpl>::THREAD_STACK_SIZE {
+        builder = builder.stack_size(stack_size);
+    }
     // `expect` matches `std::thread::spawn`, which panics on the same failure.
-    std::thread::Builder::new()
-        .stack_size(JS_WORKER_STACK_SIZE)
+    builder
         .spawn(move || {
             let _entered = worker_span.enter();
             info!(target: "rong", "{start_log}");

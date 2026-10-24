@@ -15,6 +15,7 @@ readme = "README.md"
 
 [dependencies]
 rong = { workspace = true }
+rong_core = { workspace = true }
 tokio = { workspace = true }
 rong_console = { workspace = true }
 tracing = { workspace = true }

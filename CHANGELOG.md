@@ -6,9 +6,10 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 
 ## [Unreleased]
 
-For independent releases of `rong_core` 0.6.4, `rong_quickjs` 0.6.2,
-`rong_worker` 0.6.1, `rong_command` 0.6.2, and `rong_stream` 0.6.1. No public API changes,
-and none needs another first.
+For releases of `rong_core` 0.6.4, `rong_quickjs` 0.6.2, `rong_worker` 0.6.1,
+`rong_command` 0.6.2, and `rong_stream` 0.6.1. `rong_quickjs` and
+`rong_worker` need `rong_core` 0.6.4 for `JSRuntimeImpl::THREAD_STACK_SIZE`,
+so publish `rong_core` first.
 
 ### Runtime
 
@@ -24,9 +25,12 @@ and none needs another first.
   musl and OHOS, whose libc reports only the part mapped so far. The limit is
   capped at 256 MiB, so an unlimited stack rlimit still ends runaway
   recursion with `RangeError`.
-- Shared and pinned pool workers and the JS `Worker` module's threads get an
-  8 MiB stack instead of Rust's 2 MiB default; JS recursion on them runs about
-  4× deeper before `RangeError`.
+- New `JSRuntimeImpl::THREAD_STACK_SIZE` (defaults to `None`): the stack for
+  the threads rong spawns to run an engine. Shared and pinned pool workers
+  and the JS `Worker` module's threads use it. QuickJS asks for 8 MiB, so JS
+  recursion on its workers runs about 4× deeper before `RangeError`; other
+  engines keep Rust's 2 MiB default, because an 8 MiB thread made
+  JavaScriptCore on Windows about 100× slower per call.
 - `new Worker(...)` throws instead of panicking when its thread cannot be
   started.
 - Spawning context-owned work (async host functions, `setTimeout`, ...) no
