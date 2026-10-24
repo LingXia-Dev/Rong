@@ -194,12 +194,35 @@ struct ContextState<T: 'static>(T);
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct TaskScope(u64);
 
+/// Fewest handles a task list holds before it first sweeps finished ones.
+const MIN_TASK_SWEEP: usize = 64;
+
+/// Pushes `handle`, first sweeping finished handles once the list has grown to
+/// `sweep_at`, then moving `sweep_at` to twice what is left. Sweeping on every
+/// push instead rescans the whole list each time, which is quadratic in a
+/// burst of spawns that have not run yet (10 000 `setTimeout` calls in one
+/// script); this keeps each push O(1) amortized and the list within twice
+/// its live handles.
+fn push_task_handle<H>(
+    handles: &mut Vec<H>,
+    sweep_at: &Cell<usize>,
+    handle: H,
+    is_finished: fn(&H) -> bool,
+) {
+    if handles.len() >= sweep_at.get().max(MIN_TASK_SWEEP) {
+        handles.retain(|handle| !is_finished(handle));
+        sweep_at.set(handles.len() * 2);
+    }
+    handles.push(handle);
+}
+
 /// One scope's cancellation flag and the tasks it owns. Held by the registry
 /// and by every task spawned while the scope was current.
 #[derive(Default)]
 pub(crate) struct TaskScopeState {
     cancelled: Cell<bool>,
     tasks: RefCell<Vec<tokio::task::AbortHandle>>,
+    sweep_tasks_at: Cell<usize>,
 }
 
 impl TaskScopeState {
@@ -214,9 +237,12 @@ impl TaskScopeState {
     /// host calls would otherwise accumulate one handle per call for as long
     /// as it runs.
     pub(crate) fn adopt(&self, task: tokio::task::AbortHandle) {
-        let mut tasks = self.tasks.borrow_mut();
-        tasks.retain(|task| !task.is_finished());
-        tasks.push(task);
+        push_task_handle(
+            &mut self.tasks.borrow_mut(),
+            &self.sweep_tasks_at,
+            task,
+            tokio::task::AbortHandle::is_finished,
+        );
     }
 
     /// Aborts every unfinished task in the scope.
@@ -241,6 +267,7 @@ struct ContextTaskRegistry {
 struct ContextTaskRegistryInner {
     closed: std::cell::Cell<bool>,
     tasks: RefCell<Vec<tokio::task::JoinHandle<()>>>,
+    sweep_tasks_at: Cell<usize>,
     current_scope: RefCell<Option<(TaskScope, Rc<TaskScopeState>)>>,
     scopes: RefCell<HashMap<TaskScope, Rc<TaskScopeState>>>,
 }
@@ -256,9 +283,12 @@ impl ContextTaskRegistry {
 
         let task = tokio::task::spawn_local(future);
         let abort_handle = task.abort_handle();
-        let mut tasks = self.inner.tasks.borrow_mut();
-        tasks.retain(|task| !task.is_finished());
-        tasks.push(task);
+        push_task_handle(
+            &mut self.inner.tasks.borrow_mut(),
+            &self.inner.sweep_tasks_at,
+            task,
+            tokio::task::JoinHandle::is_finished,
+        );
         Some(abort_handle)
     }
 
@@ -1025,5 +1055,41 @@ impl<C: JSContextImpl> std::fmt::Debug for JSContext<C> {
             self.rc.lifecycle_owners.get(),
             self.owns_lifecycle
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{MIN_TASK_SWEEP, push_task_handle};
+    use std::cell::Cell;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    #[test]
+    fn a_burst_of_unfinished_tasks_is_checked_a_linear_number_of_times() {
+        static CHECKS: AtomicUsize = AtomicUsize::new(0);
+        fn running(_: &bool) -> bool {
+            CHECKS.fetch_add(1, Ordering::Relaxed);
+            false
+        }
+
+        const COUNT: usize = 10_000;
+        let (mut handles, sweep_at) = (Vec::new(), Cell::new(0));
+        for _ in 0..COUNT {
+            push_task_handle(&mut handles, &sweep_at, false, running);
+        }
+        assert_eq!(handles.len(), COUNT);
+        // Each sweep at least doubles the next one's threshold, so the sweeps
+        // check fewer than 2 × COUNT handles in all; one per push would be
+        // about COUNT² / 2.
+        assert!(CHECKS.load(Ordering::Relaxed) < 2 * COUNT);
+    }
+
+    #[test]
+    fn finished_tasks_are_swept_so_the_list_stays_small() {
+        let (mut handles, sweep_at) = (Vec::new(), Cell::new(0));
+        for _ in 0..10_000 {
+            push_task_handle(&mut handles, &sweep_at, true, |finished| *finished);
+        }
+        assert!(handles.len() <= MIN_TASK_SWEEP);
     }
 }
