@@ -1,6 +1,6 @@
 [package]
 name = "rong_core"
-version = "0.6.3"
+version = "0.6.4"
 edition.workspace = true
 
 description = "Core runtime types for RongJS"
