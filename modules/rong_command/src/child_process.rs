@@ -9,7 +9,7 @@ use rong::{
 };
 use rong_event::{Emitter, EmitterExt, EventEmitter};
 use rong_stream::{JSReadableStream, JSWritableStream};
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::io;
 use std::pin::Pin;
@@ -35,6 +35,7 @@ enum ChildCommand {
 #[derive(Clone, Default)]
 struct ChildProcessTaskRegistry {
     handles: Rc<RefCell<Vec<tokio::task::JoinHandle<()>>>>,
+    sweep_at: Rc<Cell<usize>>,
 }
 
 impl ChildProcessTaskRegistry {
@@ -48,9 +49,14 @@ impl ChildProcessTaskRegistry {
         registry
     }
 
+    /// Finished handles are swept once the list has doubled since the last
+    /// sweep, not on every push, so a burst of tracks stays linear.
     fn track(&self, handle: tokio::task::JoinHandle<()>) {
         let mut handles = self.handles.borrow_mut();
-        handles.retain(|task| !task.is_finished());
+        if handles.len() >= self.sweep_at.get().max(64) {
+            handles.retain(|task| !task.is_finished());
+            self.sweep_at.set(handles.len() * 2);
+        }
         handles.push(handle);
     }
 }

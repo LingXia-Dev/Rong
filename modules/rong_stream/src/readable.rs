@@ -3,7 +3,7 @@ use bytes::{Bytes, BytesMut};
 use rong::function::{JSClassRef, This};
 use rong::*;
 use rong_abort::AbortSignal;
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex as StdMutex};
@@ -22,12 +22,18 @@ type StreamInitializer = Rc<RefCell<Option<Box<dyn FnOnce() -> StreamReceiver>>>
 #[derive(Clone, Default)]
 struct AsyncReaderTaskRegistry {
     handles: Rc<RefCell<Vec<tokio::task::JoinHandle<()>>>>,
+    sweep_at: Rc<Cell<usize>>,
 }
 
 impl AsyncReaderTaskRegistry {
+    /// Finished handles are swept once the list has doubled since the last
+    /// sweep, not on every push, so a burst of tracks stays linear.
     fn track(&self, handle: tokio::task::JoinHandle<()>) {
         let mut handles = self.handles.borrow_mut();
-        handles.retain(|task| !task.is_finished());
+        if handles.len() >= self.sweep_at.get().max(64) {
+            handles.retain(|task| !task.is_finished());
+            self.sweep_at.set(handles.len() * 2);
+        }
         handles.push(handle);
     }
 }

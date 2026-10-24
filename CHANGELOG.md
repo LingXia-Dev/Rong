@@ -6,6 +6,16 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 
 ## [Unreleased]
 
+### Runtime
+
+- Spawning context-owned work (async host functions, `setTimeout`, ...) no
+  longer rescans the context's whole task list on every spawn to drop
+  finished tasks; it sweeps once the list has doubled. A burst of spawns that
+  have not run yet was quadratic: 10 000 `setTimeout` calls in one script
+  took 1.2 s to register on macOS and long enough on Windows debug builds to
+  fail the timer tests. Now 0.15 s. The child-process and readable-stream
+  task lists got the same change.
+
 ## [0.6.10] - 2026-10-17
 
 Independent crate releases: `rong_core` 0.6.3, `rong_event` 0.6.1, and
