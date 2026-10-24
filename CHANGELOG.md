@@ -6,8 +6,29 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 
 ## [Unreleased]
 
+For independent releases of `rong_core` 0.6.4, `rong_quickjs` 0.6.2,
+`rong_worker` 0.6.1, `rong_command` 0.6.2, and `rong_stream` 0.6.1. No public API changes,
+and none needs another first.
+
 ### Runtime
 
+- A QuickJS runtime sizes its stack limit from the thread it is created on:
+  half of the stack left below that point, instead of QuickJS's fixed 1 MiB.
+  In debug builds an async host function's future is polled hundreds of KiB
+  below its JS caller, so a host function that called back into JavaScript
+  there (`JSON.stringify` on a payload, say) failed with `RangeError: Maximum
+  call stack size exceeded` while the thread had stack to spare. On threads
+  smaller than about 2 MiB the limit is now lower than before, so runaway
+  recursion throws instead of overflowing the thread. The default stays where
+  the platform cannot report the thread's stack, and on the main thread under
+  musl and OHOS, whose libc reports only the part mapped so far. The limit is
+  capped at 256 MiB, so an unlimited stack rlimit still ends runaway
+  recursion with `RangeError`.
+- Shared and pinned pool workers and the JS `Worker` module's threads get an
+  8 MiB stack instead of Rust's 2 MiB default; JS recursion on them runs about
+  4× deeper before `RangeError`.
+- `new Worker(...)` throws instead of panicking when its thread cannot be
+  started.
 - Spawning context-owned work (async host functions, `setTimeout`, ...) no
   longer rescans the context's whole task list on every spawn to drop
   finished tasks; it sweeps once the list has doubled. A burst of spawns that

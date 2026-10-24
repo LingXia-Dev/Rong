@@ -77,6 +77,15 @@ impl JSRuntimeImpl for QJSRuntime {
     // new QuickJS JS Runtime
     fn new() -> Self {
         let rt = unsafe { qjs::JS_NewRuntime() };
+        // QuickJS measures its limit down from here, 1 MiB by default
+        // whatever the thread has: too little on a big stack (a debug build's
+        // host futures alone can pass it) and too much on a small one. Take
+        // half of what the thread has left instead, so the limit sits midway
+        // between here and the end of the stack; the rest is for the native
+        // and host frames QuickJS cannot see.
+        if let Some(limit) = crate::stack::remaining().and_then(crate::stack::limit_for) {
+            unsafe { qjs::JS_SetMaxStackSize(rt, limit) };
+        }
         let inner = Rc::new(QJSRuntimeInner {
             rt,
             interrupt_flag: RefCell::new(None),
