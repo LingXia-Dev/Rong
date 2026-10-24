@@ -23,6 +23,17 @@ pub trait JSRuntimeImpl {
     /// The JavaScript context type associated with this runtime
     type Context: JSContextImpl;
 
+    /// Stack for the threads rong spawns to run this engine; `None` keeps
+    /// Rust's default (2 MiB).
+    ///
+    /// # Key Notes
+    /// - Only an engine that needs more should set it. QuickJS does: it
+    ///   sizes its stack limit from the thread, and debug builds poll large
+    ///   host futures on top of its frames.
+    /// - A bigger stack is not free everywhere: JavaScriptCore on Windows
+    ///   gets about 100× slower on an 8 MiB thread.
+    const THREAD_STACK_SIZE: Option<usize> = None;
+
     /// Creates JavaScript runtime.
     fn new() -> Self;
 

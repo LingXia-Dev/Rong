@@ -74,6 +74,10 @@ impl JSRuntimeImpl for QJSRuntime {
     type RawRuntime = *mut qjs::JSRuntime;
     type Context = QJSContext;
 
+    // QuickJS sizes its limit from the thread (see `new`), and debug builds
+    // poll host futures hundreds of KiB below their JS caller.
+    const THREAD_STACK_SIZE: Option<usize> = Some(8 * 1024 * 1024);
+
     // new QuickJS JS Runtime
     fn new() -> Self {
         let rt = unsafe { qjs::JS_NewRuntime() };
