@@ -16,3 +16,6 @@ readme = "README.md"
 rong_quickjs_sys = { workspace = true }
 rong_core = { workspace = true }
 smallvec = { workspace = true }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"

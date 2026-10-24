@@ -36,6 +36,9 @@ static ACTIVE_DETACHED_WORKER_THREADS: AtomicUsize = AtomicUsize::new(0);
 static TOTAL_DETACHED_WORKER_THREADS: AtomicUsize = AtomicUsize::new(0);
 
 const WORKER_TERMINATION_GRACE: Duration = Duration::from_secs(1);
+/// Same as rong's own JS worker threads: room for debug builds' large host
+/// futures; the engine sizes its stack limit from the thread.
+const WORKER_THREAD_STACK_SIZE: usize = 8 * 1024 * 1024;
 
 /// Process-level accounting for worker threads that outlived their termination
 /// grace period.
@@ -380,32 +383,40 @@ impl Worker {
         let (thread_exit_tx, thread_exit) = watch::channel(false);
 
         // Spawn a dedicated OS thread with its own tokio runtime + JS runtime.
-        let thread_handle = std::thread::spawn(move || {
-            let _exit = WorkerThreadExit {
-                stopped: thread_stopped_worker,
-                detached: thread_detached_worker,
-                exit_tx: thread_exit_tx,
-            };
-            let rt = tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-                .expect("Failed to create worker tokio runtime");
+        let thread_handle = std::thread::Builder::new()
+            .stack_size(WORKER_THREAD_STACK_SIZE)
+            .spawn(move || {
+                let _exit = WorkerThreadExit {
+                    stopped: thread_stopped_worker,
+                    detached: thread_detached_worker,
+                    exit_tx: thread_exit_tx,
+                };
+                let rt = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .expect("Failed to create worker tokio runtime");
 
-            rt.block_on(async {
-                let local = tokio::task::LocalSet::new();
-                local
-                    .run_until(Self::run_worker_thread(
-                        script_path,
-                        to_worker_rx,
-                        from_worker_tx,
-                        terminated_thread,
-                        terminate_thread_tx,
-                        terminate_rx,
-                        interrupt_worker,
-                    ))
-                    .await;
-            });
-        });
+                rt.block_on(async {
+                    let local = tokio::task::LocalSet::new();
+                    local
+                        .run_until(Self::run_worker_thread(
+                            script_path,
+                            to_worker_rx,
+                            from_worker_tx,
+                            terminated_thread,
+                            terminate_thread_tx,
+                            terminate_rx,
+                            interrupt_worker,
+                        ))
+                        .await;
+                });
+            })
+            .map_err(|e| {
+                HostError::new(
+                    rong::error::E_INTERNAL,
+                    format!("Failed to start worker thread: {e}"),
+                )
+            })?;
 
         let lifecycle = WorkerLifecycle(Rc::new(WorkerLifecycleInner {
             to_worker: to_worker_tx,

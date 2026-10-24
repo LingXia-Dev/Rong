@@ -1,6 +1,7 @@
 mod class;
 mod context;
 mod runtime;
+mod stack;
 mod value;
 
 mod qjs {
