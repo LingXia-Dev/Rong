@@ -6,6 +6,20 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 
 ## [Unreleased]
 
+### Engines
+
+- `rong` engine features are additive: `quickjs`, `jscore` and `arkjs` can be
+  linked into one binary. Each enabled engine has a typed module,
+  `rong::quickjs`, `rong::jscore` and `rong::arkjs`, with the full alias set
+  (`RongJS`, `JSRuntime`, `JSContext`, `JSValue`, `JSObject`, `JSArray`, ...).
+- The root aliases, `#[js_class]` and module crates bind one primary engine:
+  `jscore`, else `arkjs`, else `quickjs`. New mutually exclusive
+  `primary-quickjs`, `primary-jscore` and `primary-arkjs` features pin it.
+  Single-engine builds are unchanged.
+- Known gap: `tests/interrupt.rs` reads `cfg(feature = "quickjs")` as "the
+  engine under test", so running the single-engine suite with QuickJS and
+  JavaScriptCore both enabled (JSC primary) fails two interrupt tests.
+
 ### Fixed
 
 - `rong_core`: `Promise::from_future` boxes the host future before it holds
