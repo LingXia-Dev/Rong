@@ -186,7 +186,14 @@ Build for ArkJS explicitly on HarmonyOS/OpenHarmony targets:
 cargo build --no-default-features --features arkjs,tls-ring --target aarch64-unknown-linux-ohos
 ```
 
-`quickjs`, `jscore`, and `arkjs` are mutually exclusive. If multiple engines are enabled, build fails fast.
+Engine features are additive. Each enabled engine has its own typed API,
+`rong::quickjs`, `rong::jscore` and `rong::arkjs` (`rong::quickjs::RongJS::runtime()`,
+`rong::quickjs::JSContext`, ...), so one binary can run several engines side by side.
+The root aliases (`rong::RongJS`, `rong::JSContext`, ...), `#[js_class]` and the module
+crates bind one primary engine: `jscore` if enabled, else `arkjs`, else `quickjs`, so
+adding QuickJS for secondary isolates never moves an app's primary engine. Pin it with
+at most one of `primary-quickjs`, `primary-jscore` or `primary-arkjs`; the build fails if
+two are set or the named engine feature is off.
 `rong` the library has no default engine or TLS backend; downstream crates should choose them explicitly.
 For TLS backend selection, use `tls-aws-lc` on desktop hosts and `tls-ring` on HarmonyOS/OpenHarmony targets.
 

@@ -47,81 +47,110 @@ pub mod function {
     pub type JSClassRef<T> = rong_core::function::JSClassRef<T, ()>;
 }
 
+/// The engine-typed API for one engine; `rong::quickjs::JSContext` and so on.
+#[cfg(any(feature = "quickjs", feature = "jscore", feature = "arkjs"))]
+macro_rules! engine_api {
+    ($engine:ty) => {
+        pub type RongJS = $engine;
+        pub type JSEngineValue = <RongJS as $crate::JSEngine>::Value;
+        pub type JSEngineContext = <RongJS as $crate::JSEngine>::Context;
+        pub type JSContext = $crate::CoreJSContext<JSEngineContext>;
+        pub type JSRuntime = $crate::CoreJSRuntime<<RongJS as $crate::JSEngine>::Runtime>;
+        pub type JSValue = $crate::CoreJSValue<JSEngineValue>;
+        pub type JSObject = $crate::CoreJSObject<JSEngineValue>;
+        pub type JSProxy = $crate::CoreJSProxy<JSEngineValue>;
+        pub type JSSymbol = $crate::CoreJSSymbol<JSEngineValue>;
+        pub type JSFunc = $crate::CoreJSFunc<JSEngineValue>;
+        pub type JSDate = $crate::CoreJSDate<JSEngineValue>;
+        pub type Class = $crate::CoreClass<JSEngineValue>;
+        pub type Promise = $crate::CorePromise<JSEngineValue>;
+        pub type JSException = $crate::CoreJSException<JSEngineValue>;
+        pub type JSArray = $crate::CoreJSArray<JSEngineValue>;
+        pub type JSArrayBuffer = $crate::CoreJSArrayBuffer<JSEngineValue>;
+        pub type JSBytes = $crate::CoreJSBytes<JSEngineValue>;
+        pub type AnyJSTypedArray = $crate::CoreAnyJSTypedArray<JSEngineValue>;
+        pub type JSTypedArray<T = u8> = $crate::CoreJSTypedArray<JSEngineValue, T>;
+        pub type PropertyDescriptor = $crate::CorePropertyDescriptor<JSEngineValue>;
+        pub type ThisMut<T> = rong_core::function::ThisMut<T, JSEngineValue>;
+        pub type JSClassRef<T> = rong_core::function::JSClassRef<T, JSEngineValue>;
+        pub type Rong = $crate::Rong<RongJS>;
+        pub type PinnedRong<K, S> = $crate::PinnedRong<RongJS, K, S>;
+    };
+}
+
+/// QuickJS, usable beside another engine in the same binary.
+#[cfg(feature = "quickjs")]
+pub mod quickjs {
+    engine_api!(rong_quickjs::QuickJS);
+}
+
+/// JavaScriptCore, usable beside another engine in the same binary.
+#[cfg(feature = "jscore")]
+pub mod jscore {
+    engine_api!(rong_jscore::JavaScriptCore);
+}
+
+/// ArkJS, usable beside another engine in the same binary.
+#[cfg(feature = "arkjs")]
+pub mod arkjs {
+    engine_api!(rong_arkjs::HarmonyArkJS);
+}
+
+// The root aliases, `#[js_class]` and the module crates use one primary engine.
+// Without a `primary-*` feature a platform engine outranks QuickJS, so a crate
+// that adds QuickJS for its own isolates cannot, through feature unification,
+// move the app's primary engine.
 #[cfg(any(
-    all(feature = "quickjs", feature = "jscore"),
-    all(feature = "quickjs", feature = "arkjs"),
-    all(feature = "jscore", feature = "arkjs"),
+    all(feature = "primary-quickjs", feature = "primary-jscore"),
+    all(feature = "primary-quickjs", feature = "primary-arkjs"),
+    all(feature = "primary-jscore", feature = "primary-arkjs"),
 ))]
 compile_error!(
-    "`rong` engine features are mutually exclusive: enable exactly one of `quickjs`, `jscore`, or `arkjs`."
+    "`rong` primary engine features are mutually exclusive: enable at most one of `primary-quickjs`, `primary-jscore`, or `primary-arkjs`."
 );
+#[cfg(any(
+    all(feature = "primary-quickjs", not(feature = "quickjs")),
+    all(feature = "primary-jscore", not(feature = "jscore")),
+    all(feature = "primary-arkjs", not(feature = "arkjs")),
+))]
+compile_error!("a `rong` `primary-*` feature needs its engine feature enabled too.");
 
-#[cfg(feature = "quickjs")]
-mod engine {
-    use rong_quickjs::QuickJS;
-    pub type RongJS = QuickJS;
+#[cfg(all(feature = "primary-arkjs", feature = "arkjs"))]
+use arkjs as primary;
+#[cfg(all(feature = "primary-jscore", feature = "jscore"))]
+use jscore as primary;
+#[cfg(all(feature = "primary-quickjs", feature = "quickjs"))]
+use quickjs as primary;
+
+#[cfg(not(any(
+    feature = "primary-quickjs",
+    feature = "primary-jscore",
+    feature = "primary-arkjs"
+)))]
+mod default_primary {
+    #[cfg(all(feature = "arkjs", not(feature = "jscore")))]
+    pub use crate::arkjs::*;
+    #[cfg(feature = "jscore")]
+    pub use crate::jscore::*;
+    #[cfg(all(feature = "quickjs", not(feature = "jscore"), not(feature = "arkjs")))]
+    pub use crate::quickjs::*;
 }
-
-#[cfg(all(not(feature = "quickjs"), not(feature = "arkjs"), feature = "jscore"))]
-mod engine {
-    use rong_jscore::JavaScriptCore;
-    pub type RongJS = JavaScriptCore;
-}
-
-#[cfg(all(not(feature = "quickjs"), not(feature = "jscore"), feature = "arkjs"))]
-mod engine {
-    use rong_arkjs::HarmonyArkJS;
-    pub type RongJS = HarmonyArkJS;
-}
-
-// When no engine is selected, the engine types are not available
-// This allows the crate to compile for modules that don't use the engine directly
-#[cfg(not(any(feature = "quickjs", feature = "jscore", feature = "arkjs")))]
-mod engine {}
+#[cfg(all(
+    any(feature = "quickjs", feature = "jscore", feature = "arkjs"),
+    not(any(
+        feature = "primary-quickjs",
+        feature = "primary-jscore",
+        feature = "primary-arkjs"
+    ))
+))]
+use default_primary as primary;
 
 #[cfg(any(feature = "quickjs", feature = "jscore", feature = "arkjs"))]
-pub use engine::*;
-
-#[cfg(any(feature = "quickjs", feature = "jscore", feature = "arkjs"))]
-pub type JSEngineValue = <RongJS as JSEngine>::Value;
-#[cfg(any(feature = "quickjs", feature = "jscore", feature = "arkjs"))]
-pub type JSEngineContext = <RongJS as JSEngine>::Context;
-
-#[cfg(any(feature = "quickjs", feature = "jscore", feature = "arkjs"))]
-pub type JSContext = CoreJSContext<<RongJS as JSEngine>::Context>;
-#[cfg(any(feature = "quickjs", feature = "jscore", feature = "arkjs"))]
-pub type JSRuntime = CoreJSRuntime<<RongJS as JSEngine>::Runtime>;
-
-#[cfg(any(feature = "quickjs", feature = "jscore", feature = "arkjs"))]
-pub type JSValue = CoreJSValue<JSEngineValue>;
-#[cfg(any(feature = "quickjs", feature = "jscore", feature = "arkjs"))]
-pub type JSObject = CoreJSObject<JSEngineValue>;
-#[cfg(any(feature = "quickjs", feature = "jscore", feature = "arkjs"))]
-pub type JSProxy = CoreJSProxy<JSEngineValue>;
-#[cfg(any(feature = "quickjs", feature = "jscore", feature = "arkjs"))]
-pub type JSSymbol = CoreJSSymbol<JSEngineValue>;
-#[cfg(any(feature = "quickjs", feature = "jscore", feature = "arkjs"))]
-pub type JSFunc = CoreJSFunc<JSEngineValue>;
-#[cfg(any(feature = "quickjs", feature = "jscore", feature = "arkjs"))]
-pub type JSDate = CoreJSDate<JSEngineValue>;
-#[cfg(any(feature = "quickjs", feature = "jscore", feature = "arkjs"))]
-pub type Class = CoreClass<JSEngineValue>;
-#[cfg(any(feature = "quickjs", feature = "jscore", feature = "arkjs"))]
-pub type Promise = CorePromise<JSEngineValue>;
-#[cfg(any(feature = "quickjs", feature = "jscore", feature = "arkjs"))]
-pub type JSException = CoreJSException<JSEngineValue>;
-#[cfg(any(feature = "quickjs", feature = "jscore", feature = "arkjs"))]
-pub type JSArray = CoreJSArray<JSEngineValue>;
-#[cfg(any(feature = "quickjs", feature = "jscore", feature = "arkjs"))]
-pub type JSArrayBuffer = CoreJSArrayBuffer<JSEngineValue>;
-#[cfg(any(feature = "quickjs", feature = "jscore", feature = "arkjs"))]
-pub type JSBytes = CoreJSBytes<JSEngineValue>;
-#[cfg(any(feature = "quickjs", feature = "jscore", feature = "arkjs"))]
-pub type AnyJSTypedArray = CoreAnyJSTypedArray<JSEngineValue>;
-#[cfg(any(feature = "quickjs", feature = "jscore", feature = "arkjs"))]
-pub type JSTypedArray<T = u8> = CoreJSTypedArray<JSEngineValue, T>;
-#[cfg(any(feature = "quickjs", feature = "jscore", feature = "arkjs"))]
-pub type PropertyDescriptor = CorePropertyDescriptor<JSEngineValue>;
+pub use primary::{
+    AnyJSTypedArray, Class, JSArray, JSArrayBuffer, JSBytes, JSContext, JSDate, JSEngineContext,
+    JSEngineValue, JSException, JSFunc, JSObject, JSProxy, JSRuntime, JSSymbol, JSTypedArray,
+    JSValue, Promise, PropertyDescriptor, RongJS,
+};
 
 // re-export macro public symbols to rong
 pub use rong_macro::{

@@ -165,11 +165,18 @@ jscore-source = ["jscore", "rong_jscore/source"]
 # extra feature. See rong_jscore's App Store caveat.
 jscore-interrupt = ["jscore", "rong_jscore/interrupt-spi"]
 arkjs = ["dep:rong_arkjs"]
+# Engine features are additive. The root aliases (`rong::JSContext`, ...),
+# `#[js_class]` and module crates bind one primary engine: jscore, else arkjs,
+# else quickjs. Pin it explicitly with at most one `primary-*`.
+primary-quickjs = []
+primary-jscore = []
+primary-arkjs = []
 tls-aws-lc = ["rong_rt/tls-aws-lc"]
 tls-ring = ["rong_rt/tls-ring"]
 
 [dev-dependencies]
 rong_test = { path = "testing/rong_test" }
+rong_quickjs_sys = { workspace = true }
 bytes = { workspace = true }
 
 [profile.test]
