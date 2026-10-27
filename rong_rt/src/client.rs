@@ -142,6 +142,19 @@ static PROXY_CONFIG: OnceLock<RwLock<Option<ProxyConfig>>> = OnceLock::new();
 #[cfg(test)]
 static TEST_GUARD: OnceLock<Mutex<()>> = OnceLock::new();
 
+/// `error` and its causes: hyper's connect error alone does not say whether DNS, the
+/// address guard or TLS refused.
+fn chain(error: &dyn std::error::Error) -> String {
+    let mut message = error.to_string();
+    let mut source = error.source();
+    while let Some(cause) = source {
+        message.push_str(": ");
+        message.push_str(&cause.to_string());
+        source = cause.source();
+    }
+    message
+}
+
 fn fail(mut recorder: Recorder, message: String) -> String {
     recorder.fail(&message);
     message
@@ -434,7 +447,7 @@ async fn process_request(
     };
     let resp = match sent {
         Some(Ok(Ok(r))) => r,
-        Some(Ok(Err(e))) => return Err(fail(recorder, format!("request failed: {}", e))),
+        Some(Ok(Err(e))) => return Err(fail(recorder, format!("request failed: {}", chain(&e)))),
         Some(Err(_)) => return Err(fail(recorder, "request timeout".to_string())),
         None => {
             recorder.abort();
