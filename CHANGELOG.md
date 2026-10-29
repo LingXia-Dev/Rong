@@ -6,6 +6,17 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 
 ## [Unreleased]
 
+### Fixed
+
+- `rong_core`: `Promise::from_future` boxes the host future before it holds
+  it. A large async host future was stored inline in its task, so polling it
+  ran far below where the engine was created, and JS calls it made back into
+  the engine (`JSON.stringify` on a payload) hit the engine's stack limit.
+  On HarmonyOS the JSVM limit is fixed about 984 KiB below where the VM was
+  created, whatever stack the thread has, and a 119 KB `lx.cloud.invoke`
+  future failed every object payload with `RangeError: Maximum call stack
+  size exceeded`.
+
 ## [0.6.11] - 2026-10-24
 
 Crate releases: `rong_core` 0.6.4, `rong_quickjs` 0.6.2, `rong_worker` 0.6.1,

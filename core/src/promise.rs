@@ -116,6 +116,11 @@ where
         R: IntoJSValue<V> + 'static,
         R: PromiseResolver<V>,
     {
+        // Box the future before anything else holds it. Held inline, a large
+        // host future is copied into the task below and again wherever it is
+        // moved, and engines that check the native stack (JSVM's V8 limit is
+        // fixed when the VM is created) reject the JS calls it makes.
+        let mut future = Box::pin(future);
         let (promise, resolve, reject) = ctx.promise()?;
         // A host promise belongs to the task scope that was current when it was
         // created. Cancelling that scope abandons it: the future is dropped, so
@@ -131,7 +136,6 @@ where
         let task = ctx.spawn_task_with_handle(async move {
             let result = match scope {
                 Some(scope) => {
-                    let mut future = std::pin::pin!(future);
                     let scoped = ScopedFuture {
                         scope: &scope,
                         future: future.as_mut(),
