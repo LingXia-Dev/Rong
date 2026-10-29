@@ -176,7 +176,6 @@ tls-ring = ["rong_rt/tls-ring"]
 
 [dev-dependencies]
 rong_test = { path = "testing/rong_test" }
-rong_quickjs_sys = { workspace = true }
 bytes = { workspace = true }
 
 [profile.test]

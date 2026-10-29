@@ -79,11 +79,28 @@ fn engine_is_preemptive() -> bool {
     runtime.interrupt_handle().mode().is_preemptive()
 }
 
+// `RongJS` is the primary engine, which with several engine features enabled is
+// not simply whichever feature is on; these cfgs follow `src/lib.rs`.
 #[cfg(any(
-    feature = "quickjs",
-    feature = "jscore-interrupt",
-    feature = "jscore-source",
-    all(feature = "jscore", not(any(target_os = "macos", target_os = "ios")))
+    // Primary is QuickJS.
+    feature = "primary-quickjs",
+    all(feature = "quickjs", not(feature = "jscore"), not(feature = "arkjs")),
+    // Primary is JavaScriptCore with native preemption.
+    all(
+        any(
+            feature = "primary-jscore",
+            all(
+                feature = "jscore",
+                not(feature = "primary-quickjs"),
+                not(feature = "primary-arkjs")
+            )
+        ),
+        any(
+            feature = "jscore-interrupt",
+            feature = "jscore-source",
+            not(any(target_os = "macos", target_os = "ios"))
+        )
+    )
 ))]
 #[test]
 fn configured_engine_reports_native_preemption() {
@@ -483,7 +500,11 @@ fn pinned_timeout_is_typed_and_recoverable() {
     });
 }
 
-#[cfg(feature = "quickjs")]
+// Primary is QuickJS.
+#[cfg(any(
+    feature = "primary-quickjs",
+    all(feature = "quickjs", not(feature = "jscore"), not(feature = "arkjs"))
+))]
 #[test]
 fn interrupted_runtime_drop_preempts_pending_jobs() {
     let (done_tx, done_rx) = mpsc::channel();

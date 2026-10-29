@@ -16,9 +16,11 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
   `jscore`, else `arkjs`, else `quickjs`. New mutually exclusive
   `primary-quickjs`, `primary-jscore` and `primary-arkjs` features pin it.
   Single-engine builds are unchanged.
-- Known gap: `tests/interrupt.rs` reads `cfg(feature = "quickjs")` as "the
-  engine under test", so running the single-engine suite with QuickJS and
-  JavaScriptCore both enabled (JSC primary) fails two interrupt tests.
+- A secondary engine is bare: `#[js_class]`, the `FromJSValue`/`IntoJSObject`
+  derives and the module crates (console, timers, http, worker, ...) are
+  implemented for the primary engine only. Drive a secondary engine through
+  its own module, e.g. `rong::quickjs::JSContext`.
+- `rong_quickjs` exports its raw bindings as `rong_quickjs::sys`.
 
 ### Fixed
 

@@ -111,7 +111,7 @@ fn quickjs_hard_interrupt_leaves_jscore_alone() {
 /// time on QuickJS, then cut off by interruption; JSC's own jobs still settle.
 #[test]
 fn quickjs_bounded_jobs_beside_jscore() {
-    use rong_quickjs_sys as qjs;
+    use rong_quickjs::sys as qjs;
 
     let runtime = quickjs::RongJS::runtime();
     let ctx = runtime.context();
