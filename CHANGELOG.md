@@ -6,6 +6,16 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 
 ## [Unreleased]
 
+## [0.6.12] - 2026-10-29
+
+Crate releases: `rong_core` 0.6.5, `rong_rt` 0.6.4, `rong_quickjs` 0.6.3 and
+`rong` 0.6.4. Async host functions no longer overflow the engine's stack
+limit on HarmonyOS, engine features become additive so one binary can run
+QuickJS beside its platform engine, and a failed HTTP request names its cause.
+`rong` 0.6.4 requires `rong_core` 0.6.5, `rong_rt` 0.6.4 and `rong_quickjs`
+0.6.3; other crates pick up the fixes through their existing `^0.6`
+requirements.
+
 ### Engines
 
 - `rong` engine features are additive: `quickjs`, `jscore` and `arkjs` can be
@@ -32,6 +42,9 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
   created, whatever stack the thread has, and a 119 KB `lx.cloud.invoke`
   future failed every object payload with `RangeError: Maximum call stack
   size exceeded`.
+- `rong_rt`: a failed request reports the error's cause chain, so a refused
+  connection says whether DNS, the address guard, the socket or TLS refused
+  it, e.g. `request failed: client error (Connect): Connection reset by peer`.
 
 ## [0.6.11] - 2026-10-24
 
