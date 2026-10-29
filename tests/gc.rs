@@ -5,10 +5,22 @@
 //! which the workers service only on Apple's system framework. ArkJS has not
 //! been verified on a device yet, and source/JSCOnly builds keep collecting
 //! only under allocation, so neither runs these tests.
+//!
+//! `RongJS` is the primary engine; these cfgs follow `src/lib.rs`.
 #![cfg(any(
-    feature = "quickjs",
+    // Primary is QuickJS.
+    feature = "primary-quickjs",
+    all(feature = "quickjs", not(feature = "jscore"), not(feature = "arkjs")),
+    // Primary is Apple's system JavaScriptCore.
     all(
-        feature = "jscore",
+        any(
+            feature = "primary-jscore",
+            all(
+                feature = "jscore",
+                not(feature = "primary-quickjs"),
+                not(feature = "primary-arkjs")
+            )
+        ),
         target_vendor = "apple",
         not(feature = "jscore-source")
     )
@@ -34,7 +46,14 @@ const TASK_TIMEOUT: Duration = Duration::from_secs(30);
 /// QuickJS collects cycles only under allocation or on `run_gc`, so the tests
 /// ask for it. JavaScriptCore's `run_gc` does nothing, and there the tests
 /// leave the worker idle: its own timers are what is under test.
-const COLLECT_EXPLICITLY: bool = cfg!(feature = "quickjs");
+const COLLECT_EXPLICITLY: bool = cfg!(any(
+    feature = "primary-quickjs",
+    all(
+        feature = "quickjs",
+        not(feature = "jscore"),
+        not(feature = "arkjs")
+    )
+));
 
 /// Drop counts, one per test, since the tests run in parallel.
 static DROPS: [AtomicUsize; 2] = [AtomicUsize::new(0), AtomicUsize::new(0)];

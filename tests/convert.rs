@@ -150,7 +150,15 @@ fn test_option_conversion_from_js() {
     });
 }
 
-#[cfg(feature = "jscore")]
+// Primary is JavaScriptCore; `run` drives the primary engine.
+#[cfg(any(
+    feature = "primary-jscore",
+    all(
+        feature = "jscore",
+        not(feature = "primary-quickjs"),
+        not(feature = "primary-arkjs")
+    )
+))]
 #[test]
 fn test_jscore_i32_u32_conversion_semantics() {
     run(|ctx| {
