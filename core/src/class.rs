@@ -1,4 +1,5 @@
 use crate::function::{Constructor, FromParams, IntoJSCallable, ParamsAccessor, RustFunc};
+use crate::runtime::NativeCallFrame;
 use crate::{
     FromJSValue, HostError, JSArrayOps, JSContext, JSContextImpl, JSErrorFactory,
     JSExceptionThrower, JSFunc, JSObject, JSObjectOps, JSResult, JSTypeOf, JSValue, JSValueImpl,
@@ -67,6 +68,7 @@ pub trait JSClassExt<V: JSValueImpl>: JSClass<V> {
         V::Context: JSErrorFactory + JSExceptionThrower,
         V: JSObjectOps + JSArrayOps + JSTypeOf,
     {
+        let _frame = NativeCallFrame::enter();
         let ctx = &JSContext::from_borrowed_raw_ptr(ctx.as_raw());
         let mut accessor = ParamsAccessor::new(ctx, this.clone(), args);
 
@@ -148,6 +150,7 @@ pub trait JSClassExt<V: JSValueImpl>: JSClass<V> {
         V: JSObjectOps + JSArrayOps + 'static,
         V::Context: JSErrorFactory + JSExceptionThrower,
     {
+        let _frame = NativeCallFrame::enter();
         let ctx = &JSContext::from_borrowed_raw_ptr(ctx.as_raw());
         let mut accessor = ParamsAccessor::new(ctx, this, args);
 

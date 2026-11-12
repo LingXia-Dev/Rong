@@ -6,7 +6,7 @@ use crate::{
     JSResult, JSTypeOf, JSValueConversion, JSValueImpl,
 };
 use std::any::TypeId;
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -15,6 +15,37 @@ use std::time::Duration;
 
 const RONG_VERSION: &str = env!("CARGO_PKG_VERSION");
 const RONG_REVISION: Option<&str> = option_env!("RONG_GIT_REVISION");
+
+thread_local! {
+    static NATIVE_CALL_DEPTH: Cell<usize> = const { Cell::new(0) };
+}
+
+/// Held while a Rust function runs on behalf of JavaScript, so JavaScript is
+/// on this thread's stack until it drops.
+pub(crate) struct NativeCallFrame(());
+
+impl NativeCallFrame {
+    pub(crate) fn enter() -> Self {
+        NATIVE_CALL_DEPTH.with(|depth| depth.set(depth.get() + 1));
+        Self(())
+    }
+}
+
+impl Drop for NativeCallFrame {
+    fn drop(&mut self) {
+        NATIVE_CALL_DEPTH.with(|depth| depth.set(depth.get() - 1));
+    }
+}
+
+/// Runs queued promise jobs once the host's call into a JavaScript function
+/// has returned and no JavaScript is left on the stack, like a browser's
+/// microtask checkpoint after a callback. Calls made from inside a native
+/// function leave the jobs to the outermost one.
+pub(crate) fn microtask_checkpoint<C: JSContextImpl>(ctx: &JSContext<C>) {
+    if NATIVE_CALL_DEPTH.with(Cell::get) == 0 {
+        ctx.runtime().inner.run_pending_jobs();
+    }
+}
 
 pub trait JSRuntimeImpl {
     /// The raw runtime handle type associated with this runtime.
