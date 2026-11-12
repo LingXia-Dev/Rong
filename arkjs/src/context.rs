@@ -291,9 +291,6 @@ impl JSContextImpl for ArkJSContext {
                 &mut result,
             );
 
-            // Drain microtasks after function calls
-            let _ = arkjs::OH_JSVM_PerformMicrotaskCheckpoint(self.vm);
-
             if status != arkjs::JSVM_Status_JSVM_OK {
                 let mut exception: arkjs::JSVM_Value = ptr::null_mut();
                 arkjs::OH_JSVM_GetAndClearLastException(self.raw, &mut exception);
