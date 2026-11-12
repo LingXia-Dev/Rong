@@ -596,10 +596,11 @@ impl<C: JSContextImpl> JSContext<C> {
         } else {
             self.rc.inner.eval(source)
         };
-        // Native engines surface their own termination sentinel. Normalize it
-        // while the request is still active so callers can match E_INTERRUPTED
-        // without knowing which engine ran the code.
-        self.check_interrupt()?;
+        // Native engines surface their own termination sentinel; report it as
+        // E_INTERRUPTED without knowing which engine ran the code. Only an abort
+        // the engine made counts: a request arriving as a script throws or
+        // returns must not replace its own result.
+        self.check_engine_interrupt()?;
         result.try_convert::<T>()
     }
 
@@ -896,7 +897,7 @@ impl<C: JSContextImpl> JSContext<C> {
             .inner
             .compile_to_bytecode(Source::from_bytes(code.as_ref()))
             .map(Source::from_bytecode);
-        self.check_interrupt()?;
+        self.check_engine_interrupt()?;
         result
     }
 
@@ -924,7 +925,7 @@ impl<C: JSContextImpl> JSContext<C> {
             self.rc.inner.eval(source)
         };
 
-        self.check_interrupt()?;
+        self.check_engine_interrupt()?;
 
         let output = if result.is_promise() {
             let promise = Promise::from_js_value(self, JSValue::from_raw(self, result))?;
@@ -933,14 +934,29 @@ impl<C: JSContextImpl> JSContext<C> {
             result.try_convert::<T>()
         };
 
-        self.check_interrupt()?;
+        self.check_engine_interrupt()?;
         output
     }
 
     /// Cooperative interruption layer: reject newly submitted evaluations
     /// while the runtime's interrupt flag is set, on every engine.
     fn check_interrupt(&self) -> JSResult<()> {
+        // A stale abort from code run outside an evaluation must not be blamed
+        // on the next one.
+        self.rc.runtime.interrupt.reset_tripped();
         if self.rc.runtime.interrupt.is_interrupted() {
+            return Err(crate::HostError::new(
+                crate::error::E_INTERRUPTED,
+                "JavaScript execution was interrupted",
+            )
+            .into());
+        }
+        Ok(())
+    }
+
+    /// E_INTERRUPTED when the engine aborted the JavaScript it just ran.
+    fn check_engine_interrupt(&self) -> JSResult<()> {
+        if self.rc.runtime.interrupt.take_tripped() {
             return Err(crate::HostError::new(
                 crate::error::E_INTERRUPTED,
                 "JavaScript execution was interrupted",

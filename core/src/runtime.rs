@@ -11,8 +11,6 @@ use std::any::TypeId;
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::Rc;
-use std::sync::Arc;
-use std::sync::atomic::AtomicBool;
 use std::time::Duration;
 
 const RONG_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -119,10 +117,11 @@ pub trait JSRuntimeImpl {
     ///
     /// Engines that can preempt running JavaScript (abort a non-yielding loop
     /// with an uncatchable error while the flag is set) install a native hook
-    /// polling the flag and return `true`. The default keeps only the
+    /// asking [`InterruptSignal::should_abort`](crate::InterruptSignal::should_abort)
+    /// and return `true`. The default keeps only the
     /// cooperative layer (new evaluations are rejected while interrupted) and
     /// returns `false`.
-    fn install_interrupt(&self, _flag: Arc<AtomicBool>) -> bool {
+    fn install_interrupt(&self, _signal: crate::InterruptSignal) -> bool {
         false
     }
 }
@@ -288,7 +287,7 @@ pub trait JSEngine: Sized {
     /// (e.g. a worker pool creates the runtime lazily on its own thread).
     fn runtime_with_interrupt(handle: InterruptHandle) -> JSRuntime<Self::Runtime> {
         let runtime = Rc::new(Self::Runtime::new());
-        let preemption = runtime.install_interrupt(handle.flag().clone());
+        let preemption = runtime.install_interrupt(handle.signal());
         handle.bind_engine(preemption);
         JSRuntime {
             inner: runtime,

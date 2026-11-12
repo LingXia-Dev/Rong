@@ -527,3 +527,51 @@ fn interrupted_runtime_drop_preempts_pending_jobs() {
         .expect("interrupted runtime teardown must not hang in a pending job");
     join.join().expect("runtime teardown thread must not panic");
 }
+
+/// Installs `__arm()`, which requests an interruption from inside the script.
+fn install_arm(ctx: &JSContext, interrupt: InterruptHandle) -> JSResult<()> {
+    ctx.global().set(
+        "__arm",
+        JSFunc::new(ctx, move || {
+            interrupt.interrupt();
+        })?,
+    )?;
+    Ok(())
+}
+
+#[test]
+fn an_error_thrown_as_a_request_arrives_keeps_its_own_message() {
+    let runtime = RongJS::runtime();
+    let ctx = runtime.context();
+    install_arm(&ctx, runtime.interrupt_handle()).unwrap();
+
+    let error = ctx
+        .eval::<JSValue>(Source::from_bytes("__arm(); throw new Error('boom')"))
+        .expect_err("the script throws");
+    assert!(
+        !error.is_interrupted(),
+        "the script's own error was replaced: {error:?}"
+    );
+    assert!(
+        format!("{error:?}").contains("boom"),
+        "unexpected error: {error:?}"
+    );
+
+    // The request still holds for the next evaluation.
+    let next = ctx
+        .eval::<JSValue>(Source::from_bytes("1"))
+        .expect_err("eval while interrupted must fail");
+    assert!(next.is_interrupted(), "unexpected error: {next:?}");
+}
+
+#[test]
+fn a_value_returned_as_a_request_arrives_is_kept() {
+    let runtime = RongJS::runtime();
+    let ctx = runtime.context();
+    install_arm(&ctx, runtime.interrupt_handle()).unwrap();
+
+    let value: i32 = ctx
+        .eval(Source::from_bytes("__arm(); 42"))
+        .expect("a script that completed keeps its value");
+    assert_eq!(value, 42);
+}

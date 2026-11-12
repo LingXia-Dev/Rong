@@ -52,6 +52,8 @@ struct InterruptRequests {
 #[derive(Clone, Debug)]
 pub struct InterruptHandle {
     flag: Arc<AtomicBool>,
+    /// Set by the engine's hook when it aborts JavaScript on a request.
+    tripped: Arc<AtomicBool>,
     support: Arc<AtomicU8>,
     requests: Arc<Mutex<InterruptRequests>>,
 }
@@ -60,6 +62,7 @@ impl Default for InterruptHandle {
     fn default() -> Self {
         Self {
             flag: Arc::new(AtomicBool::new(false)),
+            tripped: Arc::new(AtomicBool::new(false)),
             support: Arc::new(AtomicU8::new(SUPPORT_UNKNOWN)),
             requests: Arc::new(Mutex::new(InterruptRequests::default())),
         }
@@ -131,9 +134,22 @@ impl InterruptHandle {
         self.requests.lock().unwrap_or_else(|err| err.into_inner())
     }
 
-    /// The shared flag an engine's native interrupt hook polls.
-    pub(crate) fn flag(&self) -> &Arc<AtomicBool> {
-        &self.flag
+    /// What an engine's native interrupt hook polls.
+    pub(crate) fn signal(&self) -> InterruptSignal {
+        InterruptSignal {
+            flag: self.flag.clone(),
+            tripped: self.tripped.clone(),
+        }
+    }
+
+    /// Forget an abort recorded before the evaluation about to start.
+    pub(crate) fn reset_tripped(&self) {
+        self.tripped.store(false, Ordering::SeqCst);
+    }
+
+    /// Whether the engine aborted JavaScript on a request since the last reset.
+    pub(crate) fn take_tripped(&self) -> bool {
+        self.tripped.swap(false, Ordering::SeqCst)
     }
 
     /// Record whether the engine installed a preempting hook.
@@ -144,6 +160,29 @@ impl InterruptHandle {
             SUPPORT_COOPERATIVE
         };
         self.support.store(value, Ordering::SeqCst);
+    }
+}
+
+/// The interruption flag as an engine's native hook sees it.
+///
+/// An engine that preempts JavaScript asks [`should_abort`](Self::should_abort)
+/// from its hook; a `true` is recorded, so the evaluation that ends in the
+/// engine's own termination error is reported as an interruption and a
+/// genuine error thrown while a request arrives is not.
+#[derive(Clone, Debug)]
+pub struct InterruptSignal {
+    flag: Arc<AtomicBool>,
+    tripped: Arc<AtomicBool>,
+}
+
+impl InterruptSignal {
+    /// Whether the engine must abort the running JavaScript now.
+    pub fn should_abort(&self) -> bool {
+        let abort = self.flag.load(Ordering::Relaxed);
+        if abort {
+            self.tripped.store(true, Ordering::SeqCst);
+        }
+        abort
     }
 }
 

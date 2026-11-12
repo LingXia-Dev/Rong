@@ -1,11 +1,9 @@
 use crate::{JSCContext, JSCValue, jsc};
+#[cfg(jsc_interrupt)]
+use rong_core::InterruptSignal;
 use rong_core::{JSEngine, JSRuntimeImpl};
 #[cfg(jsc_interrupt)]
 use std::cell::Cell;
-#[cfg(jsc_interrupt)]
-use std::sync::Arc;
-#[cfg(jsc_interrupt)]
-use std::sync::atomic::{AtomicBool, Ordering};
 
 /// How often JSC's watchdog consults the callback while JavaScript runs.
 #[cfg(jsc_interrupt)]
@@ -16,7 +14,7 @@ const WATCHDOG_QUANTUM_SECONDS: f64 = 0.1;
 #[cfg(jsc_interrupt)]
 struct WatchdogState {
     group: *const jsc::OpaqueJSContextGroup,
-    flag: Arc<AtomicBool>,
+    signal: InterruptSignal,
 }
 
 pub struct JSCRuntime {
@@ -41,7 +39,7 @@ unsafe extern "C" fn should_terminate(
     context: *mut std::os::raw::c_void,
 ) -> bool {
     let state = unsafe { &*(context as *const WatchdogState) };
-    if state.flag.load(Ordering::Relaxed) {
+    if state.signal.should_abort() {
         return true;
     }
     unsafe {
@@ -98,13 +96,13 @@ impl JSRuntimeImpl for JSCRuntime {
     /// Source builds always install preemption. System-framework builds remain
     /// cooperative-only unless `interrupt-spi` is explicitly enabled.
     #[cfg(jsc_interrupt)]
-    fn install_interrupt(&self, flag: Arc<AtomicBool>) -> bool {
+    fn install_interrupt(&self, signal: InterruptSignal) -> bool {
         // The state lives until the runtime drops, so the context pointer
         // outlives the installed watchdog. Arming before any script enters
         // the group satisfies the SPI's "set before executing" contract.
         let state = Box::into_raw(Box::new(WatchdogState {
             group: self.raw,
-            flag,
+            signal,
         }));
         self.watchdog_state.set(state);
         unsafe {
