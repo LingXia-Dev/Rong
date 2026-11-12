@@ -237,7 +237,7 @@ where
     V: JSValueImpl,
     <V::Context as crate::JSContextImpl>::Runtime: 'static,
 {
-    let _ = ctx.runtime().run_pending_jobs();
+    crate::runtime::microtask_checkpoint(ctx);
 }
 
 // Implement for RongJSError types

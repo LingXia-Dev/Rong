@@ -639,3 +639,39 @@ fn test_entering_a_dead_scope_leaves_no_scope_current() {
         Ok(())
     })
 }
+
+#[test]
+fn test_host_call_runs_the_microtasks_it_queued() {
+    run(|ctx| {
+        ctx.eval::<()>(Source::from_bytes(
+            "globalThis.done = false;
+             new Promise((r) => { globalThis.resolveIt = r; }).then(() => { globalThis.done = true; });",
+        ))?;
+        let resolve: JSFunc = ctx.global().get("resolveIt")?;
+        resolve.call::<_, ()>(None, ())?;
+        assert!(ctx.global().get::<_, bool>("done")?);
+        Ok(())
+    });
+}
+
+#[test]
+fn test_native_call_leaves_microtasks_to_the_outer_host_call() {
+    run(|ctx| {
+        let call_back = JSFunc::new(ctx, |callback: JSFunc| callback.call::<_, ()>(None, ()))?;
+        ctx.global().set("callBack", call_back)?;
+        let script: JSFunc = ctx.eval(Source::from_bytes(
+            "() => {
+               globalThis.order = [];
+               Promise.resolve().then(() => order.push('microtask'));
+               callBack(() => order.push('callback'));
+               order.push('sync');
+               return order.join();
+             }",
+        ))?;
+        let during: String = script.call(None, ())?;
+        assert_eq!(during, "callback,sync");
+        let after: String = ctx.eval(Source::from_bytes("order.join()"))?;
+        assert_eq!(after, "callback,sync,microtask");
+        Ok(())
+    });
+}

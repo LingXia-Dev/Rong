@@ -53,7 +53,9 @@ impl<V: JSObjectOps> JSFunc<V> {
             Some(obj) => obj.into_value(),
             None => V::create_undefined(ctx.as_ref()),
         };
-        ctx.as_ref().call(self.as_value(), this, argv)
+        let result = ctx.as_ref().call(self.as_value(), this, argv);
+        crate::runtime::microtask_checkpoint(ctx);
+        result
     }
 
     fn call_raw<Args>(&self, this: Option<JSObject<V>>, args: Args) -> V
