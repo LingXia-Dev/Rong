@@ -349,3 +349,38 @@ fn test_error_display() {
         Ok(())
     });
 }
+
+#[test]
+fn a_thrown_value_prints_what_was_thrown() {
+    run(|ctx| {
+        let text = |source: &str| {
+            ctx.eval::<()>(Source::from_bytes(source))
+                .unwrap_err()
+                .to_string()
+        };
+        assert_eq!(
+            text("throw new TypeError('bad input')"),
+            "TypeError: bad input"
+        );
+        assert_eq!(text("throw new Error('')"), "Error");
+        assert_eq!(text("throw 'plain text'"), "plain text");
+        assert_eq!(text("throw 42"), "42");
+        // An object's toString may run script, so Rong does not call it.
+        assert_eq!(
+            text("throw { toString() { globalThis.ran = true; return 'x' } }"),
+            "JavaScript threw a value"
+        );
+        // System JavaScriptCore stringifies an exception leaving a C API call for
+        // the Web Inspector, before Rong receives it.
+        #[cfg(not(any(
+            feature = "primary-jscore",
+            all(
+                feature = "jscore",
+                not(feature = "primary-quickjs"),
+                not(feature = "primary-arkjs")
+            )
+        )))]
+        assert!(ctx.eval::<bool>(Source::from_bytes("globalThis.ran === undefined"))?);
+        Ok(())
+    });
+}
