@@ -1,6 +1,6 @@
 use crate::{
-    FromJSValue, HostError, IntoJSValue, JSContext, JSObject, JSResult, JSTypeOf, JSValue,
-    JSValueImpl, RongJSError,
+    FromJSValue, HostError, IntoJSValue, JSContext, JSObject, JSObjectOps, JSResult, JSTypeOf,
+    JSValue, JSValueImpl, RongJSError,
 };
 use std::ops::Deref;
 
@@ -37,13 +37,19 @@ where
         ctx: &JSContext<V::Context>,
         target: JSObject<V>,
         handler: JSObject<V>,
-    ) -> JSResult<Self> {
+    ) -> JSResult<Self>
+    where
+        V: JSObjectOps,
+    {
         let value = V::new_proxy(ctx.as_ref(), target.into_value(), handler.into_value())
             .map_err(|thrown| RongJSError::from_thrown_value(JSValue::from_raw(ctx, thrown)))?;
         Self::from_js_value(ctx, JSValue::from_raw(ctx, value))
     }
 
-    pub fn target(&self) -> JSResult<JSObject<V>> {
+    pub fn target(&self) -> JSResult<JSObject<V>>
+    where
+        V: JSObjectOps,
+    {
         let ctx = self.context();
         let value = self
             .as_value()

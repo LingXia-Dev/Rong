@@ -38,7 +38,7 @@ pub const E_TYPE: &str = "E_TYPE";
 use crate::context::thrown_store::ThrownValueHandle;
 use crate::{
     FromJSValue, IntoJSValue, JSArray, JSArrayOps, JSContext, JSContextImpl, JSErrorFactory,
-    JSExceptionThrower, JSObject, JSObjectOps, JSValue, JSValueImpl,
+    JSExceptionThrower, JSObject, JSObjectOps, JSTypeOf, JSValue, JSValueImpl,
 };
 use std::collections::{BTreeMap, HashMap};
 use thiserror::Error;
@@ -411,9 +411,44 @@ impl HostError {
 ///
 /// The payload can be any JS value (including primitives). You cannot construct this type directly;
 /// use `RongJSError::from_thrown_value`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct ThrownValue {
     handle: ThrownValueHandle,
+    /// `name: message` of a thrown `Error`, or a thrown primitive, read when it was
+    /// captured: the error's text needs no context to print.
+    summary: Option<String>,
+}
+
+impl ThrownValue {
+    fn describe(&self) -> &str {
+        self.summary
+            .as_deref()
+            .unwrap_or("JavaScript threw a value")
+    }
+
+    /// Reads only an `Error`'s `name` and `message` or a primitive's value; Rong
+    /// does not call an arbitrary object's `toString`, which could run script.
+    fn summarize<V: JSTypeOf + JSObjectOps>(value: &JSValue<V>) -> Option<String> {
+        let ctx: JSContext<V::Context> =
+            JSContext::from_borrowed_raw_ptr(value.as_value().as_raw_context());
+        let raw = value.as_value();
+        if raw.is_error() {
+            let object = value.clone().into_object()?;
+            let message = object.get::<_, String>("message").ok();
+            let name = object.get::<_, String>("name").ok();
+            return match (name, message) {
+                (Some(name), Some(message)) if !message.is_empty() => {
+                    Some(format!("{name}: {message}"))
+                }
+                (_, Some(message)) if !message.is_empty() => Some(message),
+                (name, _) => name,
+            };
+        }
+        if raw.is_string() || raw.is_number() || raw.is_boolean() {
+            return String::from_js_value(&ctx, value.clone()).ok();
+        }
+        None
+    }
 }
 
 #[derive(Error, Debug, Clone, PartialEq, Eq)]
@@ -427,7 +462,7 @@ pub(crate) enum RongJSErrorKind {
     Host(HostError),
 
     /// Thrown/rejected JS payload (can be any JS value, including primitives).
-    #[error("JavaScript threw a value")]
+    #[error("{}", .0.describe())]
     Thrown(ThrownValue),
 }
 
@@ -620,11 +655,13 @@ impl RongJSError {
 
     /// Creates a `Thrown` error from a JS value that originated from JavaScript
     /// (e.g. exception payload / Promise reject reason / abort reason).
-    pub fn from_thrown_value<V: JSValueImpl>(value: JSValue<V>) -> Self {
+    pub fn from_thrown_value<V: JSTypeOf + JSObjectOps>(value: JSValue<V>) -> Self {
         let ctx: JSContext<V::Context> =
             JSContext::from_borrowed_raw_ptr(value.as_value().as_raw_context());
+        let summary = ThrownValue::summarize(&value);
         Self(RongJSErrorKind::Thrown(ThrownValue {
             handle: ctx.capture_thrown(value),
+            summary,
         }))
     }
 
