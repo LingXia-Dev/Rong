@@ -1,10 +1,9 @@
 use crate::{QJSContext, QJSValue, qjs};
-use rong_core::{JSEngine, JSRuntimeImpl};
+use rong_core::{InterruptSignal, JSEngine, JSRuntimeImpl};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::{Rc, Weak};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
 
 thread_local! {
     static RUNTIME_REGISTRY: RefCell<HashMap<usize, Weak<QJSRuntimeInner>>> =
@@ -15,7 +14,7 @@ pub(crate) struct QJSRuntimeInner {
     pub(crate) rt: *mut qjs::JSRuntime,
     /// Keeps the flag the installed interrupt handler polls alive for the
     /// whole runtime lifetime (its address is the handler's opaque pointer).
-    interrupt_flag: RefCell<Option<Arc<AtomicBool>>>,
+    interrupt_flag: RefCell<Option<Arc<InterruptSignal>>>,
 }
 
 /// QuickJS polls this handler inside the interpreter (and regex) loops; a
@@ -25,8 +24,8 @@ unsafe extern "C" fn interrupt_handler(
     _rt: *mut qjs::JSRuntime,
     opaque: *mut std::os::raw::c_void,
 ) -> std::os::raw::c_int {
-    let flag = unsafe { &*(opaque as *const AtomicBool) };
-    flag.load(Ordering::Relaxed) as std::os::raw::c_int
+    let signal = unsafe { &*(opaque as *const InterruptSignal) };
+    signal.should_abort() as std::os::raw::c_int
 }
 
 impl Drop for QJSRuntimeInner {
@@ -137,11 +136,12 @@ impl JSRuntimeImpl for QJSRuntime {
         }
     }
 
-    fn install_interrupt(&self, flag: Arc<AtomicBool>) -> bool {
-        let opaque = Arc::as_ptr(&flag) as *mut std::os::raw::c_void;
+    fn install_interrupt(&self, signal: InterruptSignal) -> bool {
+        let signal = Arc::new(signal);
+        let opaque = Arc::as_ptr(&signal) as *mut std::os::raw::c_void;
         // The Arc lives in the inner runtime until drop, so the opaque
         // pointer outlives the installed handler.
-        *self.inner.interrupt_flag.borrow_mut() = Some(flag);
+        *self.inner.interrupt_flag.borrow_mut() = Some(signal);
         unsafe {
             qjs::JS_SetInterruptHandler(self.inner.rt, Some(interrupt_handler), opaque);
         }

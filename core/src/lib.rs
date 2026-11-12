@@ -36,7 +36,7 @@ pub use class::{Class, ClassSetup, JSClass};
 pub use context::{JSContext, PromiseHandlerRegistration, TaskScope};
 pub use error::{HostError, JSResult, RongJSError, illegal_constructor};
 pub use function::Constructor;
-pub use interrupt::{InterruptGuard, InterruptHandle, InterruptMode};
+pub use interrupt::{InterruptGuard, InterruptHandle, InterruptMode, InterruptSignal};
 pub use iterator::{
     IntoJSAsyncIteratorExt, IntoJSIteratorExt, JSAsyncIterator, JSIterator,
     install_async_iterator_symbol, install_iterator_symbol,
