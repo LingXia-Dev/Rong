@@ -6,6 +6,13 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 
 ## [Unreleased]
 
+### Testing
+
+- The on-device test generator registers a test under its `#[cfg]` gates, so
+  the OHOS device crate builds again.
+- The `worker_stack` tests that call JavaScript deeper than the engine default
+  are not run on HarmonyOS, where the JSVM stack limit is fixed.
+
 ## [0.6.12] - 2026-10-29
 
 Crate releases: `rong_core` 0.6.5, `rong_rt` 0.6.4, `rong_quickjs` 0.6.3 and
