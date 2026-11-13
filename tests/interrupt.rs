@@ -575,3 +575,42 @@ fn a_value_returned_as_a_request_arrives_is_kept() {
         .expect("a script that completed keeps its value");
     assert_eq!(value, 42);
 }
+
+#[test]
+fn an_abort_inside_a_nested_evaluation_interrupts_the_outer_one() {
+    if !engine_is_preemptive() {
+        eprintln!("skipping: engine has no preemption support");
+        return;
+    }
+
+    let runtime = RongJS::runtime();
+    let ctx = runtime.context();
+    let interrupt = runtime.interrupt_handle();
+    install_arm(&ctx, interrupt.clone()).unwrap();
+
+    // A host function evaluates a script the engine aborts, swallows the
+    // error and releases the request.
+    let inner_ctx = ctx.clone();
+    ctx.global()
+        .set(
+            "__nested",
+            JSFunc::new(&ctx, move || {
+                let inner = inner_ctx
+                    .eval::<JSValue>(Source::from_bytes("__arm(); while (true) {}"))
+                    .expect_err("the nested busy loop is aborted");
+                assert!(inner.is_interrupted(), "unexpected error: {inner:?}");
+                interrupt.clear();
+            })
+            .unwrap(),
+        )
+        .unwrap();
+
+    let outer = ctx
+        .eval::<JSValue>(Source::from_bytes("__nested(); 1"))
+        .expect_err("the outer evaluation was aborted too");
+    assert!(outer.is_interrupted(), "unexpected error: {outer:?}");
+
+    // The record does not outlive the evaluation it belongs to.
+    let next: i32 = ctx.eval(Source::from_bytes("1 + 1")).unwrap();
+    assert_eq!(next, 2);
+}

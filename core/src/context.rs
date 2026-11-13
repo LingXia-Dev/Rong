@@ -590,18 +590,21 @@ impl<C: JSContextImpl> JSContext<C> {
         C::Value: JSObjectOps,
         T: FromJSValue<C::Value>,
     {
-        self.check_interrupt()?;
+        let aborts = self.begin_evaluation()?;
         let result = if let SourceKind::ByteCode(code) = source.kind() {
             self.rc.inner.run_bytecode(code)
         } else {
             self.rc.inner.eval(source)
         };
+        // Converting the result can run JavaScript too, so it is covered by
+        // the check below.
+        let output = result.try_convert::<T>();
         // Native engines surface their own termination sentinel; report it as
         // E_INTERRUPTED without knowing which engine ran the code. Only an abort
         // the engine made counts: a request arriving as a script throws or
         // returns must not replace its own result.
-        self.check_engine_interrupt()?;
-        result.try_convert::<T>()
+        Self::check_engine_interrupt(&aborts)?;
+        output
     }
 
     /// Get the global object of the JavaScript context
@@ -891,13 +894,13 @@ impl<C: JSContextImpl> JSContext<C> {
     /// }
     /// ```
     pub fn compile_to_bytecode<T: AsRef<[u8]>>(&self, code: T) -> JSResult<Source> {
-        self.check_interrupt()?;
+        let aborts = self.begin_evaluation()?;
         let result = self
             .rc
             .inner
             .compile_to_bytecode(Source::from_bytes(code.as_ref()))
             .map(Source::from_bytecode);
-        self.check_engine_interrupt()?;
+        Self::check_engine_interrupt(&aborts)?;
         result
     }
 
@@ -918,14 +921,14 @@ impl<C: JSContextImpl> JSContext<C> {
         C::Value: JSTypeOf + JSObjectOps + 'static,
         T: FromJSValue<C::Value> + 'static,
     {
-        self.check_interrupt()?;
+        let aborts = self.begin_evaluation()?;
         let result = if let SourceKind::ByteCode(code) = source.kind() {
             self.rc.inner.run_bytecode(code)
         } else {
             self.rc.inner.eval(source)
         };
 
-        self.check_engine_interrupt()?;
+        Self::check_engine_interrupt(&aborts)?;
 
         let output = if result.is_promise() {
             let promise = Promise::from_js_value(self, JSValue::from_raw(self, result))?;
@@ -934,16 +937,14 @@ impl<C: JSContextImpl> JSContext<C> {
             result.try_convert::<T>()
         };
 
-        self.check_engine_interrupt()?;
+        Self::check_engine_interrupt(&aborts)?;
         output
     }
 
     /// Cooperative interruption layer: reject newly submitted evaluations
-    /// while the runtime's interrupt flag is set, on every engine.
-    fn check_interrupt(&self) -> JSResult<()> {
-        // A stale abort from code run outside an evaluation must not be blamed
-        // on the next one.
-        self.rc.runtime.interrupt.reset_tripped();
+    /// while the runtime's interrupt flag is set, on every engine. Otherwise
+    /// start recording the engine's aborts for this evaluation.
+    fn begin_evaluation(&self) -> JSResult<crate::interrupt::EvaluationAborts<'_>> {
         if self.rc.runtime.interrupt.is_interrupted() {
             return Err(crate::HostError::new(
                 crate::error::E_INTERRUPTED,
@@ -951,12 +952,12 @@ impl<C: JSContextImpl> JSContext<C> {
             )
             .into());
         }
-        Ok(())
+        Ok(self.rc.runtime.interrupt.begin_evaluation())
     }
 
-    /// E_INTERRUPTED when the engine aborted the JavaScript it just ran.
-    fn check_engine_interrupt(&self) -> JSResult<()> {
-        if self.rc.runtime.interrupt.take_tripped() {
+    /// E_INTERRUPTED when the engine aborted JavaScript during the evaluation.
+    fn check_engine_interrupt(aborts: &crate::interrupt::EvaluationAborts<'_>) -> JSResult<()> {
+        if aborts.aborted() {
             return Err(crate::HostError::new(
                 crate::error::E_INTERRUPTED,
                 "JavaScript execution was interrupted",

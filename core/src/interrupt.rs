@@ -142,14 +142,14 @@ impl InterruptHandle {
         }
     }
 
-    /// Forget an abort recorded before the evaluation about to start.
-    pub(crate) fn reset_tripped(&self) {
-        self.tripped.store(false, Ordering::SeqCst);
-    }
-
-    /// Whether the engine aborted JavaScript on a request since the last reset.
-    pub(crate) fn take_tripped(&self) -> bool {
-        self.tripped.swap(false, Ordering::SeqCst)
+    /// Start tracking engine aborts for one evaluation.
+    pub(crate) fn begin_evaluation(&self) -> EvaluationAborts<'_> {
+        EvaluationAborts {
+            tripped: &self.tripped,
+            // An abort recorded earlier belongs to an enclosing evaluation, or
+            // to code run outside any; it is set aside, not blamed on this one.
+            outer: self.tripped.swap(false, Ordering::SeqCst),
+        }
     }
 
     /// Record whether the engine installed a preempting hook.
@@ -183,6 +183,31 @@ impl InterruptSignal {
             self.tripped.store(true, Ordering::SeqCst);
         }
         abort
+    }
+}
+
+/// The engine aborts recorded while one evaluation runs.
+///
+/// Evaluations nest (a host function may evaluate inside an evaluation), so
+/// the record an evaluation found is put back when it ends, together with its
+/// own: the enclosing evaluation was aborted too.
+pub(crate) struct EvaluationAborts<'a> {
+    tripped: &'a AtomicBool,
+    outer: bool,
+}
+
+impl EvaluationAborts<'_> {
+    /// Whether the engine aborted JavaScript since this evaluation began.
+    pub(crate) fn aborted(&self) -> bool {
+        self.tripped.load(Ordering::SeqCst)
+    }
+}
+
+impl Drop for EvaluationAborts<'_> {
+    fn drop(&mut self) {
+        if self.outer {
+            self.tripped.store(true, Ordering::SeqCst);
+        }
     }
 }
 
