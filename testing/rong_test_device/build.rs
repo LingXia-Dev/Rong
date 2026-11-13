@@ -70,7 +70,7 @@ fn main() {
             continue;
         }
 
-        let (transformed, test_fns) = transform_source(
+        let (transformed, test_fns, module_cfgs) = transform_source(
             &source,
             &test_attr,
             &tokio_attr,
@@ -90,6 +90,7 @@ fn main() {
 
         modules.push(ModuleInfo {
             name: stem,
+            cfgs: module_cfgs,
             tests: test_fns,
         });
     }
@@ -105,12 +106,43 @@ fn main() {
 
 struct ModuleInfo {
     name: String,
+    /// The file's `#![cfg(...)]` gates, as outer attributes.
+    cfgs: Vec<String>,
     tests: Vec<TestFnInfo>,
 }
 
 struct TestFnInfo {
     name: String,
     is_async: bool,
+    /// The `#[cfg(...)]` gates on the function; its registry entry repeats
+    /// them, so a test compiled out is not registered either.
+    cfgs: Vec<String>,
+}
+
+/// Reads the attribute starting at `lines[start]` through its closing bracket,
+/// which may be several lines down. Returns it on one line and the index of
+/// the line after it.
+fn read_attribute(lines: &[&str], start: usize) -> (String, usize) {
+    let mut depth: i32 = 0;
+    let mut attribute = String::new();
+    let mut i = start;
+    while i < lines.len() {
+        let code = lines[i].split("//").next().unwrap_or("").trim();
+        for c in code.chars() {
+            match c {
+                '(' | '[' => depth += 1,
+                ')' | ']' => depth -= 1,
+                _ => {}
+            }
+        }
+        attribute.push_str(code);
+        attribute.push(' ');
+        i += 1;
+        if depth <= 0 {
+            break;
+        }
+    }
+    (attribute.trim().to_string(), i)
 }
 
 fn transform_source(
@@ -121,7 +153,7 @@ fn transform_source(
     module_name: &str,
     skip_fns: &std::collections::HashSet<(&str, &str)>,
     tests_dir: &std::path::Path,
-) -> (String, Vec<TestFnInfo>) {
+) -> (String, Vec<TestFnInfo>, Vec<String>) {
     let mut output = String::with_capacity(source.len());
     let mut test_fns = Vec::new();
     let fn_name_re = Regex::new(r"fn\s+(\w+)").unwrap();
@@ -130,7 +162,8 @@ fn transform_source(
     let mut i = 0;
     let mut prev_was_test = false;
     let mut prev_was_tokio_test = false;
-    let mut prev_was_cfg_gated = false;
+    let mut module_cfgs: Vec<String> = Vec::new();
+    let mut pending_cfgs: Vec<String> = Vec::new();
     let mut cfg_test_brace_depth: i32 = 0;
 
     while i < lines.len() {
@@ -188,14 +221,28 @@ fn transform_source(
             continue;
         }
 
-        // Track #[cfg(feature = "...")] — keep the attribute but mark so the
-        // following test function is NOT registered (it will be cfg'd out at
-        // compile time).
-        if trimmed.starts_with("#[cfg(feature") {
-            prev_was_cfg_gated = true;
-            output.push_str(line);
-            output.push('\n');
-            i += 1;
+        // A file-level `#![cfg(...)]` gates every test in the module.
+        if trimmed.starts_with("#![cfg(") {
+            let (attribute, next) = read_attribute(&lines, i);
+            module_cfgs.push(attribute.replacen("#![", "#[", 1));
+            for line in &lines[i..next] {
+                output.push_str(line);
+                output.push('\n');
+            }
+            i = next;
+            continue;
+        }
+
+        // Keep a `#[cfg(...)]` and remember it: if it gates a test function,
+        // the function's registry entry carries the same gate.
+        if trimmed.starts_with("#[cfg(") {
+            let (attribute, next) = read_attribute(&lines, i);
+            pending_cfgs.push(attribute);
+            for line in &lines[i..next] {
+                output.push_str(line);
+                output.push('\n');
+            }
+            i = next;
             continue;
         }
 
@@ -216,10 +263,9 @@ fn transform_source(
         // If previous line was a test attribute, this should be the fn declaration
         if (prev_was_test || prev_was_tokio_test) && fn_decl.is_match(line) {
             let is_async = prev_was_tokio_test || line.contains("async fn ");
-            let skip_registration = prev_was_cfg_gated;
+            let cfgs = std::mem::take(&mut pending_cfgs);
             prev_was_test = false;
             prev_was_tokio_test = false;
-            prev_was_cfg_gated = false;
 
             // Extract function name
             if let Some(cap) = fn_name_re.captures(line) {
@@ -234,7 +280,7 @@ fn transform_source(
                 output.push_str(&publine);
                 output.push('\n');
 
-                // Don't register cfg-gated or skip-listed functions
+                // Don't register skip-listed functions
                 let is_skipped = skip_fns.contains(&(module_name, fn_name.as_str()));
                 if is_skipped {
                     eprintln!(
@@ -242,10 +288,11 @@ fn transform_source(
                         module_name, fn_name
                     );
                 }
-                if !skip_registration && !is_skipped {
+                if !is_skipped {
                     test_fns.push(TestFnInfo {
                         name: fn_name,
                         is_async,
+                        cfgs,
                     });
                 }
             } else {
@@ -259,13 +306,18 @@ fn transform_source(
         // Reset if we got an attribute but the next line wasn't a fn
         prev_was_test = false;
         prev_was_tokio_test = false;
+        // A gate applies to the item right under it; other attributes, doc
+        // comments and blank lines may sit in between.
+        if !(trimmed.is_empty() || trimmed.starts_with("#[") || trimmed.starts_with("//")) {
+            pending_cfgs.clear();
+        }
 
         output.push_str(&rewrite_fixture_include(line, tests_dir));
         output.push('\n');
         i += 1;
     }
 
-    (output, test_fns)
+    (output, test_fns, module_cfgs)
 }
 
 fn rewrite_fixture_include(line: &str, tests_dir: &std::path::Path) -> String {
@@ -364,6 +416,7 @@ fn is_rust_keyword(name: &str) -> bool {
 fn generate_registry(modules: &[ModuleInfo]) -> String {
     let mut out = String::new();
     out.push_str("use rong_test_harness::{TestEntry, TestFn};\n\n");
+    out.push_str("#[allow(unexpected_cfgs)]\n");
     out.push_str("pub fn all_tests() -> Vec<TestEntry> {\n");
     out.push_str("    vec![\n");
 
@@ -374,6 +427,9 @@ fn generate_registry(modules: &[ModuleInfo]) -> String {
             m.name.clone()
         };
         for t in &m.tests {
+            for cfg in m.cfgs.iter().chain(&t.cfgs) {
+                out.push_str(&format!("        {cfg}\n"));
+            }
             let full_name = format!("{}.{}", m.name, t.name);
             if t.is_async {
                 out.push_str(&format!(
