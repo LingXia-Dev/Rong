@@ -221,6 +221,14 @@ fn transform_source(
             continue;
         }
 
+        // A file-level lint attribute is dropped: the generated module is
+        // declared with its own, and repeating one is itself a lint.
+        if trimmed.starts_with("#![allow(") || trimmed.starts_with("#![cfg_attr(") {
+            let (_, next) = read_attribute(&lines, i);
+            i = next;
+            continue;
+        }
+
         // A file-level `#![cfg(...)]` gates every test in the module.
         if trimmed.starts_with("#![cfg(") {
             let (attribute, next) = read_attribute(&lines, i);

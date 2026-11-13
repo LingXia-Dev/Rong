@@ -1,3 +1,6 @@
+// The deep-call tests are not built for OHOS, which leaves their helpers unused there.
+#![cfg_attr(target_env = "ohos", allow(dead_code, unused_imports))]
+
 use rong::{JSEngine, JSObject, JSResult, JSRuntime, Rong, RongJS, Source};
 use std::hint::black_box;
 use std::time::Duration;
