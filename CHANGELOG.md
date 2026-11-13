@@ -30,10 +30,12 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 - `rong_core`: an abort whose request was cleared before the evaluation
   returned is reported as `E_INTERRUPTED` instead of the engine's raw
   termination error.
-- `rong_core`: `eval_async` returns the outcome of the promise it awaits.
-  JavaScript the engine aborts while it waits (a timer, another evaluation)
-  no longer turns its result into `E_INTERRUPTED`. A promise whose own
-  continuation was aborted never settles, as before.
+- `rong_core`: while `eval_async` waits on its promise, an interruption
+  request ends it with `E_INTERRUPTED`, on every engine, and a promise that
+  settles first gives its own outcome. It used to wait on: a promise whose
+  continuation the engine aborted never settles, so the evaluation never
+  returned. JavaScript the engine aborts meanwhile does not by itself change
+  the result.
 - `rong_core`: a thrown value prints what was thrown instead of "JavaScript
   threw a value": `TypeError: bad input` for an `Error`, the value for a
   non-empty string, a number or a boolean. Any other thrown value keeps the
