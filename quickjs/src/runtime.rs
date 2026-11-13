@@ -3,7 +3,6 @@ use rong_core::{InterruptSignal, JSEngine, JSRuntimeImpl};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::{Rc, Weak};
-use std::sync::Arc;
 
 thread_local! {
     static RUNTIME_REGISTRY: RefCell<HashMap<usize, Weak<QJSRuntimeInner>>> =
@@ -12,9 +11,9 @@ thread_local! {
 
 pub(crate) struct QJSRuntimeInner {
     pub(crate) rt: *mut qjs::JSRuntime,
-    /// Keeps the flag the installed interrupt handler polls alive for the
+    /// Keeps the signal the installed interrupt handler polls alive for the
     /// whole runtime lifetime (its address is the handler's opaque pointer).
-    interrupt_flag: RefCell<Option<Arc<InterruptSignal>>>,
+    interrupt_signal: RefCell<Option<Box<InterruptSignal>>>,
 }
 
 /// QuickJS polls this handler inside the interpreter (and regex) loops; a
@@ -54,9 +53,9 @@ impl Drop for QJSRuntimeInner {
             qjs::JS_RunGC(self.rt);
             qjs::JS_RunGC(self.rt);
 
-            // The Arc remains alive in `interrupt_flag` through the drain, so
+            // The Box remains alive in `interrupt_signal` through the drain, so
             // its opaque pointer is valid until the handler is uninstalled.
-            if self.interrupt_flag.get_mut().is_some() {
+            if self.interrupt_signal.get_mut().is_some() {
                 qjs::JS_SetInterruptHandler(self.rt, None, std::ptr::null_mut());
             }
             qjs::JS_FreeRuntime(self.rt);
@@ -91,7 +90,7 @@ impl JSRuntimeImpl for QJSRuntime {
         }
         let inner = Rc::new(QJSRuntimeInner {
             rt,
-            interrupt_flag: RefCell::new(None),
+            interrupt_signal: RefCell::new(None),
         });
         let key = rt as usize;
         RUNTIME_REGISTRY.with(|m| {
@@ -137,11 +136,11 @@ impl JSRuntimeImpl for QJSRuntime {
     }
 
     fn install_interrupt(&self, signal: InterruptSignal) -> bool {
-        let signal = Arc::new(signal);
-        let opaque = Arc::as_ptr(&signal) as *mut std::os::raw::c_void;
-        // The Arc lives in the inner runtime until drop, so the opaque
+        let signal = Box::new(signal);
+        let opaque = &*signal as *const InterruptSignal as *mut std::os::raw::c_void;
+        // The Box lives in the inner runtime until drop, so the opaque
         // pointer outlives the installed handler.
-        *self.inner.interrupt_flag.borrow_mut() = Some(signal);
+        *self.inner.interrupt_signal.borrow_mut() = Some(signal);
         unsafe {
             qjs::JS_SetInterruptHandler(self.inner.rt, Some(interrupt_handler), opaque);
         }

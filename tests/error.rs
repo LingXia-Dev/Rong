@@ -350,6 +350,18 @@ fn test_error_display() {
     });
 }
 
+/// JavaScriptCore stringifies an exception leaving a C API call for the Web
+/// Inspector, before Rong receives it: script-visible reads Rong did not make.
+/// True when JavaScriptCore is the primary engine; the cfg follows `src/lib.rs`.
+const ENGINE_STRINGIFIES_EXCEPTIONS: bool = cfg!(any(
+    feature = "primary-jscore",
+    all(
+        feature = "jscore",
+        not(feature = "primary-quickjs"),
+        not(feature = "primary-arkjs")
+    )
+));
+
 #[test]
 fn a_thrown_value_prints_what_was_thrown() {
     run(|ctx| {
@@ -370,17 +382,65 @@ fn a_thrown_value_prints_what_was_thrown() {
             text("throw { toString() { globalThis.ran = true; return 'x' } }"),
             "JavaScript threw a value"
         );
-        // System JavaScriptCore stringifies an exception leaving a C API call for
-        // the Web Inspector, before Rong receives it.
-        #[cfg(not(any(
-            feature = "primary-jscore",
-            all(
-                feature = "jscore",
-                not(feature = "primary-quickjs"),
-                not(feature = "primary-arkjs")
-            )
-        )))]
-        assert!(ctx.eval::<bool>(Source::from_bytes("globalThis.ran === undefined"))?);
+        if !ENGINE_STRINGIFIES_EXCEPTIONS {
+            assert!(ctx.eval::<bool>(Source::from_bytes("globalThis.ran === undefined"))?);
+        }
+        Ok(())
+    });
+}
+
+#[test]
+fn describing_a_thrown_error_converts_nothing_to_a_string() {
+    run(|ctx| {
+        let text = |source: &str| {
+            ctx.eval::<()>(Source::from_bytes(source))
+                .unwrap_err()
+                .to_string()
+        };
+        // Only a `name` / `message` that already is a string is printed.
+        assert_eq!(
+            text(
+                "var e = new Error('x'); \
+                 e.message = { toString() { globalThis.coerced = true; return 'm' } }; throw e"
+            ),
+            "Error"
+        );
+        assert_eq!(
+            text("var e = new Error('x'); e.message = undefined; throw e"),
+            "Error"
+        );
+        assert_eq!(text("var e = new Error('x'); e.name = 7; throw e"), "x");
+        assert_eq!(text("throw ''"), "JavaScript threw a value");
+        if !ENGINE_STRINGIFIES_EXCEPTIONS {
+            assert!(ctx.eval::<bool>(Source::from_bytes("globalThis.coerced === undefined"))?);
+        }
+        Ok(())
+    });
+}
+
+#[test]
+fn a_throwing_message_getter_is_read_once() {
+    run(|ctx| {
+        let error = ctx
+            .eval::<()>(Source::from_bytes(
+                "globalThis.reads = 0; \
+                 function make() { \
+                     var e = new Error('x'); \
+                     Object.defineProperty(e, 'message', { get() { reads++; throw make(); } }); \
+                     return e; \
+                 } \
+                 throw make()",
+            ))
+            .unwrap_err();
+        assert_eq!(error.to_string(), "Error");
+        // Rong reads `message` once; without the guard each failed read would
+        // describe the error it raised, and so on down the stack.
+        let reads = ctx.eval::<i32>(Source::from_bytes("globalThis.reads"))?;
+        if ENGINE_STRINGIFIES_EXCEPTIONS {
+            assert!(reads <= 3, "message was read {reads} times");
+        } else {
+            assert_eq!(reads, 1);
+        }
         Ok(())
     });
 }
