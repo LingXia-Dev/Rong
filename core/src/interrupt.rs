@@ -6,7 +6,7 @@
 //! such as `while (true) {}` with an uncatchable error, and every engine
 //! rejects newly submitted evaluations until the request is cleared.
 
-use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 
 const SUPPORT_UNKNOWN: u8 = 0;
@@ -52,8 +52,8 @@ struct InterruptRequests {
 #[derive(Clone, Debug)]
 pub struct InterruptHandle {
     flag: Arc<AtomicBool>,
-    /// Set by the engine's hook when it aborts JavaScript on a request.
-    tripped: Arc<AtomicBool>,
+    /// Counts the times the engine's hook aborted JavaScript on a request.
+    aborts: Arc<AtomicU64>,
     support: Arc<AtomicU8>,
     requests: Arc<Mutex<InterruptRequests>>,
 }
@@ -62,7 +62,7 @@ impl Default for InterruptHandle {
     fn default() -> Self {
         Self {
             flag: Arc::new(AtomicBool::new(false)),
-            tripped: Arc::new(AtomicBool::new(false)),
+            aborts: Arc::new(AtomicU64::new(0)),
             support: Arc::new(AtomicU8::new(SUPPORT_UNKNOWN)),
             requests: Arc::new(Mutex::new(InterruptRequests::default())),
         }
@@ -138,17 +138,15 @@ impl InterruptHandle {
     pub(crate) fn signal(&self) -> InterruptSignal {
         InterruptSignal {
             flag: self.flag.clone(),
-            tripped: self.tripped.clone(),
+            aborts: self.aborts.clone(),
         }
     }
 
     /// Start tracking engine aborts for one evaluation.
     pub(crate) fn begin_evaluation(&self) -> EvaluationAborts<'_> {
         EvaluationAborts {
-            tripped: &self.tripped,
-            // An abort recorded earlier belongs to an enclosing evaluation, or
-            // to code run outside any; it is set aside, not blamed on this one.
-            outer: self.tripped.swap(false, Ordering::SeqCst),
+            aborts: &self.aborts,
+            before: self.aborts.load(Ordering::SeqCst),
         }
     }
 
@@ -166,13 +164,13 @@ impl InterruptHandle {
 /// The interruption flag as an engine's native hook sees it.
 ///
 /// An engine that preempts JavaScript asks [`should_abort`](Self::should_abort)
-/// from its hook; a `true` is recorded, so the evaluation that ends in the
+/// from its hook; a `true` is counted, so the evaluation that ends in the
 /// engine's own termination error is reported as an interruption and a
 /// genuine error thrown while a request arrives is not.
 #[derive(Clone, Debug)]
 pub struct InterruptSignal {
     flag: Arc<AtomicBool>,
-    tripped: Arc<AtomicBool>,
+    aborts: Arc<AtomicU64>,
 }
 
 impl InterruptSignal {
@@ -180,34 +178,26 @@ impl InterruptSignal {
     pub fn should_abort(&self) -> bool {
         let abort = self.flag.load(Ordering::Relaxed);
         if abort {
-            self.tripped.store(true, Ordering::SeqCst);
+            self.aborts.fetch_add(1, Ordering::SeqCst);
         }
         abort
     }
 }
 
-/// The engine aborts recorded while one evaluation runs.
+/// The engine aborts made while one evaluation runs.
 ///
-/// Evaluations nest (a host function may evaluate inside an evaluation), so
-/// the record an evaluation found is put back when it ends, together with its
-/// own: the enclosing evaluation was aborted too.
+/// Aborts are counted, never reset, so evaluations nest: an abort inside a
+/// nested evaluation is seen by the enclosing one too, and one made before an
+/// evaluation began is not blamed on it.
 pub(crate) struct EvaluationAborts<'a> {
-    tripped: &'a AtomicBool,
-    outer: bool,
+    aborts: &'a AtomicU64,
+    before: u64,
 }
 
 impl EvaluationAborts<'_> {
     /// Whether the engine aborted JavaScript since this evaluation began.
     pub(crate) fn aborted(&self) -> bool {
-        self.tripped.load(Ordering::SeqCst)
-    }
-}
-
-impl Drop for EvaluationAborts<'_> {
-    fn drop(&mut self) {
-        if self.outer {
-            self.tripped.store(true, Ordering::SeqCst);
-        }
+        self.aborts.load(Ordering::SeqCst) != self.before
     }
 }
 

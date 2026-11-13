@@ -38,7 +38,7 @@ pub const E_TYPE: &str = "E_TYPE";
 use crate::context::thrown_store::ThrownValueHandle;
 use crate::{
     FromJSValue, IntoJSValue, JSArray, JSArrayOps, JSContext, JSContextImpl, JSErrorFactory,
-    JSExceptionThrower, JSObject, JSObjectOps, JSTypeOf, JSValue, JSValueImpl,
+    JSExceptionThrower, JSObject, JSObjectOps, JSValue, JSValueImpl,
 };
 use std::collections::{BTreeMap, HashMap};
 use thiserror::Error;
@@ -426,57 +426,12 @@ impl ThrownValue {
             .unwrap_or("JavaScript threw a value")
     }
 
-    /// The text of a thrown `Error` (`name: message`) or primitive.
-    ///
-    /// Nothing is converted to a string: only a `name` / `message` that already
-    /// is one counts, and an arbitrary object is not described at all, so no
-    /// `toString` runs. Reading the two properties is an ordinary get, which
-    /// can still run an accessor or a Proxy trap.
-    fn summarize<V: JSTypeOf + JSObjectOps>(value: &JSValue<V>) -> Option<String> {
-        thread_local! {
-            static SUMMARIZING: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
-        }
-        struct Reset;
-        impl Drop for Reset {
-            fn drop(&mut self) {
-                SUMMARIZING.set(false);
-            }
-        }
-        // A read that throws captures that error in turn; it gets no summary
-        // instead of recursing.
-        if SUMMARIZING.replace(true) {
-            return None;
-        }
-        let _reset = Reset;
-
+    /// The text of a thrown `Error` (`name: message`) or primitive, read
+    /// without running script; see `ThrownReader`.
+    fn summarize<V: JSObjectOps>(value: &JSValue<V>) -> Option<String> {
         let ctx: JSContext<V::Context> =
             JSContext::from_borrowed_raw_ptr(value.as_value().as_raw_context());
-        let string = |value: JSValue<V>| {
-            if !value.as_value().is_string() {
-                return None;
-            }
-            String::from_js_value(&ctx, value)
-                .ok()
-                .filter(|text| !text.is_empty())
-        };
-        let raw = value.as_value();
-        if raw.is_error() {
-            let object = value.clone().into_object()?;
-            let read = |key: &str| object.get::<_, JSValue<V>>(key).ok().and_then(string);
-            let message = read("message");
-            let name = read("name");
-            return match (name, message) {
-                (Some(name), Some(message)) => Some(format!("{name}: {message}")),
-                (name, message) => message.or(name),
-            };
-        }
-        if raw.is_string() {
-            return string(value.clone());
-        }
-        if raw.is_number() || raw.is_boolean() {
-            return String::from_js_value(&ctx, value.clone()).ok();
-        }
-        None
+        ctx.describe_thrown(value.as_value())
     }
 }
 
@@ -684,7 +639,7 @@ impl RongJSError {
 
     /// Creates a `Thrown` error from a JS value that originated from JavaScript
     /// (e.g. exception payload / Promise reject reason / abort reason).
-    pub fn from_thrown_value<V: JSTypeOf + JSObjectOps>(value: JSValue<V>) -> Self {
+    pub fn from_thrown_value<V: JSObjectOps>(value: JSValue<V>) -> Self {
         let ctx: JSContext<V::Context> =
             JSContext::from_borrowed_raw_ptr(value.as_value().as_raw_context());
         let summary = ThrownValue::summarize(&value);
