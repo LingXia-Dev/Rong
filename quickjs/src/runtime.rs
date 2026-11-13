@@ -31,7 +31,8 @@ impl Drop for QJSRuntimeInner {
     fn drop(&mut self) {
         // Remove before freeing to avoid upgrading a dead runtime.
         let key = self.rt as usize;
-        RUNTIME_REGISTRY.with(|m| {
+        // The last value can be dropped by a thread-local destructor after the registry's own.
+        let _ = RUNTIME_REGISTRY.try_with(|m| {
             m.borrow_mut().remove(&key);
         });
 
@@ -155,7 +156,10 @@ pub(crate) fn runtime_guard_from_ctx(ctx: *mut qjs::JSContext) -> Option<Rc<QJSR
     // SAFETY: `ctx` is expected to be a valid QuickJS context pointer.
     let rt = unsafe { qjs::JS_GetRuntime(ctx) };
     let key = rt as usize;
-    RUNTIME_REGISTRY.with(|m| m.borrow().get(&key).and_then(|w| w.upgrade()))
+    RUNTIME_REGISTRY
+        .try_with(|m| m.borrow().get(&key).and_then(|w| w.upgrade()))
+        .ok()
+        .flatten()
 }
 
 pub struct QuickJS;
@@ -200,5 +204,24 @@ mod tests {
                 .unwrap();
         }
         assert_eq!(live_runtimes(), before, "dropped runtimes were never freed");
+    }
+
+    #[test]
+    fn a_value_freed_by_a_thread_local_destructor_frees_its_runtime() {
+        thread_local! {
+            static KEPT: RefCell<Option<rong_core::JSValue<QJSValue>>> = const { RefCell::new(None) };
+        }
+        std::thread::spawn(|| {
+            // Registered before the runtime registry, so it is destroyed after it.
+            KEPT.with(|_| {});
+            let runtime = QuickJS::runtime();
+            let context = runtime.context();
+            let value = context
+                .eval::<rong_core::JSValue<QJSValue>>(Source::from_bytes("({ a: 1 })"))
+                .unwrap();
+            KEPT.with(|kept| *kept.borrow_mut() = Some(value));
+        })
+        .join()
+        .expect("thread exit freeing the last runtime value");
     }
 }
