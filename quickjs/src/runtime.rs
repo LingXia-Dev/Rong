@@ -179,3 +179,26 @@ impl JSEngine for QuickJS {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rong_core::Source;
+
+    fn live_runtimes() -> usize {
+        RUNTIME_REGISTRY.with(|m| m.borrow().len())
+    }
+
+    #[test]
+    fn a_runtime_with_a_context_is_freed_when_dropped() {
+        let before = live_runtimes();
+        for _ in 0..3 {
+            let runtime = QuickJS::runtime();
+            let context = runtime.context();
+            context
+                .eval::<()>(Source::from_bytes("globalThis.kept = { a: [1, 2, 3] }"))
+                .unwrap();
+        }
+        assert_eq!(live_runtimes(), before, "dropped runtimes were never freed");
+    }
+}
