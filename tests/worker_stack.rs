@@ -34,6 +34,9 @@ fn stringify_deep(runtime: &JSRuntime) -> JSResult<String> {
     below(&top as *const u8 as usize, &mut || object.to_json_string())
 }
 
+// The JSVM limit on HarmonyOS is fixed below where the VM was created,
+// whatever stack the thread has.
+#[cfg(not(target_env = "ohos"))]
 #[tokio::test]
 async fn a_shared_worker_calls_js_deeper_than_the_engine_default() -> JSResult<()> {
     let rong = Rong::<RongJS>::builder().shared().workers(1).build()?;
@@ -44,6 +47,9 @@ async fn a_shared_worker_calls_js_deeper_than_the_engine_default() -> JSResult<(
     Ok(())
 }
 
+// The JSVM limit on HarmonyOS is fixed below where the VM was created,
+// whatever stack the thread has.
+#[cfg(not(target_env = "ohos"))]
 #[test]
 fn a_pinned_worker_calls_js_deeper_than_the_engine_default() {
     let rong = Rong::<RongJS>::builder()
@@ -63,6 +69,9 @@ fn a_pinned_worker_calls_js_deeper_than_the_engine_default() {
     assert_eq!(json, r#"{"a":1}"#);
 }
 
+// The JSVM limit on HarmonyOS is fixed below where the VM was created,
+// whatever stack the thread has.
+#[cfg(not(target_env = "ohos"))]
 /// Any thread with a large stack gets the room, not only rong's workers:
 /// the limit comes from the thread the runtime is created on.
 #[test]
