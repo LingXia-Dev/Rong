@@ -596,13 +596,14 @@ impl<C: JSContextImpl> JSContext<C> {
         } else {
             self.rc.inner.eval(source)
         };
-        // Converting the result can run JavaScript too, so it is covered by
-        // the check below.
-        let output = result.try_convert::<T>();
         // Native engines surface their own termination sentinel; report it as
         // E_INTERRUPTED without knowing which engine ran the code. Only an abort
         // the engine made counts: a request arriving as a script throws or
-        // returns must not replace its own result.
+        // returns must not replace its own result. The sentinel is not a value
+        // to convert (JavaScriptCore's is null), so this comes first.
+        Self::check_engine_interrupt(&aborts)?;
+        // Converting the result can run JavaScript too.
+        let output = result.try_convert::<T>();
         Self::check_engine_interrupt(&aborts)?;
         output
     }
