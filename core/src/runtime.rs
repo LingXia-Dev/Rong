@@ -1,3 +1,5 @@
+#![allow(clippy::missing_const_for_thread_local)]
+
 use crate::function::RustFunc;
 use crate::interrupt::InterruptHandle;
 use crate::value::JSBytesData;
@@ -16,6 +18,8 @@ use std::time::Duration;
 const RONG_VERSION: &str = env!("CARGO_PKG_VERSION");
 const RONG_REVISION: Option<&str> = option_env!("RONG_GIT_REVISION");
 
+// The initializer is already const, but cross-target Clippy reports
+// `missing_const_for_thread_local` for the OHOS target.
 thread_local! {
     static NATIVE_CALL_DEPTH: Cell<usize> = const { Cell::new(0) };
 }

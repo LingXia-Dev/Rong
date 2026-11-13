@@ -1,3 +1,7 @@
+// The generated tests keep the `#[cfg(feature = ...)]` gates they have in the
+// root crate, whose engine features this crate does not declare.
+#![allow(unexpected_cfgs)]
+
 #[cfg(target_env = "ohos")]
 pub mod prelude;
 
