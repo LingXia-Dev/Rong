@@ -8,6 +8,7 @@
 
 use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
+use std::task::Waker;
 
 const SUPPORT_UNKNOWN: u8 = 0;
 const SUPPORT_COOPERATIVE: u8 = 1;
@@ -37,6 +38,25 @@ impl InterruptMode {
 struct InterruptRequests {
     persistent: bool,
     scoped: usize,
+    /// Counts the requests made, so a waiter learns of one that came and went.
+    raised: u64,
+    next_waiter: u64,
+    /// Evaluations waiting on a promise, woken when a request is made.
+    waiters: Vec<(u64, Waker)>,
+}
+
+impl InterruptRequests {
+    /// Records a new request and hands back who to wake for it.
+    fn raise(&mut self) -> Vec<(u64, Waker)> {
+        self.raised = self.raised.wrapping_add(1);
+        std::mem::take(&mut self.waiters)
+    }
+}
+
+fn wake(waiters: Vec<(u64, Waker)>) {
+    for (_, waker) in waiters {
+        waker.wake();
+    }
 }
 
 /// Thread-safe request to abort JavaScript execution on one runtime.
@@ -82,6 +102,9 @@ impl InterruptHandle {
         let mut requests = self.requests();
         requests.persistent = true;
         self.flag.store(true, Ordering::SeqCst);
+        let waiters = requests.raise();
+        drop(requests);
+        wake(waiters);
     }
 
     /// Clear this handle's persistent interruption request.
@@ -107,7 +130,9 @@ impl InterruptHandle {
             .checked_add(1)
             .expect("too many concurrent interruption requests");
         self.flag.store(true, Ordering::SeqCst);
+        let waiters = requests.raise();
         drop(requests);
+        wake(waiters);
 
         InterruptGuard {
             flag: self.flag.clone(),
@@ -147,6 +172,15 @@ impl InterruptHandle {
         EvaluationAborts {
             aborts: &self.aborts,
             before: self.aborts.load(Ordering::SeqCst),
+        }
+    }
+
+    /// Start watching for requests on behalf of an evaluation that waits.
+    pub(crate) fn watch_requests(&self) -> RequestWatch<'_> {
+        RequestWatch {
+            handle: self,
+            raised: self.requests().raised,
+            waiter: None,
         }
     }
 
@@ -198,6 +232,52 @@ impl EvaluationAborts<'_> {
     /// Whether the engine aborted JavaScript since this evaluation began.
     pub(crate) fn aborted(&self) -> bool {
         self.aborts.load(Ordering::SeqCst) != self.before
+    }
+}
+
+/// Watches for interruption requests while an evaluation waits on a promise.
+///
+/// Nothing runs then for the engine to abort, so the request itself ends the
+/// wait: one that is active, or was made since the watch began even if it has
+/// been released again.
+pub(crate) struct RequestWatch<'a> {
+    handle: &'a InterruptHandle,
+    raised: u64,
+    waiter: Option<u64>,
+}
+
+impl RequestWatch<'_> {
+    /// Whether a request interrupts the wait; otherwise `waker` is woken when
+    /// one is made.
+    pub(crate) fn poll_requested(&mut self, waker: &Waker) -> bool {
+        let mut requests = self.handle.requests();
+        if requests.persistent || requests.scoped != 0 || requests.raised != self.raised {
+            return true;
+        }
+        let id = *self.waiter.get_or_insert_with(|| {
+            requests.next_waiter = requests.next_waiter.wrapping_add(1);
+            requests.next_waiter
+        });
+        match requests
+            .waiters
+            .iter_mut()
+            .find(|(waiter, _)| *waiter == id)
+        {
+            Some((_, registered)) => registered.clone_from(waker),
+            None => requests.waiters.push((id, waker.clone())),
+        }
+        false
+    }
+}
+
+impl Drop for RequestWatch<'_> {
+    fn drop(&mut self) {
+        if let Some(id) = self.waiter {
+            self.handle
+                .requests()
+                .waiters
+                .retain(|(waiter, _)| *waiter != id);
+        }
     }
 }
 

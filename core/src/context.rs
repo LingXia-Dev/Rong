@@ -952,12 +952,25 @@ impl<C: JSContextImpl> JSContext<C> {
         Self::check_engine_interrupt(&aborts)?;
 
         if result.is_promise() {
-            // From here the outcome is the promise's own. JavaScript the
-            // engine aborts while this waits may be anyone's (a timer, another
-            // evaluation), so it is not reported here; a promise whose own
-            // continuation was aborted never settles.
+            // From here the outcome is the promise's own, whatever JavaScript
+            // the engine aborts meanwhile: that may be anyone's (a timer,
+            // another evaluation). Nothing of this evaluation runs while it
+            // waits, so what interrupts it is the request itself; without
+            // that, a promise whose continuation was aborted would never end
+            // the wait.
             let promise = Promise::from_js_value(self, JSValue::from_raw(self, result))?;
-            return promise.into_future::<T>().await;
+            let mut settled = promise.into_future::<T>();
+            let mut requests = self.rc.runtime.interrupt.watch_requests();
+            return std::future::poll_fn(|cx| {
+                if let std::task::Poll::Ready(output) = std::pin::Pin::new(&mut settled).poll(cx) {
+                    return std::task::Poll::Ready(output);
+                }
+                if requests.poll_requested(cx.waker()) {
+                    return std::task::Poll::Ready(Err(Self::interrupted()));
+                }
+                std::task::Poll::Pending
+            })
+            .await;
         }
 
         let output = result.try_convert::<T>();
@@ -970,23 +983,23 @@ impl<C: JSContextImpl> JSContext<C> {
     /// start recording the engine's aborts for this evaluation.
     fn begin_evaluation(&self) -> JSResult<crate::interrupt::EvaluationAborts<'_>> {
         if self.rc.runtime.interrupt.is_interrupted() {
-            return Err(crate::HostError::new(
-                crate::error::E_INTERRUPTED,
-                "JavaScript execution was interrupted",
-            )
-            .into());
+            return Err(Self::interrupted());
         }
         Ok(self.rc.runtime.interrupt.begin_evaluation())
+    }
+
+    fn interrupted() -> RongJSError {
+        crate::HostError::new(
+            crate::error::E_INTERRUPTED,
+            "JavaScript execution was interrupted",
+        )
+        .into()
     }
 
     /// E_INTERRUPTED when the engine aborted JavaScript during the evaluation.
     fn check_engine_interrupt(aborts: &crate::interrupt::EvaluationAborts<'_>) -> JSResult<()> {
         if aborts.aborted() {
-            return Err(crate::HostError::new(
-                crate::error::E_INTERRUPTED,
-                "JavaScript execution was interrupted",
-            )
-            .into());
+            return Err(Self::interrupted());
         }
         Ok(())
     }
