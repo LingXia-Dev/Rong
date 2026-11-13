@@ -6,6 +6,44 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 
 ## [Unreleased]
 
+### Engines
+
+- `JSRuntimeImpl::install_interrupt` takes the new `rong_core::InterruptSignal`
+  instead of the bare flag, and a preempting engine asks
+  `InterruptSignal::should_abort` from its hook. An engine crate implementing
+  the trait must be built against this `rong_core`.
+- `RongJSError::from_thrown_value`, `JSProxy::new` and `JSProxy::target`
+  require `JSObjectOps` on the value type. Every engine value implements it.
+- JavaScriptCore: `Object.getPrototypeOf(Proxy)` is `Function.prototype`, as
+  the language specifies. It was the engine's untracked `Proxy` constructor,
+  whose proxies `JSProxy` and `is_proxy` did not recognise.
+
+### Fixed
+
+- `rong_core`: `eval`, `eval_async` and `compile_to_bytecode` report
+  `E_INTERRUPTED` only when the engine aborted the JavaScript. A script that
+  threw or returned as an interrupt request arrived keeps its own error or
+  value; the next evaluation is still rejected while the request holds. On
+  cooperative engines (ArkJS, system JavaScriptCore without `interrupt-spi`)
+  an evaluation in flight when a request arrives therefore no longer returns
+  `E_INTERRUPTED`.
+- `rong_core`: an abort whose request was cleared before the evaluation
+  returned is reported as `E_INTERRUPTED` instead of the engine's raw
+  termination error.
+- `rong_core`: `eval_async` returns the outcome of the promise it awaits.
+  JavaScript the engine aborts while it waits (a timer, another evaluation)
+  no longer turns its result into `E_INTERRUPTED`. A promise whose own
+  continuation was aborted never settles, as before.
+- `rong_core`: a thrown value prints what was thrown instead of "JavaScript
+  threw a value": `TypeError: bad input` for an `Error`, the value for a
+  non-empty string, a number or a boolean. Any other thrown value keeps the
+  placeholder.
+- `rong_core`: describing a thrown value runs no script. `name` and `message`
+  are read through built-ins captured when the context is created, only as
+  data properties holding a string; an accessor is not called, and a Proxy
+  thrown or on the prototype chain is not looked into. An object inheriting
+  from `Error.prototype` counts as an `Error` on every engine.
+
 ### Testing
 
 - The on-device test generator registers a test under its `#[cfg]` gates, so

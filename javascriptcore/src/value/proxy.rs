@@ -15,9 +15,15 @@ const PROXY_HELPER_SOURCE: &[u8] = br#"
 
     const NativeProxy = globalThis.Proxy;
     const meta = new WeakMap();
+    // Bound now, so a script replacing `WeakMap.prototype.has` (or `get`,
+    // `set`, `Function.prototype.call`) later is never called from here.
+    const call = Function.prototype.call;
+    const weakHas = call.bind(WeakMap.prototype.has);
+    const weakGet = call.bind(WeakMap.prototype.get);
+    const weakSet = call.bind(WeakMap.prototype.set);
 
     function track(proxy, target, handler) {
-        meta.set(proxy, { target, handler });
+        weakSet(meta, proxy, { target, handler });
         return proxy;
     }
 
@@ -28,7 +34,8 @@ const PROXY_HELPER_SOURCE: &[u8] = br#"
         return track(new NativeProxy(target, handler), target, handler);
     }
 
-    Object.setPrototypeOf(TrackedProxy, NativeProxy);
+    // Not `NativeProxy`'s heir: `Object.getPrototypeOf(Proxy)` would hand out
+    // the constructor that makes untracked proxies.
     TrackedProxy.prototype = NativeProxy.prototype;
     TrackedProxy.revocable = function revocable(target, handler) {
         const revocable = NativeProxy.revocable(target, handler);
@@ -44,16 +51,17 @@ const PROXY_HELPER_SOURCE: &[u8] = br#"
         isProxy(value) {
             return value !== null &&
                 (typeof value === "object" || typeof value === "function") &&
-                meta.has(value);
+                weakHas(meta, value);
         },
         target(value) {
-            if (value === null || (typeof value !== "object" && typeof value !== "function") || !meta.has(value)) {
+            if (value === null || (typeof value !== "object" && typeof value !== "function") || !weakHas(meta, value)) {
                 throw new TypeError("Not JS Proxy");
             }
-            return meta.get(value).target;
+            return weakGet(meta, value).target;
         }
     };
 
+    Object.freeze(helper);
     Object.defineProperty(globalThis, "__rongProxyHelper__", {
         value: helper,
         configurable: false,
@@ -112,15 +120,14 @@ pub(crate) fn is_proxy(value: &JSCValue) -> bool {
     let Ok(is_proxy) = helper_method(&ctx, "isProxy") else {
         return false;
     };
-    is_proxy
-        .call::<_, bool>(
-            None,
-            (JSValue::from_raw(
-                &JSContext::from_borrowed_raw_ptr(ctx.as_raw()),
-                value.clone(),
-            ),),
-        )
-        .unwrap_or(false)
+    // Called directly: a host call into script would run the pending promise
+    // jobs afterwards, and asking whether a value is a Proxy must run nothing.
+    let result = ctx.call(
+        is_proxy.as_value(),
+        JSCValue::create_undefined(&ctx),
+        std::slice::from_ref(value),
+    );
+    !result.is_exception() && result.try_into().unwrap_or(false)
 }
 
 impl JSProxyOps for JSCValue {

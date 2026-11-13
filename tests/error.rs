@@ -419,27 +419,91 @@ fn describing_a_thrown_error_converts_nothing_to_a_string() {
 }
 
 #[test]
-fn a_throwing_message_getter_is_read_once() {
+fn describing_a_thrown_error_runs_no_script() {
     run(|ctx| {
-        let error = ctx
-            .eval::<()>(Source::from_bytes(
-                "globalThis.reads = 0; \
-                 function make() { \
-                     var e = new Error('x'); \
-                     Object.defineProperty(e, 'message', { get() { reads++; throw make(); } }); \
-                     return e; \
-                 } \
-                 throw make()",
-            ))
-            .unwrap_err();
-        assert_eq!(error.to_string(), "Error");
-        // Rong reads `message` once; without the guard each failed read would
-        // describe the error it raised, and so on down the stack.
-        let reads = ctx.eval::<i32>(Source::from_bytes("globalThis.reads"))?;
+        let text = |source: &str| {
+            ctx.eval::<()>(Source::from_bytes(source))
+                .unwrap_err()
+                .to_string()
+        };
+        ctx.eval::<()>(Source::from_bytes("globalThis.ran = [];"))?;
+
+        // An accessor is recognised and not called, own or inherited.
+        assert_eq!(
+            text(
+                "var e = new Error('x'); \
+                 Object.defineProperty(e, 'message', { get() { ran.push('message'); return 'g' } }); \
+                 throw e"
+            ),
+            "Error"
+        );
+        assert_eq!(
+            text(
+                "class Loud extends Error { get name() { ran.push('name'); return 'Loud' } } \
+                 throw new Loud('quiet')"
+            ),
+            "quiet"
+        );
+        // A Proxy is not looked into, thrown or on the prototype chain.
+        assert_eq!(
+            text(
+                "var trap = new Proxy({}, { get(t, k) { ran.push('trap ' + String(k)); \
+                 return Reflect.get(t, k) } }); \
+                 throw new Proxy(new Error('x'), trap)"
+            ),
+            "JavaScript threw a value"
+        );
+        assert_eq!(
+            text(
+                "var e = new Error('x'); \
+                 Object.setPrototypeOf(e, new Proxy(Error.prototype, trap)); throw e"
+            ),
+            "JavaScript threw a value"
+        );
+        // Built-ins a script replaced are not the ones used.
+        assert_eq!(
+            text(
+                "Object.getOwnPropertyDescriptor = () => { ran.push('descriptor') }; \
+                 Object.getPrototypeOf = () => { ran.push('prototype') }; \
+                 Object.prototype.hasOwnProperty = () => { ran.push('hasOwn') }; \
+                 Object.defineProperty(Object.prototype, 'value', { get() { ran.push('value') } }); \
+                 throw new RangeError('still read')"
+            ),
+            "RangeError: still read"
+        );
+        // A promise job queued by the script is left for the event loop.
+        assert_eq!(
+            text(
+                "globalThis.jobs = 0; Promise.resolve().then(() => { jobs++ }); \
+                 throw new Error('now')"
+            ),
+            "Error: now"
+        );
+        // An object that only inherits from `Error.prototype` is an error too.
+        assert_eq!(text("throw Object.create(Error.prototype)"), "Error");
+
+        let ran: String = ctx.eval(Source::from_bytes("ran.join()"))?;
         if ENGINE_STRINGIFIES_EXCEPTIONS {
-            assert!(reads <= 3, "message was read {reads} times");
+            // JavaScriptCore's own stringification reads `name` and `message`
+            // (through a Proxy's `get` trap too). Nothing Rong's read would
+            // reach has run.
+            for reached in [
+                "descriptor",
+                "prototype",
+                "hasOwn",
+                "value",
+                "trap getOwn",
+                "trap getProto",
+            ] {
+                assert!(!ran.contains(reached), "{reached} ran: {ran}");
+            }
         } else {
-            assert_eq!(reads, 1);
+            assert_eq!(ran, "");
+        }
+        // JavaScriptCore and ArkJS drain promise jobs themselves as an
+        // evaluation ends, before Rong sees its result.
+        if !(ENGINE_STRINGIFIES_EXCEPTIONS || cfg!(target_env = "ohos")) {
+            assert_eq!(ctx.eval::<i32>(Source::from_bytes("globalThis.jobs"))?, 0);
         }
         Ok(())
     });

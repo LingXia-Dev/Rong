@@ -614,3 +614,35 @@ fn an_abort_inside_a_nested_evaluation_interrupts_the_outer_one() {
     let next: i32 = ctx.eval(Source::from_bytes("1 + 1")).unwrap();
     assert_eq!(next, 2);
 }
+
+#[test]
+fn an_abort_of_other_javascript_does_not_interrupt_an_awaiting_evaluation() {
+    if !engine_is_preemptive() {
+        eprintln!("skipping: engine has no preemption support");
+        return;
+    }
+
+    async_run!(|ctx: JSContext| async move {
+        let interrupt = ctx.runtime().interrupt_handle();
+        install_arm(&ctx, interrupt.clone())?;
+
+        let awaiting = ctx.eval_async::<i32>(Source::from_bytes(
+            "new Promise((resolve) => { globalThis.__settle = resolve })",
+        ));
+        let other = async {
+            tokio::task::yield_now().await;
+            // Unrelated JavaScript is aborted while the first evaluation waits.
+            let aborted = ctx
+                .eval::<JSValue>(Source::from_bytes("__arm(); while (true) {}"))
+                .expect_err("the busy loop is aborted");
+            assert!(aborted.is_interrupted(), "unexpected error: {aborted:?}");
+            interrupt.clear();
+            ctx.eval::<()>(Source::from_bytes("__settle(42)"))
+        };
+
+        let (value, settled) = tokio::join!(awaiting, other);
+        settled?;
+        assert_eq!(value?, 42);
+        Ok(())
+    });
+}

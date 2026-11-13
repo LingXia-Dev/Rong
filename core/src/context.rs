@@ -14,6 +14,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{LazyLock, RwLock};
 
 pub(crate) mod thrown_store;
+mod thrown_text;
 
 /// Describes how a JavaScript engine registered promise handlers.
 ///
@@ -514,6 +515,11 @@ impl<C: JSContextImpl> JSContext<C> {
             .unwrap()
             .insert(key, Box::into_raw(opaque) as usize);
 
+        // Before any script can run in the context.
+        let reader = thrown_text::ThrownReader::capture(&ctx);
+        let data = ctx.get_opaque();
+        unsafe { *(*data).thrown_reader.borrow_mut() = reader };
+
         ctx
     }
 
@@ -719,6 +725,20 @@ impl<C: JSContextImpl> JSContext<C> {
             .expect("[JSContext] Fatal: ThrownValueStore already borrowed. Recursive error handling detected.");
 
         store.insert(context_id, value.into_value())
+    }
+
+    /// The text of a thrown value, read without running script: `name: message`
+    /// of an `Error`, or a string, number or boolean.
+    pub(crate) fn describe_thrown(&self, value: &C::Value) -> Option<String>
+    where
+        C::Value: JSObjectOps,
+    {
+        let data = self.get_opaque();
+        if data.is_null() {
+            return None;
+        }
+        let reader = unsafe { (*data).thrown_reader.try_borrow().ok()? };
+        reader.as_ref()?.describe(self, value)
     }
 
     pub(crate) fn resolve_thrown(&self, handle: ThrownValueHandle) -> Option<JSValue<C::Value>> {
@@ -931,13 +951,16 @@ impl<C: JSContextImpl> JSContext<C> {
 
         Self::check_engine_interrupt(&aborts)?;
 
-        let output = if result.is_promise() {
+        if result.is_promise() {
+            // From here the outcome is the promise's own. JavaScript the
+            // engine aborts while this waits may be anyone's (a timer, another
+            // evaluation), so it is not reported here; a promise whose own
+            // continuation was aborted never settles.
             let promise = Promise::from_js_value(self, JSValue::from_raw(self, result))?;
-            promise.into_future::<T>().await
-        } else {
-            result.try_convert::<T>()
-        };
+            return promise.into_future::<T>().await;
+        }
 
+        let output = result.try_convert::<T>();
         Self::check_engine_interrupt(&aborts)?;
         output
     }
@@ -992,6 +1015,8 @@ struct ContextOpaque<V: JSValueImpl> {
     registry: RefCell<HashMap<TypeId, V>>,
     ctx_inner: Weak<JSContextInner<V::Context>>,
     thrown: RefCell<ThrownValueStore<V>>,
+    /// `None` until the context is set up, and if its built-ins are missing.
+    thrown_reader: RefCell<Option<thrown_text::ThrownReader<V>>>,
 }
 
 impl<V: JSValueImpl> ContextOpaque<V> {
@@ -1000,6 +1025,7 @@ impl<V: JSValueImpl> ContextOpaque<V> {
             registry: RefCell::new(HashMap::new()),
             ctx_inner,
             thrown: RefCell::new(ThrownValueStore::new()),
+            thrown_reader: RefCell::new(None),
         })
     }
 }
