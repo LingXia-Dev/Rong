@@ -176,9 +176,12 @@ impl JSValueImpl for QJSValue {
         QJSValue::new(ctx, value)
     }
 
-    fn into_raw_value(self) -> Self::RawValue {
+    fn into_raw_value(mut self) -> Self::RawValue {
         let value = self.value;
-        std::mem::forget(self); // forbiden triggering drop
+        // The raw value changes owner, but the runtime guard must still be released:
+        // forgetting it would keep the runtime from ever being freed.
+        drop(self.rt_guard.take());
+        std::mem::forget(self);
         value
     }
 
