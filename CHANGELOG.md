@@ -6,6 +6,19 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-11-13
+
+Crate releases: `rong_core`, `rong`, `rong_quickjs`, `rong_jscore`,
+`rong_arkjs`, `rong_modules`, `rong_cli` and every module crate at 0.7.0.
+`rong_core` changes the engine trait (`JSRuntimeImpl::install_interrupt`), so
+it leaves the `^0.6` range and each crate depending on it moves with it;
+`rong_rt`, `rong_macro`, `rong_typegen` and the `*_sys` crates are unchanged.
+An evaluation is reported as interrupted only when the engine aborted it or a
+request ended its wait, a thrown value prints what was thrown, read without
+running script, and host calls into JavaScript run their promise jobs right
+away. Module crates also pick up fixes merged since their last release (the
+`Optional<JSValue>` `undefined` handling and docs.rs metadata).
+
 ### Engines
 
 - `JSRuntimeImpl::install_interrupt` takes the new `rong_core::InterruptSignal`
@@ -20,6 +33,13 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 
 ### Fixed
 
+- `rong_core`: a `JSFunc` called from Rust runs the promise jobs it queued
+  when the outermost host call returns, like a browser's microtask checkpoint
+  after a callback. They waited for the worker's 50 ms fallback drain, which
+  capped an awaited host-callback loop at 20 rounds per second.
+- `rong_arkjs`: the checkpoint after a function call is left to core. ArkJS
+  ran one after every call, including calls made from inside a native
+  function, so continuations ran while JavaScript was on the stack.
 - `rong_core`: `eval`, `eval_async` and `compile_to_bytecode` report
   `E_INTERRUPTED` only when the engine aborted the JavaScript. A script that
   threw or returned as an interrupt request arrived keeps its own error or
@@ -52,6 +72,7 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
   the OHOS device crate builds again.
 - The `worker_stack` tests that call JavaScript deeper than the engine default
   are not run on HarmonyOS, where the JSVM stack limit is fixed.
+- `cargo make clippy-arkjs-ohos` passes again.
 
 ## [0.6.12] - 2026-10-29
 
