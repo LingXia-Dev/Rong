@@ -21,8 +21,8 @@ int QJS_GetRefCount(JSValue v)
 {
     int count=-1;
     if (JS_VALUE_HAS_REF_COUNT(v)) {
-        JSRefCountHeader *p = (JSRefCountHeader *)JS_VALUE_GET_PTR(v);
-        count=p->ref_count;
+        // The count lives in the allocator block header since QuickJS-NG 0.18.
+        count = JS_REF_COUNT(JS_VALUE_GET_PTR(v));
     }
     return count;
 }
