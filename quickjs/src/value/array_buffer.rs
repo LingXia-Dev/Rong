@@ -32,7 +32,8 @@ impl JSArrayBufferOps for QJSValue {
                 ctx.to_raw(),
                 data_ptr as *mut _,
                 len as _,
-                Some(deallocator_callback),
+                0, // max_len = 0: fixed length
+                Some(vec_realloc),
                 opaque,
                 false, // is_shared = false
             );
@@ -81,17 +82,29 @@ impl JSArrayBufferOps for QJSValue {
     }
 }
 
-// Callback for deallocating ArrayBuffer memory
-unsafe extern "C" fn deallocator_callback(
+/// Backing store of an ArrayBuffer made by `from_vec`: `opaque` is the
+/// `Box<Vec<u8>>` from `from_vec`. QuickJS frees with `size == 0` and resizes
+/// (`ArrayBuffer.prototype.transfer`) with any other size, keeping `opaque`.
+unsafe extern "C" fn vec_realloc(
     _rt: *mut qjs::JSRuntime,
     opaque: *mut ::std::os::raw::c_void,
     _ptr: *mut ::std::os::raw::c_void,
-) {
-    if !opaque.is_null() {
-        // SAFETY: `opaque` was created by `Box::into_raw(Box::new(Vec<u8>))` in `from_vec`.
-        // QuickJS calls this deallocator exactly once for the ArrayBuffer.
-        unsafe {
-            drop(Box::from_raw(opaque as *mut Vec<u8>));
-        }
+    size: usize,
+) -> *mut ::std::os::raw::c_void {
+    if opaque.is_null() {
+        return std::ptr::null_mut();
     }
+    if size == 0 {
+        // SAFETY: created by `Box::into_raw` in `from_vec`; QuickJS frees once.
+        drop(unsafe { Box::from_raw(opaque as *mut Vec<u8>) });
+        return std::ptr::null_mut();
+    }
+    // SAFETY: as above, and the ArrayBuffer is its only user.
+    let vec = unsafe { &mut *(opaque as *mut Vec<u8>) };
+    let extra = size.saturating_sub(vec.len());
+    if vec.try_reserve_exact(extra).is_err() {
+        return std::ptr::null_mut(); // QuickJS keeps the old block
+    }
+    vec.resize(size, 0);
+    vec.as_mut_ptr().cast()
 }

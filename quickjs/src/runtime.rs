@@ -20,7 +20,7 @@ pub(crate) struct QJSRuntimeInner {
 /// nonzero return aborts execution with an uncatchable `InternalError:
 /// interrupted`, which breaks `while (true) {}`.
 unsafe extern "C" fn interrupt_handler(
-    _rt: *mut qjs::JSRuntime,
+    _ctx: *mut qjs::JSContext,
     opaque: *mut std::os::raw::c_void,
 ) -> std::os::raw::c_int {
     let signal = unsafe { &*(opaque as *const InterruptSignal) };

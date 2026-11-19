@@ -6,6 +6,13 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 
 ## [Unreleased]
 
+### Engines
+
+- Upgraded the bundled QuickJS-NG runtime from v0.15.1 to v0.18.0. Its
+  interrupt handler now receives the `JSContext`, and an ArrayBuffer made from
+  a `Vec<u8>` is managed by a realloc callback, so
+  `ArrayBuffer.prototype.transfer` can resize it.
+
 ## [0.7.0] - 2026-11-13
 
 Crate releases: `rong_core`, `rong`, `rong_quickjs`, `rong_jscore`,
