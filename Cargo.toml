@@ -42,8 +42,8 @@ categories = ["api-bindings"]
 # Internal dependencies
 rong = { path = ".", default-features = false      , version = "0.7.0" }
 rong_core = { path = "core"      , version = "0.7.0" }
-rong_quickjs = { path = "quickjs"      , version = "0.7.0" }
-rong_quickjs_sys = { path = "quickjs/sys"      , version = "0.6.1" }
+rong_quickjs = { path = "quickjs"      , version = "0.7.1" }
+rong_quickjs_sys = { path = "quickjs/sys"      , version = "0.7.0" }
 rong_jscore = { path = "javascriptcore"      , version = "0.7.0" }
 rong_jscore_sys = { path = "javascriptcore/sys"      , version = "0.6.1" }
 rong_arkjs = { path = "arkjs"      , version = "0.7.0" }

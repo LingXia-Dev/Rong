@@ -6,12 +6,25 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 
 ## [Unreleased]
 
-### Engines
+## [0.7.1] - 2026-11-18
 
-- Upgraded the bundled QuickJS-NG runtime from v0.15.1 to v0.18.0. Its
-  interrupt handler now receives the `JSContext`, and an ArrayBuffer made from
-  a `Vec<u8>` is managed by a realloc callback, so
-  `ArrayBuffer.prototype.transfer` can resize it.
+Crate releases: `rong_quickjs_sys` 0.7.0 and `rong_quickjs` 0.7.1. QuickJS
+moves to QuickJS-NG v0.18.0, and a dropped QuickJS runtime is now freed.
+`rong` and the module crates pick this up through their `^0.7` requirement on
+`rong_quickjs`.
+
+### QuickJS
+
+- Upgraded the bundled QuickJS-NG runtime from v0.15.1 to v0.18.0.
+  `rong_quickjs_sys` moves to 0.7.0 because the raw bindings changed: the
+  interrupt handler receives the `JSContext`, and `JS_NewArrayBuffer` takes
+  `max_len` and a realloc callback instead of a free callback.
+- An ArrayBuffer made from a `Vec<u8>` can be resized by
+  `ArrayBuffer.prototype.transfer(newLength)`.
+- A runtime that had a context is freed once its contexts and values are
+  dropped; it used to leak until the process exited.
+- Dropping a value from a thread-local destructor at thread exit no longer
+  aborts the process.
 
 ## [0.7.0] - 2026-11-13
 
