@@ -114,6 +114,8 @@ struct ModuleInfo {
 struct TestFnInfo {
     name: String,
     is_async: bool,
+    /// A sync test returning `Result` reports `Err` as a failure, not a crash.
+    returns_result: bool,
     /// The `#[cfg(...)]` gates on the function; its registry entry repeats
     /// them, so a test compiled out is not registered either.
     cfgs: Vec<String>,
@@ -271,6 +273,7 @@ fn transform_source(
         // If previous line was a test attribute, this should be the fn declaration
         if (prev_was_test || prev_was_tokio_test) && fn_decl.is_match(line) {
             let is_async = prev_was_tokio_test || line.contains("async fn ");
+            let returns_result = line.contains("-> Result<");
             let cfgs = std::mem::take(&mut pending_cfgs);
             prev_was_test = false;
             prev_was_tokio_test = false;
@@ -300,6 +303,7 @@ fn transform_source(
                     test_fns.push(TestFnInfo {
                         name: fn_name,
                         is_async,
+                        returns_result,
                         cfgs,
                     });
                 }
@@ -442,6 +446,11 @@ fn generate_registry(modules: &[ModuleInfo]) -> String {
             if t.is_async {
                 out.push_str(&format!(
                     "        TestEntry {{ name: \"{full_name}\", run: TestFn::Async(|| Box::pin(async {{ super::generated::{mod_ident}::{func}().await.map_err(|e| e.to_string()) }})) }},\n",
+                    func = t.name,
+                ));
+            } else if t.returns_result {
+                out.push_str(&format!(
+                    "        TestEntry {{ name: \"{full_name}\", run: TestFn::Sync(|| super::generated::{mod_ident}::{func}().map_err(|e| e.to_string())) }},\n",
                     func = t.name,
                 ));
             } else {
