@@ -255,7 +255,10 @@ typed arrays and `JSDate` refuse the wrong kind of value the same way
 (`argument 1 must be an array, got object`), and a derived field or array
 element names its path (`` argument 1: `inner.url` is required ``,
 `` `items[2]` must be a string ``). `Coerced<f64>` and `Coerced<bool>` are the
-strict conversions. A custom `FromJSValue` that converts parts of a value can
+strict conversions, and every other `Coerced<T>` refuses a value of the wrong
+kind the same way. `undefined` means omitted for `Option<T>` fields,
+`#[js_default]` fields and `Optional<T>` parameters; `null` means `None` only
+for `Option<T>`. A custom `FromJSValue` that converts parts of a value can
 locate a refusal with `err.at_field("name")` or `err.at_index(i)`, and build
 one with `HostError::type_mismatch(expected, got)`.
 
@@ -264,7 +267,9 @@ one with `HostError::type_mismatch(expected, got)`.
 `ctx.register_error_class("AppError", ctor)` makes host errors named
 `AppError` instances of `ctor` on every engine (`"Error"` covers every plain
 `HostError::new`). The class sets `name`; Rong sets `code`, `reason`, `detail`
-and `data`.
+and `data`. `ctx.new_error_value` and `ctx.throw_named_error` (with the
+`throw_*` helpers) use the registered class too; only the engine-level
+`JSErrorFactory::new_error` always builds the built-in error.
 
 ---
 

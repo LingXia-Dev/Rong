@@ -72,7 +72,27 @@ becomes strict, which changes behaviour for existing embedders.
   required ``. `RongJSError::is_property_not_found` no longer matches a
   nested missing-field refusal.
 - `Coerced<f64>` and `Coerced<bool>` use the strict conversion of the plain
-  type, with the same error and location.
+  type, with the same error and location; `Coerced<i32>`/`Coerced<u32>`
+  refuse a non-number and `Coerced<i64>`/`Coerced<u64>` a value that is
+  neither a number nor a BigInt the same way (`must be a number, got string`).
+- `undefined` means omitted everywhere: an own property whose value is
+  `undefined` takes the `#[js_default]` default, as an absent one does and as
+  `Optional<T>` and `Option<T>` already treat it. `null` is a value except for
+  `Option<T>` (where it is `None`), so `#[js_default]` and `Optional<T>`
+  refuse it for a non-nullable type.
+- `JSTypedArray<T>` given a non-typed-array names its kind (`must be a
+  Uint8Array, got number`); `JSClassRef<T>` and `#[js_class(clone)]` types
+  report `must be a Foo instance`; `JSBytes`/`Bytes` report `must be a JSBytes
+  instance`; `#[js_union]` lists its alternatives (`must be a string or a
+  number`); `#[js_numeric_enum]` lists its values (`must be one of Read (0),
+  Write (1), got 7`). All are type mismatches with the argument position or
+  field path.
+- `JSContext::new_error_value` and `throw_named_error` (and `throw_type_error`
+  and the other `throw_*` helpers) build an instance of the class registered
+  for the name, like host errors. `JSErrorFactory::new_error` still builds the
+  engine's built-in error.
+- ArkJS: `Coerced<String>` fails when `ToString` throws (a Symbol, a throwing
+  `toString`) instead of returning `""`, as on QuickJS and JavaScriptCore.
 - `assert.ok(0.5)` passes; it truncated the number before.
 
 ### Types
