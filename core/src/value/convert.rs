@@ -245,7 +245,8 @@ where
 /// - `Coerced<i32>`, `Coerced<u32>`: any number, truncated and wrapped as
 ///   ECMAScript `ToInt32` / `ToUint32` do; a non-number is still refused.
 /// - `Coerced<i64>`, `Coerced<u64>`: any number, truncated; or a BigInt.
-/// - `Coerced<f64>`, `Coerced<bool>`: the same as the plain types.
+/// - `Coerced<f64>`, `Coerced<bool>`: no coercion; the strict conversion of
+///   the plain type, with the same errors and location.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Coerced<T>(pub T);
 
@@ -264,23 +265,50 @@ impl<T> std::ops::Deref for Coerced<T> {
 
 impl<V, T> FromJSValue<V> for Coerced<T>
 where
-    V: JSValueImpl + TryInto<T, Error = RongJSError>,
-    T: CoercedTarget,
+    V: JSValueImpl,
+    T: CoercedTarget<V>,
 {
-    fn from_js_value(_ctx: &JSContext<V::Context>, value: JSValue<V>) -> JSResult<Self> {
-        value.into_value().try_into().map(Coerced)
+    fn from_js_value(ctx: &JSContext<V::Context>, value: JSValue<V>) -> JSResult<Self> {
+        T::coerce(ctx, value).map(Coerced)
     }
 }
 
-/// Types [`Coerced`] can produce: the engine conversions that coerce.
-pub trait CoercedTarget {}
-impl CoercedTarget for String {}
-impl CoercedTarget for bool {}
-impl CoercedTarget for i32 {}
-impl CoercedTarget for u32 {}
-impl CoercedTarget for i64 {}
-impl CoercedTarget for u64 {}
-impl CoercedTarget for f64 {}
+/// Types [`Coerced`] can produce, and how each converts.
+pub trait CoercedTarget<V: JSValueImpl>: Sized {
+    fn coerce(ctx: &JSContext<V::Context>, value: JSValue<V>) -> JSResult<Self>;
+}
+
+/// The engine conversions that coerce (`ToString`, `ToInt32`, ...).
+macro_rules! impl_coerced_by_engine {
+    ($($ty:ty),*) => {$(
+        impl<V> CoercedTarget<V> for $ty
+        where
+            V: JSValueImpl + TryInto<$ty, Error = RongJSError>,
+        {
+            fn coerce(_ctx: &JSContext<V::Context>, value: JSValue<V>) -> JSResult<Self> {
+                value.into_value().try_into()
+            }
+        }
+    )*};
+}
+impl_coerced_by_engine!(String, i32, u32, i64, u64);
+
+/// No coercion: the strict conversion, so errors and their location match the
+/// plain type.
+macro_rules! impl_coerced_strict {
+    ($($ty:ty),*) => {$(
+        impl<V> CoercedTarget<V> for $ty
+        where
+            V: JSValueImpl,
+            $ty: FromJSValue<V>,
+        {
+            fn coerce(ctx: &JSContext<V::Context>, value: JSValue<V>) -> JSResult<Self> {
+                <$ty as FromJSValue<V>>::from_js_value(ctx, value)
+            }
+        }
+    )*};
+}
+impl_coerced_strict!(f64, bool);
 
 impl<T> crate::function::JSParameterType for Coerced<T> {}
 

@@ -481,3 +481,23 @@ fn object_array_and_function_fields_name_the_path() {
         Ok(())
     });
 }
+
+#[test]
+fn coerced_f64_and_bool_are_the_strict_conversion() {
+    run(|ctx| {
+        let global = ctx.global();
+        global.set("takeCoercedF64", JSFunc::new(ctx, |n: Coerced<f64>| n.0)?)?;
+        global.set("takeCoercedBool", JSFunc::new(ctx, |b: Coerced<bool>| b.0)?)?;
+        assert_eq!(
+            thrown(ctx, "takeCoercedF64('5')")?,
+            "TypeError|E_INVALID_ARG|argument 1 must be a number, got string|1"
+        );
+        assert_eq!(
+            thrown(ctx, "takeCoercedBool(1)")?,
+            "TypeError|E_INVALID_ARG|argument 1 must be a boolean, got number|1"
+        );
+        let n: f64 = ctx.eval(Source::from_bytes("takeCoercedF64(1.5)"))?;
+        assert_eq!(n, 1.5);
+        Ok(())
+    });
+}
