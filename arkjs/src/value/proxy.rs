@@ -14,13 +14,11 @@ impl JSProxyOps for ArkJSValue {
                 &mut proxy,
             );
             if status == arkjs::JSVM_Status_JSVM_OK {
-                Ok(ArkJSValue::from_owned_raw(env, proxy).protect())
+                Ok(ArkJSValue::from_owned_raw(env, proxy))
             } else {
                 let mut exception: arkjs::JSVM_Value = std::ptr::null_mut();
                 arkjs::OH_JSVM_GetAndClearLastException(env, &mut exception);
-                Err(ArkJSValue::from_owned_raw(env, exception)
-                    .protect()
-                    .with_exception())
+                Err(ArkJSValue::from_owned_raw(env, exception).with_exception())
             }
         }
     }
@@ -31,13 +29,11 @@ impl JSProxyOps for ArkJSValue {
             let status =
                 arkjs::OH_JSVM_ProxyGetTarget(self.env, self.raw_value_for_api(), &mut target);
             if status == arkjs::JSVM_Status_JSVM_OK {
-                Ok(ArkJSValue::from_owned_raw(self.env, target).protect())
+                Ok(ArkJSValue::from_owned_raw(self.env, target))
             } else {
                 let mut exception: arkjs::JSVM_Value = std::ptr::null_mut();
                 arkjs::OH_JSVM_GetAndClearLastException(self.env, &mut exception);
-                Err(ArkJSValue::from_owned_raw(self.env, exception)
-                    .protect()
-                    .with_exception())
+                Err(ArkJSValue::from_owned_raw(self.env, exception).with_exception())
             }
         }
     }

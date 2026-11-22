@@ -54,6 +54,18 @@ impl Drop for ArkJSContextInner {
     }
 }
 
+/// A live env of `vm`, for VM-wide requests that the JSVM API takes per env.
+pub(crate) fn any_env_of_vm(vm: arkjs::JSVM_VM) -> Option<arkjs::JSVM_Env> {
+    CONTEXT_REGISTRY.with(|registry| {
+        registry
+            .borrow()
+            .values()
+            .filter_map(Weak::upgrade)
+            .find(|inner| inner.runtime.raw == vm)
+            .map(|inner| inner.raw)
+    })
+}
+
 pub(crate) fn context_guard_from_env(env: arkjs::JSVM_Env) -> Option<Rc<ArkJSContextInner>> {
     if env.is_null() {
         return None;
@@ -183,9 +195,7 @@ impl JSContextImpl for ArkJSContext {
                 let mut exception: arkjs::JSVM_Value = ptr::null_mut();
                 arkjs::OH_JSVM_GetAndClearLastException(self.raw, &mut exception);
                 if !exception.is_null() {
-                    return ArkJSValue::from_owned_raw(self.raw, exception)
-                        .protect()
-                        .with_exception();
+                    return ArkJSValue::from_owned_raw(self.raw, exception).with_exception();
                 }
                 return Self::Value::create_undefined(self);
             }
@@ -213,9 +223,7 @@ impl JSContextImpl for ArkJSContext {
                 let mut exception: arkjs::JSVM_Value = ptr::null_mut();
                 arkjs::OH_JSVM_GetAndClearLastException(self.raw, &mut exception);
                 if !exception.is_null() {
-                    return ArkJSValue::from_owned_raw(self.raw, exception)
-                        .protect()
-                        .with_exception();
+                    return ArkJSValue::from_owned_raw(self.raw, exception).with_exception();
                 }
                 return Self::Value::create_undefined(self);
             }
@@ -229,9 +237,7 @@ impl JSContextImpl for ArkJSContext {
                 let mut exception: arkjs::JSVM_Value = ptr::null_mut();
                 arkjs::OH_JSVM_GetAndClearLastException(self.raw, &mut exception);
                 if !exception.is_null() {
-                    return ArkJSValue::from_owned_raw(self.raw, exception)
-                        .protect()
-                        .with_exception();
+                    return ArkJSValue::from_owned_raw(self.raw, exception).with_exception();
                 }
                 return Self::Value::create_undefined(self);
             }
@@ -294,9 +300,7 @@ impl JSContextImpl for ArkJSContext {
             if status != arkjs::JSVM_Status_JSVM_OK {
                 let mut exception: arkjs::JSVM_Value = ptr::null_mut();
                 arkjs::OH_JSVM_GetAndClearLastException(self.raw, &mut exception);
-                return ArkJSValue::from_owned_raw(self.raw, exception)
-                    .protect()
-                    .with_exception();
+                return ArkJSValue::from_owned_raw(self.raw, exception).with_exception();
             }
 
             ArkJSValue::from_owned_raw(self.raw, result)
@@ -319,7 +323,7 @@ impl JSContextImpl for ArkJSContext {
             let reject_func = create_deferred_function(self, deferred, false);
 
             (
-                ArkJSValue::from_owned_raw(self.raw, promise).protect(),
+                ArkJSValue::from_owned_raw(self.raw, promise),
                 resolve_func,
                 reject_func,
             )
@@ -493,9 +497,7 @@ impl JSContextImpl for ArkJSContext {
                 let mut exception: arkjs::JSVM_Value = ptr::null_mut();
                 arkjs::OH_JSVM_GetAndClearLastException(self.raw, &mut exception);
                 if !exception.is_null() {
-                    return ArkJSValue::from_owned_raw(self.raw, exception)
-                        .protect()
-                        .with_exception();
+                    return ArkJSValue::from_owned_raw(self.raw, exception).with_exception();
                 }
                 return ArkJSValue::create_undefined(self);
             }
@@ -722,7 +724,7 @@ fn create_deferred_function(
                         wrapper_obj,
                     );
                     if status == arkjs::JSVM_Status_JSVM_OK {
-                        return ArkJSValue::from_owned_raw(ctx.to_raw(), func).protect();
+                        return ArkJSValue::from_owned_raw(ctx.to_raw(), func);
                     }
 
                     let mut stale: arkjs::JSVM_Value = ptr::null_mut();

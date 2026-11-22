@@ -155,7 +155,7 @@ unsafe extern "C" fn fatal_error_handler(
         } else {
             CStr::from_ptr(message).to_str().unwrap_or("<invalid utf8>")
         };
-        eprintln!("[ArkJS FATAL] {}: {}", loc, msg);
+        crate::hilog::fatal(&format!("[ArkJS FATAL] {loc}: {msg}"));
     }
 }
 
@@ -178,7 +178,9 @@ unsafe extern "C" fn oom_error_handler(
         } else {
             CStr::from_ptr(detail).to_str().unwrap_or("<invalid utf8>")
         };
-        eprintln!("[ArkJS OOM] {}: {} (heap_oom={})", loc, det, is_heap_oom);
+        crate::hilog::error(&format!(
+            "[ArkJS OOM] {loc}: {det} (heap_oom={is_heap_oom})"
+        ));
     }
 }
 
@@ -317,7 +319,15 @@ impl JSRuntimeImpl for ArkJSRuntime {
     }
 
     fn run_gc(&self) {
-        // Harmony Ark JS doesn't expose direct GC control
+        // JSVM has no collect call; critical memory pressure runs a full GC.
+        if let Some(env) = crate::context::any_env_of_vm(self.inner.raw) {
+            unsafe {
+                let _ = arkjs::OH_JSVM_MemoryPressureNotification(
+                    env,
+                    arkjs::JSVM_MemoryPressureLevel_JSVM_MEMORY_PRESSURE_LEVEL_CRITICAL,
+                );
+            }
+        }
     }
 
     // Engine preemption is intentionally NOT implemented: the JSVM-API surface
