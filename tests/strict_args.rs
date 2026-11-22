@@ -554,3 +554,28 @@ fn undefined_is_omitted_for_option_js_default_and_optional() {
         Ok(())
     });
 }
+
+#[test]
+fn coerced_integers_refuse_non_numbers_with_a_location() {
+    run(|ctx| {
+        let global = ctx.global();
+        global.set("takeCoercedI32", JSFunc::new(ctx, |n: Coerced<i32>| n.0)?)?;
+        global.set("takeCoercedU32", JSFunc::new(ctx, |n: Coerced<u32>| n.0)?)?;
+        global.set("takeCoercedU64", JSFunc::new(ctx, |_n: Coerced<u64>| true)?)?;
+        assert_eq!(
+            thrown(ctx, "takeCoercedI32('abc')")?,
+            "TypeError|E_INVALID_ARG|argument 1 must be a number, got string|1"
+        );
+        assert_eq!(
+            thrown(ctx, "takeCoercedU32(undefined)")?,
+            "TypeError|E_INVALID_ARG|argument 1 must be a number, got undefined|1"
+        );
+        assert_eq!(
+            thrown(ctx, "takeCoercedU64('x')")?,
+            "TypeError|E_INVALID_ARG|argument 1 must be a number or a bigint, got string|1"
+        );
+        let n: i32 = ctx.eval(Source::from_bytes("takeCoercedI32(2.9)"))?;
+        assert_eq!(n, 2);
+        Ok(())
+    });
+}

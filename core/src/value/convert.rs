@@ -243,7 +243,8 @@ where
 ///   `"42"`, `undefined` → `"undefined"`); fails only if `ToString` throws
 ///   (a symbol, or a throwing `toString`).
 /// - `Coerced<i32>`, `Coerced<u32>`: any number, truncated and wrapped as
-///   ECMAScript `ToInt32` / `ToUint32` do; a non-number is still refused.
+///   ECMAScript `ToInt32` / `ToUint32` do; a non-number is refused like a
+///   plain integer (`must be a number, got string`).
 /// - `Coerced<i64>`, `Coerced<u64>`: any number, truncated; or a BigInt.
 /// - `Coerced<f64>`, `Coerced<bool>`: no coercion; the strict conversion of
 ///   the plain type, with the same errors and location.
@@ -278,20 +279,38 @@ pub trait CoercedTarget<V: JSValueImpl>: Sized {
     fn coerce(ctx: &JSContext<V::Context>, value: JSValue<V>) -> JSResult<Self>;
 }
 
-/// The engine conversions that coerce (`ToString`, `ToInt32`, ...).
-macro_rules! impl_coerced_by_engine {
-    ($($ty:ty),*) => {$(
+impl<V> CoercedTarget<V> for String
+where
+    V: JSValueImpl + TryInto<String, Error = RongJSError>,
+{
+    fn coerce(_ctx: &JSContext<V::Context>, value: JSValue<V>) -> JSResult<Self> {
+        value.into_value().try_into()
+    }
+}
+
+/// Integers: the engine's truncating conversion, after the same kind check as
+/// the plain types so a refusal carries its location.
+macro_rules! impl_coerced_integer {
+    ($($ty:ty, $expected:expr, |$value:ident| $accepts:expr);* $(;)?) => {$(
         impl<V> CoercedTarget<V> for $ty
         where
-            V: JSValueImpl + TryInto<$ty, Error = RongJSError>,
+            V: JSValueImpl + JSTypeOf + TryInto<$ty, Error = RongJSError>,
         {
-            fn coerce(_ctx: &JSContext<V::Context>, value: JSValue<V>) -> JSResult<Self> {
-                value.into_value().try_into()
+            fn coerce(_ctx: &JSContext<V::Context>, $value: JSValue<V>) -> JSResult<Self> {
+                if !$accepts {
+                    return Err(HostError::type_mismatch($expected, describe_got(&$value)).into());
+                }
+                $value.into_value().try_into()
             }
         }
     )*};
 }
-impl_coerced_by_engine!(String, i32, u32, i64, u64);
+impl_coerced_integer!(
+    i32, "a number", |value| value.is_number();
+    u32, "a number", |value| value.is_number();
+    i64, "a number or a bigint", |value| (value.is_number() || value.is_bigint());
+    u64, "a number or a bigint", |value| (value.is_number() || value.is_bigint());
+);
 
 /// No coercion: the strict conversion, so errors and their location match the
 /// plain type.
