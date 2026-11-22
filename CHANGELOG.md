@@ -6,6 +6,33 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 
 ## [Unreleased]
 
+### ArkJS
+
+- A value Rust keeps past the native call that created it keeps naming the
+  same value. Values the backend created itself (every `JSFunc::new`
+  function, eval and call results, new objects, class constructors) held only
+  a handle scoped to that call; once it returned the slot was reused, so a
+  kept handler could call a different, older function. Every value now takes
+  a persistent reference when it is created, and clones and reads go through
+  it; undefined, null, booleans and numbers are kept by value instead.
+- Classes are told apart by an id kept on the constructor. The class table
+  was keyed by a handle address that is reused, and type tags came from the
+  finalizer's address, which release builds share between classes whose drop
+  code compiles identically; instances of such classes passed `instance_of`
+  for each other.
+- A function made by `JSFunc::new` is freed once nothing holds it; it kept a
+  strong reference to itself and leaked with its closure.
+- `JSRuntime::run_gc` runs a full collection.
+- Fatal, out-of-memory and refused-reference reports go to HiLog under the
+  tag `Rong` instead of stderr, which a device does not collect.
+- `Hash` for a value covers only its context: equality is StrictEquals and
+  JSVM has no identity hash.
+
+### Console
+
+- Circular references are found by comparing values along the current path,
+  not by hashing them.
+
 ## [0.8.0] - 2026-11-22
 
 Crate releases: `rong_core`, `rong`, `rong_quickjs`, `rong_jscore`,
