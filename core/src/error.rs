@@ -809,11 +809,8 @@ impl RongJSError {
             RongJSErrorKind::Thrown(thrown) => {
                 let handle = thrown.handle;
                 let Some(value) = ctx.take_thrown(handle) else {
-                    let raw = ctx.as_ref().new_error(
-                        "Error",
-                        "Invalid thrown value handle",
-                        Some(E_INTERNAL),
-                    );
+                    let raw =
+                        ctx.create_error("Error", "Invalid thrown value handle", Some(E_INTERNAL));
                     return ctx.as_ref().throw(raw);
                 };
                 ctx.throw(value).into_value()
@@ -843,11 +840,8 @@ impl RongJSError {
             RongJSErrorKind::Thrown(thrown) => {
                 let handle = thrown.handle;
                 let Some(value) = ctx.take_thrown(handle) else {
-                    let raw = ctx.as_ref().new_error(
-                        "Error",
-                        "Invalid thrown value handle",
-                        Some(E_INTERNAL),
-                    );
+                    let raw =
+                        ctx.create_error("Error", "Invalid thrown value handle", Some(E_INTERNAL));
                     return JSValue::from_raw(ctx, raw);
                 };
                 value

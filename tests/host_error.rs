@@ -311,3 +311,27 @@ fn unregistered_names_keep_the_built_in_errors() {
         Ok(())
     });
 }
+
+#[test]
+fn new_error_value_uses_the_registered_class() {
+    run(|ctx| {
+        register_app_error(ctx, "TypeError")?;
+        ctx.global().set(
+            "makeError",
+            JSFunc::new(ctx, |ctx: JSContext| {
+                ctx.new_error_value("TypeError", "made", Some("E_MADE"))
+            })?,
+        )?;
+        assert!(eval_bool(
+            ctx,
+            r#"
+            (() => {
+                const e = makeError();
+                return e instanceof AppError && e.message === 'made'
+                    && e.code === 'E_MADE';
+            })()
+            "#,
+        )?);
+        Ok(())
+    });
+}

@@ -108,15 +108,17 @@ where
 impl<C> JSContext<C>
 where
     C: JSContextImpl + JSExceptionThrower + JSErrorFactory,
-    C::Value: JSValueImpl,
+    C::Value: JSObjectOps + crate::JSArrayOps,
 {
+    /// Throws an error built like [`JSContext::new_error_value`]: an instance of
+    /// the class registered for `name`, if any.
     pub fn throw_named_error(
         &self,
         name: &str,
         message: impl AsRef<str>,
         code: Option<&str>,
     ) -> JSValue<C::Value> {
-        let raw = self.as_ref().new_error(name, message, code);
+        let raw = self.create_error(name, message.as_ref(), code);
         let raw = self.as_ref().throw(raw);
         JSValue::from_raw(self, raw)
     }

@@ -1,4 +1,4 @@
-use crate::{JSContext, JSContextImpl, JSValue, JSValueImpl};
+use crate::{JSContext, JSContextImpl, JSValue};
 use std::fmt;
 use std::string::String;
 
@@ -40,15 +40,19 @@ pub trait JSErrorFactory: JSContextImpl {
 impl<C> JSContext<C>
 where
     C: JSContextImpl + JSErrorFactory,
-    C::Value: JSValueImpl,
+    C::Value: crate::JSObjectOps + crate::JSArrayOps,
 {
     /// Creates an `Error` object as a normal return value (does not throw).
+    ///
+    /// Like host errors, it is an instance of the class registered for `name`
+    /// with [`JSContext::register_error_class`], if any. The engine's
+    /// [`JSErrorFactory::new_error`] always builds the built-in error.
     pub fn new_error_value(
         &self,
         name: &str,
         message: impl AsRef<str>,
         code: Option<&str>,
     ) -> JSValue<C::Value> {
-        JSValue::from_raw(self, self.as_ref().new_error(name, message, code))
+        JSValue::from_raw(self, self.create_error(name, message.as_ref(), code))
     }
 }
