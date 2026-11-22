@@ -23,12 +23,20 @@ pub(crate) enum ArkJSValueType {
     Other,
 }
 
+/// A JSVM value owned by Rust.
+///
+/// `value` is a handle scoped to the native call that created it: once that
+/// call returns, its slot is reused for other values. Every read therefore
+/// goes through `reference`, taken at creation while the handle is still valid,
+/// or, for a primitive kept by value, makes a fresh handle from `primitive`.
 pub struct ArkJSValue {
     value: arkjs::JSVM_Value,
     env: arkjs::JSVM_Env,
     value_type: ArkJSValueType,
-    reference: Option<arkjs::JSVM_Ref>, // Track reference for proper cleanup
-    context_guard: Option<Rc<ArkJSContextInner>>,
+    reference: Option<arkjs::JSVM_Ref>,
+    primitive: Option<Primitive>,
+    // Keeps the env alive until this value has deleted its reference.
+    _context_guard: Option<Rc<ArkJSContextInner>>,
 }
 
 impl PartialEq for ArkJSValue {
@@ -43,11 +51,64 @@ impl PartialEq for ArkJSValue {
     }
 }
 
+// JSVM has no identity hash and handles differ per read, so only the env is
+// stable across values that `eq` (StrictEquals) treats as equal.
 impl Hash for ArkJSValue {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        (self.value as usize).hash(state);
         (self.env as usize).hash(state);
-        self.value_type.hash(state);
+    }
+}
+
+/// A primitive whose value is all there is to keep, so it needs no
+/// persistent reference: reads make a fresh handle from it.
+#[derive(Clone, Copy)]
+enum Primitive {
+    Undefined,
+    Null,
+    Bool(bool),
+    Number(f64),
+}
+
+impl Primitive {
+    fn of(env: arkjs::JSVM_Env, value: arkjs::JSVM_Value) -> Option<Self> {
+        if value.is_null() {
+            return None;
+        }
+        unsafe {
+            let mut kind: arkjs::JSVM_ValueType = arkjs::JSVM_ValueType_JSVM_UNDEFINED;
+            if arkjs::OH_JSVM_Typeof(env, value, &mut kind) != arkjs::JSVM_Status_JSVM_OK {
+                return None;
+            }
+            match kind {
+                arkjs::JSVM_ValueType_JSVM_UNDEFINED => Some(Self::Undefined),
+                arkjs::JSVM_ValueType_JSVM_NULL => Some(Self::Null),
+                arkjs::JSVM_ValueType_JSVM_BOOLEAN => {
+                    let mut b = false;
+                    (arkjs::OH_JSVM_GetValueBool(env, value, &mut b) == arkjs::JSVM_Status_JSVM_OK)
+                        .then_some(Self::Bool(b))
+                }
+                arkjs::JSVM_ValueType_JSVM_NUMBER => {
+                    let mut n = 0.0;
+                    (arkjs::OH_JSVM_GetValueDouble(env, value, &mut n)
+                        == arkjs::JSVM_Status_JSVM_OK)
+                        .then_some(Self::Number(n))
+                }
+                _ => None,
+            }
+        }
+    }
+
+    fn handle(self, env: arkjs::JSVM_Env) -> arkjs::JSVM_Value {
+        let mut value: arkjs::JSVM_Value = ptr::null_mut();
+        unsafe {
+            match self {
+                Self::Undefined => arkjs::OH_JSVM_GetUndefined(env, &mut value),
+                Self::Null => arkjs::OH_JSVM_GetNull(env, &mut value),
+                Self::Bool(b) => arkjs::OH_JSVM_GetBoolean(env, b, &mut value),
+                Self::Number(n) => arkjs::OH_JSVM_CreateDouble(env, n, &mut value),
+            };
+        }
+        value
     }
 }
 
@@ -58,8 +119,10 @@ impl ArkJSValue {
             value,
             value_type: ArkJSValueType::Other,
             reference: None,
-            context_guard: context_guard_from_env(env),
+            primitive: Primitive::of(env, value),
+            _context_guard: context_guard_from_env(env),
         }
+        .protect()
     }
 
     pub(crate) fn with_exception(mut self) -> Self {
@@ -94,9 +157,7 @@ impl ArkJSValue {
             let mut exception: arkjs::JSVM_Value = ptr::null_mut();
             arkjs::OH_JSVM_GetAndClearLastException(self.env, &mut exception);
             if !exception.is_null() {
-                return Self::from_owned_raw(self.env, exception)
-                    .protect()
-                    .with_exception();
+                return Self::from_owned_raw(self.env, exception).with_exception();
             }
         }
 
@@ -159,23 +220,30 @@ impl ArkJSValue {
         }
     }
 
-    /// Protects the current value from garbage collection by creating a reference
-    pub(crate) fn protect(mut self) -> Self {
+    /// Takes the persistent reference this value reads through; a no-op once taken.
+    fn protect(mut self) -> Self {
+        if self.reference.is_some() || self.primitive.is_some() || self.value.is_null() {
+            return self;
+        }
         unsafe {
             let mut ref_value: arkjs::JSVM_Ref = ptr::null_mut();
             let status = arkjs::OH_JSVM_CreateReference(self.env, self.value, 1, &mut ref_value);
             if status == arkjs::JSVM_Status_JSVM_OK {
                 self.reference = Some(ref_value);
+            } else {
+                report_refused_reference(status);
             }
         }
         self
     }
 
-    /// Returns a fresh local handle for this value. If the value has a persistent
-    /// reference, resolves it via OH_JSVM_GetReferenceValue to get a handle that
-    /// is guaranteed valid in the current scope (important for async boundaries).
-    /// Falls back to the stored local handle if no reference exists.
+    /// Returns a handle valid in the current scope, read through the reference.
+    /// Only a value JSVM refused a reference for falls back to its creation
+    /// handle, which is valid only inside the native call that created it.
     pub(crate) fn resolve_handle(&self) -> arkjs::JSVM_Value {
+        if let Some(primitive) = self.primitive {
+            return primitive.handle(self.env);
+        }
         if let Some(reference) = self.reference {
             unsafe {
                 let mut value: arkjs::JSVM_Value = ptr::null_mut();
@@ -187,6 +255,19 @@ impl ArkJSValue {
         }
         self.value
     }
+}
+
+/// Without a reference a value reads its creation handle, which is reused
+/// once its native call returns. JSVM (V8 13.2) references every value type,
+/// so say so loudly if some JSVM version does not.
+fn report_refused_reference(status: arkjs::JSVM_Status) {
+    static REPORTED: std::sync::Once = std::sync::Once::new();
+    REPORTED.call_once(|| {
+        crate::hilog::warn(&format!(
+            "[ArkJS] OH_JSVM_CreateReference refused a value (status {status}); \
+             it is readable only inside the native call that created it"
+        ));
+    });
 }
 
 impl Drop for ArkJSValue {
@@ -212,9 +293,11 @@ impl JSValueImpl for ArkJSValue {
         ctx: <Self::Context as JSContextImpl>::RawContext,
         value: Self::RawValue,
     ) -> Self {
-        ArkJSValue::new(ctx, value).protect()
+        ArkJSValue::new(ctx, value)
     }
 
+    // A JSVM handle dies with the native call that made it, so an owned value
+    // needs a reference just like a borrowed one.
     fn from_owned_raw(
         ctx: <Self::Context as JSContextImpl>::RawContext,
         value: Self::RawValue,
@@ -230,6 +313,8 @@ impl JSValueImpl for ArkJSValue {
         value
     }
 
+    /// The creation handle; valid only inside the native call that made the
+    /// value. Use `raw_value_for_api` to pass the value to JSVM.
     fn as_raw_value(&self) -> &Self::RawValue {
         &self.value
     }
@@ -283,9 +368,7 @@ impl JSValueImpl for ArkJSValue {
                     let mut exception: arkjs::JSVM_Value = ptr::null_mut();
                     arkjs::OH_JSVM_GetAndClearLastException(env, &mut exception);
                     if !exception.is_null() {
-                        ArkJSValue::from_owned_raw(env, exception)
-                            .protect()
-                            .with_exception()
+                        ArkJSValue::from_owned_raw(env, exception).with_exception()
                     } else {
                         Self::create_undefined(ctx)
                     }
@@ -339,33 +422,20 @@ impl JSValueImpl for ArkJSValue {
 
 impl Clone for ArkJSValue {
     fn clone(&self) -> Self {
-        if let Some(reference) = self.reference {
-            // The original has a persistent reference. Resolve it to get a
-            // fresh local handle for creating the new reference, but keep
-            // self.value as the stored value (CLASS map keys depend on stable
-            // handle identity).
-            unsafe {
-                let mut fresh: arkjs::JSVM_Value = ptr::null_mut();
-                let status = arkjs::OH_JSVM_GetReferenceValue(self.env, reference, &mut fresh);
-                if status == arkjs::JSVM_Status_JSVM_OK && !fresh.is_null() {
-                    let mut ref_value: arkjs::JSVM_Ref = ptr::null_mut();
-                    let status = arkjs::OH_JSVM_CreateReference(self.env, fresh, 1, &mut ref_value);
-                    if status == arkjs::JSVM_Status_JSVM_OK {
-                        return ArkJSValue {
-                            env: self.env,
-                            value: self.value, // keep original handle identity
-                            reference: Some(ref_value),
-                            value_type: self.value_type,
-                            context_guard: self.context_guard.clone(),
-                        };
-                    }
-                }
-            }
+        if self.primitive.is_some() {
+            return ArkJSValue {
+                value: self.value,
+                env: self.env,
+                value_type: self.value_type,
+                reference: None,
+                primitive: self.primitive,
+                _context_guard: self._context_guard.clone(),
+            };
         }
-        // Fallback: no reference or resolve failed
-        let mut cloned = ArkJSValue::new(self.env, self.value);
+        // Each clone owns its own reference to the value the original reads now.
+        let mut cloned = ArkJSValue::new(self.env, self.resolve_handle());
         cloned.value_type = self.value_type;
-        cloned.protect()
+        cloned
     }
 }
 

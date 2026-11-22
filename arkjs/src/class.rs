@@ -20,7 +20,7 @@ struct CallableWrapperData {
     state: *mut CallableFuncState,
 }
 
-/// Per-class registration info stored by constructor pointer.
+/// Per-class registration info, keyed by the id stored on the constructor.
 struct ClassInfo {
     env: arkjs::JSVM_Env,
     finalizer_ptr: usize,
@@ -34,9 +34,28 @@ struct ClassInfo {
     type_tag: arkjs::JSVM_TypeTag,
 }
 
+/// What a constructor's class registration says about its instances.
+#[derive(Clone, Copy)]
+pub(crate) struct ClassMeta {
+    pub(crate) id: u32,
+    pub(crate) finalizer: arkjs::JSVM_Finalize,
+    pub(crate) callable: bool,
+    native_callback: Option<
+        unsafe extern "C" fn(arkjs::JSVM_Env, arkjs::JSVM_CallbackInfo) -> arkjs::JSVM_Value,
+    >,
+    pub(crate) type_tag: arkjs::JSVM_TypeTag,
+}
+
+/// Own property on each registered constructor holding its `CLASS` id. A
+/// handle address cannot key the map: the slot is reused once the native call
+/// that registered the class returns.
+const CLASS_ID_KEY: &CStr = c"__rong_class_id";
+
 thread_local! {
-    /// Maps constructor pointer → class registration info.
-    static CLASS: RefCell<HashMap<usize, ClassInfo>> = RefCell::new(HashMap::new());
+    /// Maps class id → class registration info.
+    static CLASS: RefCell<HashMap<u32, ClassInfo>> = RefCell::new(HashMap::new());
+
+    static NEXT_CLASS_ID: Cell<u32> = const { Cell::new(1) };
 
     /// When true, the generic_constructor was triggered by make_instance
     /// (via OH_JSVM_NewInstance) and should skip data_constructor — just return `this`.
@@ -165,7 +184,7 @@ where
     JC: JSClass<ArkJSValue>,
 {
     unsafe {
-        let Some((argv, this_arg, _data)) = read_callback_info(env, info) else {
+        let Some((argv, this_arg, data)) = read_callback_info(env, info) else {
             let mut undefined: arkjs::JSVM_Value = ptr::null_mut();
             arkjs::OH_JSVM_GetUndefined(env, &mut undefined);
             return undefined;
@@ -187,7 +206,8 @@ where
         // Store this_arg so make_instance wraps data onto it instead of
         // creating a second instance (JSVM ignores constructor return values).
         // Restore the outer value afterwards: constructors can nest.
-        let class_key = finalizer::<JC> as *const std::ffi::c_void as usize;
+        // The callback data is the class id (see `register_class_internal`).
+        let class_key = data as usize;
         let outer = CONSTRUCTOR_THIS.replace((this_arg, class_key));
 
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -242,6 +262,11 @@ where
         let func_data = &*(data as *const CallableFuncState);
         let mut func_value: arkjs::JSVM_Value = ptr::null_mut();
         arkjs::OH_JSVM_GetReferenceValue(env, func_data.func_ref, &mut func_value);
+        if func_value.is_null() {
+            let mut undefined: arkjs::JSVM_Value = ptr::null_mut();
+            arkjs::OH_JSVM_GetUndefined(env, &mut undefined);
+            return undefined;
+        }
 
         let function = ArkJSValue::from_borrowed_raw(env, func_value);
         let this = ArkJSValue::from_borrowed_raw(env, this_arg);
@@ -273,15 +298,11 @@ pub(crate) fn make_callable_instance(
     constructor: ArkJSValue,
     data: *mut (),
 ) -> ArkJSValue {
-    let native_finalizer = get_finalizer_by_constructor(&constructor);
-    let constructor_ptr = *constructor.as_raw_value() as usize;
-    let native_callback = CLASS.with(|map| {
-        map.borrow()
-            .get(&constructor_ptr)
-            .and_then(|info| info.native_callback)
-    });
-
-    let Some(callback_fn) = native_callback else {
+    let Some(meta) = class_meta(&constructor) else {
+        return ArkJSValue::create_undefined(ctx);
+    };
+    let native_finalizer = meta.finalizer;
+    let Some(callback_fn) = meta.native_callback else {
         return ArkJSValue::create_undefined(ctx);
     };
 
@@ -309,8 +330,11 @@ pub(crate) fn make_callable_instance(
             return ArkJSValue::create_undefined(ctx);
         }
 
+        // Weak: a strong self-reference would keep the function, and so the
+        // wrapper whose finalizer frees this state, alive forever. A function
+        // is reachable while it runs, so the callback always resolves it.
         let mut func_ref: arkjs::JSVM_Ref = ptr::null_mut();
-        if arkjs::OH_JSVM_CreateReference(ctx.to_raw(), func_value, 1, &mut func_ref)
+        if arkjs::OH_JSVM_CreateReference(ctx.to_raw(), func_value, 0, &mut func_ref)
             != arkjs::JSVM_Status_JSVM_OK
         {
             finalize_native_data(ctx.to_raw(), native_finalizer, data);
@@ -349,9 +373,7 @@ pub(crate) fn make_callable_instance(
             let _ = Box::from_raw(state);
             return ArkJSValue::create_undefined(ctx);
         }
-        if let Some(tag) = get_type_tag_by_constructor(&constructor) {
-            let _ = arkjs::OH_JSVM_TypeTagObject(ctx.to_raw(), wrapper_obj, &tag);
-        }
+        let _ = arkjs::OH_JSVM_TypeTagObject(ctx.to_raw(), wrapper_obj, &meta.type_tag);
         let status =
             define_hidden_value_property(ctx.to_raw(), func_value, c"__rong_data", wrapper_obj);
         if status != arkjs::JSVM_Status_JSVM_OK {
@@ -419,10 +441,13 @@ where
         let class_name_cstr = CString::new(class_name).unwrap();
         let mut constructor: arkjs::JSVM_Value = ptr::null_mut();
 
+        let class_id = NEXT_CLASS_ID.get();
+        NEXT_CLASS_ID.set(class_id.wrapping_add(1).max(1));
+
         // Heap-allocated because JSVM stores the pointer
         let constructor_callback = Box::into_raw(Box::new(arkjs::JSVM_CallbackStruct {
             callback: Some(generic_constructor::<JC>),
-            data: ptr::null_mut(),
+            data: class_id as usize as *mut std::ffi::c_void,
         }));
 
         // All classes use OH_JSVM_DefineClass. For CALLABLE classes (RustFunc),
@@ -462,15 +487,28 @@ where
                 None
             };
 
-            // Generate a unique type tag from the finalizer pointer and a magic constant
+            // From the class id, not a function address: the compiler folds
+            // identical finalizers of same-layout classes into one address.
             let type_tag = arkjs::JSVM_TypeTag {
-                lower: finalizer_ptr as u64,
+                lower: class_id as u64,
                 upper: 0x524F4E47_524F4E47, // "RONGRONG" as magic
             };
 
+            let mut id_value: arkjs::JSVM_Value = ptr::null_mut();
+            let id_status = arkjs::OH_JSVM_CreateUint32(ctx.to_raw(), class_id, &mut id_value);
+            if id_status != arkjs::JSVM_Status_JSVM_OK
+                || define_hidden_value_property(ctx.to_raw(), constructor, CLASS_ID_KEY, id_value)
+                    != arkjs::JSVM_Status_JSVM_OK
+            {
+                let mut stale: arkjs::JSVM_Value = ptr::null_mut();
+                let _ = arkjs::OH_JSVM_GetAndClearLastException(ctx.to_raw(), &mut stale);
+                let _ = Box::from_raw(constructor_callback);
+                return ArkJSValue::create_undefined(ctx);
+            }
+
             CLASS.with(|map| {
                 map.borrow_mut().insert(
-                    constructor as usize,
+                    class_id,
                     ClassInfo {
                         env: ctx.to_raw(),
                         finalizer_ptr,
@@ -490,16 +528,70 @@ where
     }
 }
 
-/// Retrieves the finalizer function pointer associated with a given constructor
-pub(crate) fn get_finalizer_by_constructor(constructor: &ArkJSValue) -> arkjs::JSVM_Finalize {
-    let constructor_ptr = *constructor.as_raw_value() as usize;
+/// Reads the class id from the constructor's own property; a subclass
+/// constructor inherits the property but is not the registered class.
+fn class_id(constructor: &ArkJSValue) -> Option<u32> {
+    unsafe {
+        let env = *constructor.as_raw_context();
+        let ctor = constructor.resolve_handle();
+        if ctor.is_null() {
+            return None;
+        }
+        let mut key: arkjs::JSVM_Value = ptr::null_mut();
+        if arkjs::OH_JSVM_CreateStringUtf8(
+            env,
+            CLASS_ID_KEY.as_ptr(),
+            CLASS_ID_KEY.to_bytes().len(),
+            &mut key,
+        ) != arkjs::JSVM_Status_JSVM_OK
+        {
+            return None;
+        }
+        let mut own = false;
+        if arkjs::OH_JSVM_HasOwnProperty(env, ctor, key, &mut own) != arkjs::JSVM_Status_JSVM_OK
+            || !own
+        {
+            let mut stale: arkjs::JSVM_Value = ptr::null_mut();
+            let _ = arkjs::OH_JSVM_GetAndClearLastException(env, &mut stale);
+            return None;
+        }
+        let mut id_value: arkjs::JSVM_Value = ptr::null_mut();
+        let mut id = 0u32;
+        if arkjs::OH_JSVM_GetProperty(env, ctor, key, &mut id_value) != arkjs::JSVM_Status_JSVM_OK
+            || arkjs::OH_JSVM_GetValueUint32(env, id_value, &mut id) != arkjs::JSVM_Status_JSVM_OK
+        {
+            let mut stale: arkjs::JSVM_Value = ptr::null_mut();
+            let _ = arkjs::OH_JSVM_GetAndClearLastException(env, &mut stale);
+            return None;
+        }
+        Some(id)
+    }
+}
+
+/// The registration of the class `constructor` was registered as, if any.
+pub(crate) fn class_meta(constructor: &ArkJSValue) -> Option<ClassMeta> {
+    let id = class_id(constructor)?;
+    let env = *constructor.as_raw_context();
     CLASS.with(|map| {
-        map.borrow().get(&constructor_ptr).map(|info| unsafe {
-            std::mem::transmute::<
-                usize,
-                unsafe extern "C" fn(arkjs::JSVM_Env, *mut std::ffi::c_void, *mut std::ffi::c_void),
-            >(info.finalizer_ptr)
-        })
+        map.borrow()
+            .get(&id)
+            .filter(|info| info.env == env)
+            .map(|info| ClassMeta {
+                id,
+                finalizer: Some(unsafe {
+                    std::mem::transmute::<
+                        usize,
+                        unsafe extern "C" fn(
+                            arkjs::JSVM_Env,
+                            *mut std::ffi::c_void,
+                            *mut std::ffi::c_void,
+                        ),
+                    >(info.finalizer_ptr)
+                }),
+                callable: info.callable,
+                native_callback: info.native_callback,
+                type_tag: info.type_tag,
+            })
     })
 }
 
@@ -547,10 +639,8 @@ fn get_callable_wrapper(value: &ArkJSValue) -> Option<arkjs::JSVM_Value> {
     }
 }
 
-pub(crate) fn callable_instance_of(value: &ArkJSValue, constructor: &ArkJSValue) -> bool {
-    let Some(tag) = get_type_tag_by_constructor(constructor) else {
-        return false;
-    };
+pub(crate) fn callable_instance_of(value: &ArkJSValue, meta: &ClassMeta) -> bool {
+    let tag = meta.type_tag;
     let Some(wrapper) = get_callable_wrapper(value) else {
         return false;
     };
@@ -583,20 +673,4 @@ pub(crate) fn cleanup_class_cache(env: arkjs::JSVM_Env) {
             }
         }
     });
-}
-
-/// Retrieves the type tag associated with a given constructor for instance_of checks.
-pub(crate) fn get_type_tag_by_constructor(constructor: &ArkJSValue) -> Option<arkjs::JSVM_TypeTag> {
-    let constructor_ptr = *constructor.as_raw_value() as usize;
-    CLASS.with(|map| map.borrow().get(&constructor_ptr).map(|info| info.type_tag))
-}
-
-/// Checks if a constructor was registered as callable (CALLABLE=true)
-pub(crate) fn is_callable_constructor(constructor: &ArkJSValue) -> bool {
-    let constructor_ptr = *constructor.as_raw_value() as usize;
-    CLASS.with(|map| {
-        map.borrow()
-            .get(&constructor_ptr)
-            .is_some_and(|info| info.callable)
-    })
 }

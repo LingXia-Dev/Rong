@@ -23,9 +23,7 @@ impl JSArrayOps for ArkJSValue {
             if status != arkjs::JSVM_Status_JSVM_OK {
                 let mut exception: arkjs::JSVM_Value = std::ptr::null_mut();
                 arkjs::OH_JSVM_GetAndClearLastException(self.env, &mut exception);
-                return ArkJSValue::from_owned_raw(self.env, exception)
-                    .protect()
-                    .with_exception();
+                return ArkJSValue::from_owned_raw(self.env, exception).with_exception();
             }
 
             let mut value: arkjs::JSVM_Value = std::ptr::null_mut();
@@ -38,9 +36,7 @@ impl JSArrayOps for ArkJSValue {
                 // the OOM/internal-error root cause as a type mismatch.
                 let mut exception: arkjs::JSVM_Value = std::ptr::null_mut();
                 arkjs::OH_JSVM_GetAndClearLastException(self.env, &mut exception);
-                ArkJSValue::from_owned_raw(self.env, exception)
-                    .protect()
-                    .with_exception()
+                ArkJSValue::from_owned_raw(self.env, exception).with_exception()
             }
         }
     }
@@ -56,9 +52,7 @@ impl JSArrayOps for ArkJSValue {
                 // Return exception
                 let mut exception: arkjs::JSVM_Value = std::ptr::null_mut();
                 arkjs::OH_JSVM_GetAndClearLastException(self.env, &mut exception);
-                ArkJSValue::from_owned_raw(self.env, exception)
-                    .protect()
-                    .with_exception()
+                ArkJSValue::from_owned_raw(self.env, exception).with_exception()
             }
         }
     }
@@ -70,9 +64,7 @@ impl JSArrayOps for ArkJSValue {
             if status != arkjs::JSVM_Status_JSVM_OK {
                 let mut exception: arkjs::JSVM_Value = std::ptr::null_mut();
                 arkjs::OH_JSVM_GetAndClearLastException(self.env, &mut exception);
-                return ArkJSValue::from_owned_raw(self.env, exception)
-                    .protect()
-                    .with_exception();
+                return ArkJSValue::from_owned_raw(self.env, exception).with_exception();
             }
 
             self.reflect_set(key, value.resolve_handle())
