@@ -6,10 +6,16 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 
 ## [Unreleased]
 
-Proposed release: `rong_core` 0.8.0 with every crate that depends on it
-(`rong`, the engine crates, `rong_modules`, `rong_cli` and the module crates)
-at 0.8.0, `rong_macro` 0.7.0 and `rong_typegen` 0.7.0. Argument conversion
-becomes strict, which changes behaviour for existing embedders.
+## [0.8.0] - 2026-11-22
+
+Crate releases: `rong_core`, `rong`, `rong_quickjs`, `rong_jscore`,
+`rong_arkjs`, `rong_modules`, `rong_cli` and every module crate at 0.8.0;
+`rong_macro` and `rong_typegen` at 0.7.0. Argument conversion becomes strict,
+which changes behaviour for existing embedders, so `rong_core` leaves the
+`^0.7` range and each crate depending on it moves with it; `rong_macro` moves
+because its derived code needs the new `rong_core`. `rong_rt` and the `*_sys`
+crates are unchanged. Host errors can be instances of an embedder-registered
+class and carry `reason` and `detail`.
 
 ### Errors
 
