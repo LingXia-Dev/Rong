@@ -242,8 +242,7 @@ fn js_value_to_sqlite(val: &JSValue) -> JSResult<Value> {
     }
     if val.is_bigint() {
         let s: String = val
-            .clone()
-            .to_rust()
+            .to_string_coerced()
             .map_err(|_| sqlite_error("Invalid bigint parameter"))?;
         let n: i64 = s
             .parse()

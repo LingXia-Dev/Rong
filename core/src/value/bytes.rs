@@ -184,12 +184,15 @@ where
     V::Context: JSErrorFactory + JSExceptionThrower,
 {
     fn from_js_value(ctx: &JSContext<V::Context>, value: JSValue<V>) -> JSResult<Self> {
+        let refuse = |got: String| -> crate::RongJSError {
+            HostError::type_mismatch("a JSBytes instance", got).into()
+        };
+        let got = value.type_of().to_string();
+        if !value.is_object() {
+            return Err(refuse(got));
+        }
         let obj = JSObject::from_js_value(ctx, value)?;
-        Self::from_object(obj).ok_or_else(|| {
-            HostError::new(crate::error::E_TYPE, "Value is not a JSBytes instance")
-                .with_name("TypeError")
-                .into()
-        })
+        Self::from_object(obj).ok_or_else(|| refuse(got))
     }
 }
 

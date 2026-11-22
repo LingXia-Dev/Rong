@@ -51,20 +51,23 @@ impl Headers {
                                 .into());
                             }
 
-                            let key: String = pair.get_opt(0)?.ok_or_else(|| {
-                                HostError::new(
-                                    rong::error::E_INVALID_ARG,
-                                    "Header name is required",
-                                )
-                                .with_name("TypeError")
-                            })?;
-                            let value: String = pair.get_opt(1)?.ok_or_else(|| {
-                                HostError::new(
-                                    rong::error::E_INVALID_ARG,
-                                    "Header value is required",
-                                )
-                                .with_name("TypeError")
-                            })?;
+                            // Header names and values are ByteStrings: stringified.
+                            let Coerced(key) =
+                                pair.get_opt::<Coerced<String>>(0)?.ok_or_else(|| {
+                                    HostError::new(
+                                        rong::error::E_INVALID_ARG,
+                                        "Header name is required",
+                                    )
+                                    .with_name("TypeError")
+                                })?;
+                            let Coerced(value) =
+                                pair.get_opt::<Coerced<String>>(1)?.ok_or_else(|| {
+                                    HostError::new(
+                                        rong::error::E_INVALID_ARG,
+                                        "Header value is required",
+                                    )
+                                    .with_name("TypeError")
+                                })?;
 
                             match (
                                 HeaderName::try_from(key.as_str()),
@@ -101,7 +104,7 @@ impl Headers {
                     }
                 } else {
                     for entry in obj.entries()? {
-                        let (key, value) = entry.try_into::<String, String>()?;
+                        let (key, Coerced(value)) = entry.try_into::<String, Coerced<String>>()?;
 
                         match (
                             HeaderName::try_from(key.as_str()),
@@ -145,7 +148,9 @@ impl Headers {
     /// existing header inside a Headers object, or adds the header if it does not
     /// already exist.
     #[js_method]
-    pub(crate) fn append(&mut self, name: String, value: String) -> JSResult<()> {
+    pub(crate) fn append(&mut self, name: Coerced<String>, value: Coerced<String>) -> JSResult<()> {
+        let name = name.0;
+        let value = value.0;
         match (
             HeaderName::try_from(name.as_str()),
             HeaderValue::try_from(value.as_str()),
@@ -170,7 +175,8 @@ impl Headers {
 
     /// The delete() method of the Headers interface deletes a header from the current Headers object.
     #[js_method]
-    pub(crate) fn delete(&mut self, name: String) -> JSResult<()> {
+    pub(crate) fn delete(&mut self, name: Coerced<String>) -> JSResult<()> {
+        let name = name.0;
         let name = HeaderName::try_from(name.as_str()).map_err(|_| {
             HostError::new(
                 rong::error::E_INVALID_ARG,
@@ -190,7 +196,8 @@ impl Headers {
     /// object. If the given name is not the name of an HTTP header, this method throws
     /// a TypeError. The name is case-insensitive.
     #[js_method]
-    pub(crate) fn get(&self, name: String) -> JSResult<Option<String>> {
+    pub(crate) fn get(&self, name: Coerced<String>) -> JSResult<Option<String>> {
+        let name = name.0;
         match HeaderName::try_from(name.as_str()) {
             Ok(name) => {
                 let values: Vec<&str> = self
@@ -221,7 +228,8 @@ impl Headers {
     /// The name of the HTTP header you want to test for. If the given name is not a
     /// valid HTTP header name, this method throws a TypeError.
     #[js_method]
-    pub(crate) fn has(&self, name: String) -> JSResult<bool> {
+    pub(crate) fn has(&self, name: Coerced<String>) -> JSResult<bool> {
+        let name = name.0;
         match HeaderName::try_from(name.as_str()) {
             Ok(name) => Ok(self.headers.contains_key(&name)),
             Err(_) => Err(HostError::new(
@@ -239,7 +247,9 @@ impl Headers {
     /// The name of the HTTP header you want to set to a new value. If the given
     /// name is not the name of an HTTP header, this method throws a TypeError.
     #[js_method]
-    pub(crate) fn set(&mut self, name: String, value: String) -> JSResult<()> {
+    pub(crate) fn set(&mut self, name: Coerced<String>, value: Coerced<String>) -> JSResult<()> {
+        let name = name.0;
+        let value = value.0;
         // Check for null characters in value
         if value.contains('\0') {
             return Err(HostError::new(

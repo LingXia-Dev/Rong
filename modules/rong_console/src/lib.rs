@@ -296,7 +296,8 @@ fn trace(ctx: JSContext, args: Rest<JSValue>) {
     log_message(&ctx, LogLevel::Trace, rendered);
 }
 
-fn time(ctx: JSContext, label: Optional<String>) {
+fn time(ctx: JSContext, label: Optional<Coerced<String>>) {
+    let label = Optional(label.0.map(Coerced::into_inner));
     let label = normalize_console_label(label.0, "default");
     console_state(&ctx)
         .timers
@@ -304,7 +305,8 @@ fn time(ctx: JSContext, label: Optional<String>) {
         .insert(label, Instant::now());
 }
 
-fn time_log(ctx: JSContext, label: Optional<String>, args: Rest<JSValue>) {
+fn time_log(ctx: JSContext, label: Optional<Coerced<String>>, args: Rest<JSValue>) {
+    let label = Optional(label.0.map(Coerced::into_inner));
     let label = normalize_console_label(label.0, "default");
     let Some(started_at) = console_state(&ctx).timers.borrow().get(&label).copied() else {
         log_message(
@@ -323,7 +325,8 @@ fn time_log(ctx: JSContext, label: Optional<String>, args: Rest<JSValue>) {
     log_message(&ctx, LogLevel::Info, message);
 }
 
-fn time_end(ctx: JSContext, label: Optional<String>) {
+fn time_end(ctx: JSContext, label: Optional<Coerced<String>>) {
+    let label = Optional(label.0.map(Coerced::into_inner));
     let label = normalize_console_label(label.0, "default");
     let Some(started_at) = console_state(&ctx).timers.borrow_mut().remove(&label) else {
         log_message(
@@ -341,7 +344,8 @@ fn time_end(ctx: JSContext, label: Optional<String>) {
     );
 }
 
-fn count(ctx: JSContext, label: Optional<String>) {
+fn count(ctx: JSContext, label: Optional<Coerced<String>>) {
+    let label = Optional(label.0.map(Coerced::into_inner));
     let label = normalize_console_label(label.0, "default");
     let next = {
         let state = console_state(&ctx);
@@ -353,7 +357,8 @@ fn count(ctx: JSContext, label: Optional<String>) {
     log_message(&ctx, LogLevel::Info, format!("{label}: {next}"));
 }
 
-fn count_reset(ctx: JSContext, label: Optional<String>) {
+fn count_reset(ctx: JSContext, label: Optional<Coerced<String>>) {
+    let label = Optional(label.0.map(Coerced::into_inner));
     let label = normalize_console_label(label.0, "default");
     let removed = console_state(&ctx)
         .counters
@@ -405,7 +410,7 @@ fn format_values_internal(result: &mut String, args: Vec<JSValue>) {
                     match chars.next() {
                         Some('s') => {
                             if let Some((_, next_arg)) = iter.next() {
-                                if let Ok(str) = next_arg.clone().to_rust::<String>() {
+                                if let Ok(str) = next_arg.to_string_coerced() {
                                     result.push_str(&str);
                                 } else {
                                     format_raw_inner(
@@ -547,7 +552,7 @@ fn format_raw_inner(
         }
 
         JSValueType::BigInt => {
-            if let Ok(s) = value.to_rust::<String>() {
+            if let Ok(s) = value.to_string_coerced() {
                 result.push_str(&ensure_bigint_suffix(&s));
             }
         }
@@ -565,7 +570,7 @@ fn format_raw_inner(
         }
 
         JSValueType::Date => {
-            if let Ok(s) = value.to_rust::<String>() {
+            if let Ok(s) = value.to_string_coerced() {
                 result.push_str(&s);
             }
         }
@@ -585,7 +590,7 @@ fn format_raw_inner(
                 format_array(result, array, visited, depth, options);
             } else if let Some(name) = object_display_name(&obj)
                 && name == "RegExp"
-                && let Ok(source) = value.clone().to_rust::<String>()
+                && let Ok(source) = value.to_string_coerced()
             {
                 result.push_str(&source);
             } else {
@@ -906,8 +911,7 @@ fn js_value_is_truthy(value: &JSValue) -> bool {
             .map(|num| num != 0.0 && !num.is_nan())
             .unwrap_or(false),
         JSValueType::BigInt => value
-            .clone()
-            .to_rust::<String>()
+            .to_string_coerced()
             .map(|num| num != "0" && num != "0n")
             .unwrap_or(true),
         JSValueType::String => value
@@ -1036,27 +1040,27 @@ impl Console {
     }
 
     #[js_method]
-    fn time(&self, ctx: JSContext, label: Optional<String>) {
+    fn time(&self, ctx: JSContext, label: Optional<Coerced<String>>) {
         time(ctx, label);
     }
 
     #[js_method(rename = "timeLog")]
-    fn time_log(&self, ctx: JSContext, label: Optional<String>, args: Rest<JSValue>) {
+    fn time_log(&self, ctx: JSContext, label: Optional<Coerced<String>>, args: Rest<JSValue>) {
         time_log(ctx, label, args);
     }
 
     #[js_method(rename = "timeEnd")]
-    fn time_end(&self, ctx: JSContext, label: Optional<String>) {
+    fn time_end(&self, ctx: JSContext, label: Optional<Coerced<String>>) {
         time_end(ctx, label);
     }
 
     #[js_method]
-    fn count(&self, ctx: JSContext, label: Optional<String>) {
+    fn count(&self, ctx: JSContext, label: Optional<Coerced<String>>) {
         count(ctx, label);
     }
 
     #[js_method(rename = "countReset")]
-    fn count_reset(&self, ctx: JSContext, label: Optional<String>) {
+    fn count_reset(&self, ctx: JSContext, label: Optional<Coerced<String>>) {
         count_reset(ctx, label);
     }
 

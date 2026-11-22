@@ -46,7 +46,7 @@ pub use promise::{Promise, PromiseResolver};
 pub use runtime::{JSEngine, JSRuntime};
 pub use source::{Source, SourceKind};
 pub use value::{
-    AnyJSTypedArray, FromJSValue, IntoJSValue, JSArray, JSArrayBuffer, JSBytes, JSDate,
+    AnyJSTypedArray, Coerced, FromJSValue, IntoJSValue, JSArray, JSArrayBuffer, JSBytes, JSDate,
     JSException, JSFunc, JSObject, JSProxy, JSSymbol, JSTypedArray, JSTypedArrayKind, JSValue,
     JSValueType, JsonToJSValue, PropertyAttributes, PropertyDescriptor, PropertyKey,
     TypedArrayElement, Uint8Clamped,
@@ -63,11 +63,11 @@ pub use engine::{
 
 pub mod prelude {
     pub use crate::{
-        Class, ClassSetup, FromJSValue, HostError, InterruptGuard, InterruptHandle, InterruptMode,
-        IntoJSAsyncIteratorExt, IntoJSIteratorExt, IntoJSValue, JSArray, JSArrayBuffer,
-        JSArrayBufferOps, JSArrayOps, JSAsyncIterator, JSBytes, JSClass, JSContext, JSContextImpl,
-        JSDate, JSEngine, JSErrorFactory, JSException, JSExceptionThrower, JSFunc, JSIterator,
-        JSObject, JSObjectOps, JSProxy, JSProxyOps, JSRawContext, JSResult, JSRuntime,
+        Class, ClassSetup, Coerced, FromJSValue, HostError, InterruptGuard, InterruptHandle,
+        InterruptMode, IntoJSAsyncIteratorExt, IntoJSIteratorExt, IntoJSValue, JSArray,
+        JSArrayBuffer, JSArrayBufferOps, JSArrayOps, JSAsyncIterator, JSBytes, JSClass, JSContext,
+        JSContextImpl, JSDate, JSEngine, JSErrorFactory, JSException, JSExceptionThrower, JSFunc,
+        JSIterator, JSObject, JSObjectOps, JSProxy, JSProxyOps, JSRawContext, JSResult, JSRuntime,
         JSRuntimeImpl, JSSymbol, JSTypeOf, JSTypedArray, JSTypedArrayOps, JSValue,
         JSValueConversion, JSValueImpl, JSValueMapper, JsInvokePriority, Promise, RongJSError,
         Source, SourceKind, enqueue_js_invoke, install_async_iterator_symbol,

@@ -8,7 +8,8 @@ use url::form_urlencoded;
 enum FormDataEntryValue {
     File(File),
     Blob(Blob),
-    String(String),
+    /// A USVString: any other value is stringified.
+    String(Coerced<String>),
 }
 
 #[js_class]
@@ -97,7 +98,14 @@ impl FormData {
     /// appends a new value onto an existing key inside a FormData object, or adds
     /// the key if it does not already exist.
     #[js_method]
-    fn append(&mut self, name: String, value: FormDataEntryValue, filename: Optional<String>) {
+    fn append(
+        &mut self,
+        name: Coerced<String>,
+        value: FormDataEntryValue,
+        filename: Optional<Coerced<String>>,
+    ) {
+        let filename = Optional(filename.0.map(Coerced::into_inner));
+        let name = name.0;
         let filename = match &value {
             FormDataEntryValue::File(file) => filename.0.unwrap_or_else(|| file.name()),
             FormDataEntryValue::Blob(_) => filename.0.unwrap_or_else(|| "blob".to_string()),
@@ -108,13 +116,15 @@ impl FormData {
 
     /// deletes a key and its value(s) from a FormData object
     #[js_method]
-    fn delete(&mut self, name: String) {
+    fn delete(&mut self, name: Coerced<String>) {
+        let name = name.0;
         self.entries.retain(|(key, _, _)| key != &name);
     }
 
     /// returns the first value associated with a given key from within a FormData object
     #[js_method]
-    fn get(&self, name: String) -> Option<FormDataEntryValue> {
+    fn get(&self, name: Coerced<String>) -> Option<FormDataEntryValue> {
+        let name = name.0;
         self.entries
             .iter()
             .find(|(key, _, _)| key == &name)
@@ -123,7 +133,8 @@ impl FormData {
 
     /// returns all the values associated with a given key from within a FormData object.
     #[js_method(rename = "getAll")]
-    fn get_all(&self, name: String) -> Vec<FormDataEntryValue> {
+    fn get_all(&self, name: Coerced<String>) -> Vec<FormDataEntryValue> {
+        let name = name.0;
         self.entries
             .iter()
             .filter(|(key, _, _)| key == &name)
@@ -133,14 +144,22 @@ impl FormData {
 
     /// returns whether a FormData object contains a certain key.
     #[js_method]
-    fn has(&self, name: String) -> bool {
+    fn has(&self, name: Coerced<String>) -> bool {
+        let name = name.0;
         self.entries.iter().any(|(key, _, _)| key == &name)
     }
 
     /// sets a new value for an existing key inside a FormData object, or adds the
     /// key/value if it does not already exist.
     #[js_method]
-    fn set(&mut self, name: String, value: FormDataEntryValue, filename: Optional<String>) {
+    fn set(
+        &mut self,
+        name: Coerced<String>,
+        value: FormDataEntryValue,
+        filename: Optional<Coerced<String>>,
+    ) {
+        let filename = Optional(filename.0.map(Coerced::into_inner));
+        let name = name.0;
         let filename = match &value {
             FormDataEntryValue::File(file) => filename.0.unwrap_or_else(|| file.name()),
             FormDataEntryValue::Blob(_) => filename.0.unwrap_or_else(|| "blob".to_string()),
@@ -317,7 +336,7 @@ impl FormData {
         for (key, value) in form_urlencoded::parse(body.as_bytes()) {
             entries.push((
                 key.into_owned(),
-                FormDataEntryValue::String(value.into_owned()),
+                FormDataEntryValue::String(Coerced(value.into_owned())),
                 String::new(),
             ));
         }
@@ -401,7 +420,11 @@ impl FormData {
                 entries.push((name, FormDataEntryValue::File(file), filename));
             } else {
                 let value = String::from_utf8_lossy(content).into_owned();
-                entries.push((name, FormDataEntryValue::String(value), String::new()));
+                entries.push((
+                    name,
+                    FormDataEntryValue::String(Coerced(value)),
+                    String::new(),
+                ));
             }
 
             pos = next_boundary + delimiter_with_crlf.len();

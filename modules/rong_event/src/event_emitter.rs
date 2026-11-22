@@ -59,8 +59,12 @@ impl FromJSValue<JSEngineValue> for EventKey {
         if let Ok(key) = String::from_js_value(ctx, value.clone()) {
             return Ok(EventKey::String(key));
         }
-        if let Ok(symbol) = JSSymbol::from_js_value(ctx, value) {
+        if let Ok(symbol) = JSSymbol::from_js_value(ctx, value.clone()) {
             return Ok(EventKey::Symbol(symbol));
+        }
+        // Other names (`emitter.on(1, …)`) are keyed by their string form.
+        if let Ok(key) = value.to_string_coerced() {
+            return Ok(EventKey::String(key));
         }
         Err(HostError::new(
             rong::error::E_INVALID_ARG,

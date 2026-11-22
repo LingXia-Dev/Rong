@@ -265,7 +265,7 @@ impl HttpBody {
 
         // BodyInit falls back to JavaScript string conversion for values that
         // are not one of its supported binary or structured body types.
-        let s = self.0.clone().to_rust::<String>()?;
+        let s = self.0.to_string_coerced()?;
         Ok((Bytes::from(s), None))
     }
 

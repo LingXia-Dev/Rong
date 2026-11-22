@@ -287,10 +287,14 @@ pub async fn fetch(
                         let next_port = next_url.port_or_known_default();
                         let is_cross_host = current_host != next_host || current_port != next_port;
                         if is_cross_host {
-                            request.headers.delete("authorization".to_string())?;
-                            request.headers.delete("proxy-authorization".to_string())?;
-                            request.headers.delete("cookie".to_string())?;
-                            request.headers.delete("host".to_string())?;
+                            request
+                                .headers
+                                .delete(Coerced("authorization".to_string()))?;
+                            request
+                                .headers
+                                .delete(Coerced("proxy-authorization".to_string()))?;
+                            request.headers.delete(Coerced("cookie".to_string()))?;
+                            request.headers.delete(Coerced("host".to_string()))?;
                         }
 
                         // Check permission for new domain
@@ -351,9 +355,15 @@ pub async fn fetch(
                         if should_switch_to_get {
                             request.method = http::Method::GET;
                             request.body = None;
-                            request.headers.delete("content-length".to_string())?;
-                            request.headers.delete("content-type".to_string())?;
-                            request.headers.delete("transfer-encoding".to_string())?;
+                            request
+                                .headers
+                                .delete(Coerced("content-length".to_string()))?;
+                            request
+                                .headers
+                                .delete(Coerced("content-type".to_string()))?;
+                            request
+                                .headers
+                                .delete(Coerced("transfer-encoding".to_string()))?;
                         }
 
                         // Discard the redirect response and continue.

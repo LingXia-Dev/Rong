@@ -299,7 +299,7 @@ impl Storage {
                 })?
             }
         } else if value.is_bigint() {
-            let bigint = value.clone().to_rust::<String>().map_err(|_| {
+            let bigint = value.to_string_coerced().map_err(|_| {
                 HostError::new(rong::error::E_INVALID_ARG, "Invalid bigint value")
                     .with_name("TypeError")
             })?;
@@ -364,7 +364,7 @@ impl Storage {
                 )
                 .with_name("TypeError")
             })?
-        } else if let Ok(s) = value.clone().to_rust::<String>() {
+        } else if let Ok(s) = value.to_string_coerced() {
             // Fallback: convert to string
             serde_json::to_string(&s).map_err(|e| {
                 HostError::new(

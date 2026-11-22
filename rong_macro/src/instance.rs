@@ -72,6 +72,21 @@ pub fn class_instance_impl(input: &DeriveInput) -> syn::Result<TokenStream> {
         quote! {
             impl rong::FromJSValue<rong::JSEngineValue> for #type_name {
                 fn from_js_value(ctx: &rong::JSContext, value: rong::JSValue) -> rong::JSResult<Self> {
+                    let got = value.type_of().to_string();
+                    let is_instance = value.is_object() && {
+                        let obj = rong::JSObject::from_js_value(ctx, value.clone())?;
+                        rong::Class::instance_of::<Self>(&obj)
+                    };
+                    if !is_instance {
+                        return Err(rong::HostError::type_mismatch(
+                            format!(
+                                "a {} instance",
+                                <Self as rong::JSClass<rong::JSEngineValue>>::NAME
+                            ),
+                            got,
+                        )
+                        .into());
+                    }
                     let obj = rong::JSObject::from_js_value(ctx, value)?;
                     let instance = obj.borrow::<Self>()?;
                     // Some JS-exposed structs implement an inherent `clone()` method (e.g. `Response.prototype.clone()`).

@@ -23,8 +23,13 @@ pub(crate) fn impl_enum_conversions(input: &DeriveInput) -> Result<TokenStream, 
                         if fields.unnamed.len() == 1 {
                             let ty = &fields.unnamed.first().unwrap().ty;
                             from_js_variants.push(quote! {
-                                if let Ok(val) = #ty::from_js_value(ctx, value.clone()) {
-                                    return Ok(Self::#variant_name(val));
+                                match <#ty as rong::FromJSValue<rong::JSEngineValue>>::from_js_value(ctx, value.clone()) {
+                                    Ok(val) => return Ok(Self::#variant_name(val)),
+                                    Err(e) => expected.push(
+                                        e.expected_kind()
+                                            .map(str::to_string)
+                                            .unwrap_or_else(|| stringify!(#variant_name).to_string()),
+                                    ),
                                 }
                             });
 
@@ -54,20 +59,19 @@ pub(crate) fn impl_enum_conversions(input: &DeriveInput) -> Result<TokenStream, 
                 }
             }
 
-            let variant_names = data.variants.iter().map(|v| &v.ident);
-
             let expanded = quote! {
                 impl rong::FromJSValue<rong::JSEngineValue> for #name {
                     fn from_js_value(ctx: &rong::JSContext, value: rong::JSValue) -> rong::JSResult<Self> {
+                        let mut expected: ::std::vec::Vec<::std::string::String> = ::std::vec::Vec::new();
                         #(#from_js_variants)*
-                        Err(rong::HostError::new(
-                            rong::error::E_INVALID_ARG,
-                            format!(
-                                "Invalid value for enum {}. Expected one of: {}",
-                                stringify!(#name),
-                                [#(stringify!(#variant_names)),*].join(", ")
-                            )
-                        ).with_name("TypeError").into())
+                        expected.dedup();
+                        let expected = match expected.split_last() {
+                            Some((last, rest)) if !rest.is_empty() => {
+                                format!("{} or {}", rest.join(", "), last)
+                            }
+                            _ => expected.concat(),
+                        };
+                        Err(rong::HostError::type_mismatch(expected, value.type_of().to_string()).into())
                     }
                 }
 

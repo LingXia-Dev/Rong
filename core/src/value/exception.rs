@@ -80,7 +80,7 @@ where
         } else {
             let js_value = self.into_js_value(&ctx);
             JSError {
-                message: String::from_js_value(&ctx, js_value).ok(),
+                message: js_value.to_string_coerced().ok(),
                 stack: None,
             }
         }
@@ -108,15 +108,17 @@ where
 impl<C> JSContext<C>
 where
     C: JSContextImpl + JSExceptionThrower + JSErrorFactory,
-    C::Value: JSValueImpl,
+    C::Value: JSObjectOps + crate::JSArrayOps,
 {
+    /// Throws an error built like [`JSContext::new_error_value`]: an instance of
+    /// the class registered for `name`, if any.
     pub fn throw_named_error(
         &self,
         name: &str,
         message: impl AsRef<str>,
         code: Option<&str>,
     ) -> JSValue<C::Value> {
-        let raw = self.as_ref().new_error(name, message, code);
+        let raw = self.create_error(name, message.as_ref(), code);
         let raw = self.as_ref().throw(raw);
         JSValue::from_raw(self, raw)
     }
@@ -164,9 +166,11 @@ impl<V: JSObjectOps> fmt::Display for JSException<V> {
                 stack.fmt(f)?;
             }
         } else {
-            let ctx = self.context();
             let value = self.as_js_value().clone();
-            String::from_js_value(&ctx, value).unwrap().fmt(f)?;
+            match value.to_string_coerced() {
+                Ok(text) => text.fmt(f)?,
+                Err(_) => value.type_of().fmt(f)?,
+            }
         }
         Ok(())
     }

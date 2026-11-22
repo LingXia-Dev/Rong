@@ -64,49 +64,40 @@ pub(crate) fn impl_deserialize(input: syn::DeriveInput) -> syn::Result<TokenStre
             });
 
             let js_name_lit = syn::LitStr::new(&js_name, field_name.span());
-            let field_name_str = field_name.to_string();
 
-            // Check if field type is Option<T>
+            // Presence comes from `get_opt` itself, so a nested conversion that
+            // reports a missing field is never mistaken for this field being absent.
             if let Some(inner_type) = extract_option_inner_type(field_type) {
-                // Optional field
+                // Optional field: absent, `undefined` and `null` are `None`.
                 Ok(quote! {
-                    #field_name: match obj.get::<_, Option<#inner_type>>(#js_name_lit) {
-                        Ok(val) => val,
-                        Err(e) if e.is_property_not_found() => None,
-                        Err(e) => return Err(rong::HostError::new(
-                            rong::error::E_INVALID_ARG,
-                            format!("Failed to convert field '{}': {}", #field_name_str, e)
-                        ).with_name("TypeError").into()),
+                    #field_name: match obj.get_opt::<_, Option<#inner_type>>(#js_name_lit) {
+                        Ok(val) => val.flatten(),
+                        Err(e) => return Err(e.into_field_error(#js_name_lit)),
                     }
                 })
             } else if let Some(js_default_expr) = js_default_value {
-                // Field with default value
+                // Field with default value: used when the property is absent or
+                // `undefined`, like an omitted `Optional` argument; `null` is a value.
                 Ok(quote! {
-                    #field_name: match obj.get(#js_name_lit) {
-                        Ok(val) => val,
-                        Err(e) if e.is_property_not_found() => #js_default_expr,
-                        Err(e) => return Err(rong::HostError::new(
-                            rong::error::E_INVALID_ARG,
-                            format!("Failed to convert field '{}': {}", #field_name_str, e)
-                        ).with_name("TypeError").into()),
+                    #field_name: match obj.get_opt::<_, rong::JSValue>(#js_name_lit) {
+                        Ok(Some(val)) if !val.is_undefined() => {
+                            <#field_type as rong::FromJSValue<rong::JSEngineValue>>::from_js_value(ctx, val)
+                                .map_err(|e| e.into_field_error(#js_name_lit))?
+                        }
+                        Ok(_) => #js_default_expr,
+                        Err(e) => return Err(e.into_field_error(#js_name_lit)),
                     }
                 })
             } else {
                 // Required field
                 Ok(quote! {
-                    #field_name: obj.get(#js_name_lit).map_err(|e| {
-                        if e.is_property_not_found() {
-                            rong::HostError::new(
-                                rong::error::E_MISSING_PROPERTY,
-                                format!("Required field '{}' is missing", #field_name_str)
-                            ).with_name("TypeError")
-                        } else {
-                            rong::HostError::new(
-                                rong::error::E_INVALID_ARG,
-                                format!("Failed to convert field '{}': {}", #field_name_str, e)
-                            ).with_name("TypeError")
+                    #field_name: match obj.get_opt::<_, #field_type>(#js_name_lit) {
+                        Ok(Some(val)) => val,
+                        Ok(None) => {
+                            return Err(rong::HostError::missing_field(#js_name_lit).into());
                         }
-                    })?
+                        Err(e) => return Err(e.into_field_error(#js_name_lit)),
+                    }
                 })
             }
         })
@@ -115,6 +106,13 @@ pub(crate) fn impl_deserialize(input: syn::DeriveInput) -> syn::Result<TokenStre
     let expanded = quote! {
         impl rong::FromJSValue<rong::JSEngineValue> for #name {
             fn from_js_value(ctx: &rong::JSContext, value: rong::JSValue) -> rong::JSResult<Self> {
+                if !value.is_object() {
+                    return Err(rong::HostError::type_mismatch(
+                        "an object",
+                        value.type_of().to_string(),
+                    )
+                    .into());
+                }
                 let obj = rong::JSObject::from_js_value(ctx, value)?;
                 Ok(Self {
                     #(#field_extractions,)*

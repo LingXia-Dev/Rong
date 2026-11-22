@@ -45,7 +45,8 @@ impl TextDecoder {
     ///
     /// Returns a `TypeError` if an unsupported encoding is specified.
     #[js_method(constructor)]
-    fn new(label: Optional<String>, options: Optional<JSObject>) -> JSResult<Self> {
+    fn new(label: Optional<Coerced<String>>, options: Optional<JSObject>) -> JSResult<Self> {
+        let label = Optional(label.0.map(Coerced::into_inner));
         // Only support UTF-8 encoding for now
         if let Some(label) = label.0 {
             let label = label.to_lowercase();

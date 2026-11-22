@@ -118,9 +118,7 @@ where
 {
     fn from_js_value(_ctx: &JSContext<V::Context>, value: JSValue<V>) -> JSResult<Self> {
         if !value.is_date() {
-            return Err(HostError::new(crate::error::E_TYPE, "Value is not a Date")
-                .with_name("TypeError")
-                .into());
+            return Err(HostError::type_mismatch("a Date", value.type_of().to_string()).into());
         }
         Ok(JSDate { inner: value })
     }

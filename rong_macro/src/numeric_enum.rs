@@ -57,7 +57,7 @@ pub(crate) fn impl_numeric_enum(input: &DeriveInput) -> Result<TokenStream, Erro
         });
     }
 
-    let expected = expected.join(", ");
+    let expected = format!("one of {}", expected.join(", "));
     let input_tokens = quote! { #input };
 
     Ok(quote! {
@@ -65,18 +65,20 @@ pub(crate) fn impl_numeric_enum(input: &DeriveInput) -> Result<TokenStream, Erro
 
         impl rong::FromJSValue<rong::JSEngineValue> for #name {
             fn from_js_value(ctx: &rong::JSContext, value: rong::JSValue) -> rong::JSResult<Self> {
-                let value = <u32 as rong::FromJSValue<rong::JSEngineValue>>::from_js_value(ctx, value)?;
-                match value {
+                let got = if value.is_number() {
+                    value.to_string_coerced().unwrap_or_default()
+                } else {
+                    value.type_of().to_string()
+                };
+                let refuse = || -> rong::RongJSError {
+                    rong::HostError::type_mismatch(#expected, got.clone()).into()
+                };
+                let Ok(number) = <u32 as rong::FromJSValue<rong::JSEngineValue>>::from_js_value(ctx, value) else {
+                    return Err(refuse());
+                };
+                match number {
                     #(#from_arms)*
-                    other => Err(rong::HostError::new(
-                        rong::error::E_INVALID_ARG,
-                        format!(
-                            "Invalid value for enum {}: {}. Expected one of: {}",
-                            stringify!(#name),
-                            other,
-                            #expected,
-                        )
-                    ).with_name("TypeError").into()),
+                    _ => Err(refuse()),
                 }
             }
         }

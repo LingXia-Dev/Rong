@@ -97,9 +97,12 @@ fn map_path(ty: &Type) -> TsType {
             .unwrap_or_else(|| TsType::plain("any")),
 
         // Transparent wrappers — unwrap.
-        "JSResult" | "Box" | "Rc" | "Arc" | "RefCell" | "Cell" | "Ref" => generic_arg(ty, 0)
-            .map(|t| rust_type_to_ts(&t))
-            .unwrap_or_else(|| TsType::plain("any")),
+        // `Coerced<T>` coerces at runtime; its declared type is still `T`.
+        "JSResult" | "Box" | "Rc" | "Arc" | "RefCell" | "Cell" | "Ref" | "Coerced" => {
+            generic_arg(ty, 0)
+                .map(|t| rust_type_to_ts(&t))
+                .unwrap_or_else(|| TsType::plain("any"))
+        }
 
         // rong's optional-parameter wrapper.
         "Optional" => {

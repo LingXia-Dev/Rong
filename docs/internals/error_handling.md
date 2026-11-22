@@ -15,7 +15,7 @@ Two concepts matter throughout this guide:
 
 | Scenario                 | Rust Code                                                                          |
 | :---                     | :---                                                                               |
-| Type mismatch            | `HostError::new(E_TYPE, "expected string").with_name("TypeError")`                 |
+| Type mismatch            | `HostError::type_mismatch("a string", "number")` (parameters do this for you)      |
 | Wrong argument count     | `HostError::invalid_arg_count(2, got)`                                             |
 | Out of range             | `HostError::new(E_OUT_OF_RANGE, "index out of bounds").with_name("RangeError")`    |
 | IO failure               | `HostError::new(E_IO, err.to_string())`                                            |
@@ -221,11 +221,19 @@ HostError::new(code, message)
 // Set JS Error name (TypeError, RangeError, AbortError, ...)
 .with_name("TypeError")
 
+// A stable refinement of `code`, and free-form developer detail; both become
+// own properties of the JS error and are absent when unset
+.with_reason("host_upgrade_required")
+.with_detail("needs host 2.1")
+
 // Attach structured data
 .with_data(rong::err_data!({ key: "value" }))
 .with_data(rong::err_data!({ maybe_code: (Some(5)) }))
 
 // Convenience constructors
+HostError::type_mismatch(expected, got)      // Wrong type: "must be {expected}, got {got}"
+HostError::range_mismatch(expected, got)     // Integer out of range
+HostError::missing_field(field)              // Required field absent
 HostError::invalid_arg_count(expected, got)  // Wrong argument count
 HostError::aborted(None)                      // Default AbortError
 
@@ -235,6 +243,33 @@ RongJSError::from_thrown_value(reason)
 // Convert to RongJSError
 host_error.into()  // converts HostError into RongJSError
 ```
+
+### Strict parameters
+
+A `String`, `bool`, `f64` or integer parameter accepts only that JS type, and
+the refusal names the argument: `argument 1 must be a string, got undefined`
+(`E_INVALID_ARG`). Take `Coerced<String>` (or `Coerced<i32>`, …) where a Web
+API calls for `DOMString`/`long` conversion, and `JSValue::to_string_coerced()`
+to format a value. `Vec<T>`, `JSObject`, `JSArray`, `JSFunc`, `JSArrayBuffer`,
+typed arrays and `JSDate` refuse the wrong kind of value the same way
+(`argument 1 must be an array, got object`), and a derived field or array
+element names its path (`` argument 1: `inner.url` is required ``,
+`` `items[2]` must be a string ``). `Coerced<f64>` and `Coerced<bool>` are the
+strict conversions, and every other `Coerced<T>` refuses a value of the wrong
+kind the same way. `undefined` means omitted for `Option<T>` fields,
+`#[js_default]` fields and `Optional<T>` parameters; `null` means `None` only
+for `Option<T>`. A custom `FromJSValue` that converts parts of a value can
+locate a refusal with `err.at_field("name")` or `err.at_index(i)`, and build
+one with `HostError::type_mismatch(expected, got)`.
+
+### Embedder error classes
+
+`ctx.register_error_class("AppError", ctor)` makes host errors named
+`AppError` instances of `ctor` on every engine (`"Error"` covers every plain
+`HostError::new`). The class sets `name`; Rong sets `code`, `reason`, `detail`
+and `data`. `ctx.new_error_value` and `ctx.throw_named_error` (with the
+`throw_*` helpers) use the registered class too; only the engine-level
+`JSErrorFactory::new_error` always builds the built-in error.
 
 ---
 

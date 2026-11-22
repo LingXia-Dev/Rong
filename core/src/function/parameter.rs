@@ -13,6 +13,8 @@ pub struct ParamsAccessor<'a, V: JSValueImpl> {
     this: V,
     args: VecDeque<V>,
     is_last_param: bool,
+    /// How many arguments have been taken: the 1-based position of the last.
+    taken: usize,
 }
 
 impl<'a, V: JSValueImpl> ParamsAccessor<'a, V> {
@@ -22,6 +24,7 @@ impl<'a, V: JSValueImpl> ParamsAccessor<'a, V> {
             this,
             args: args.into(),
             is_last_param: false,
+            taken: 0,
         }
     }
 
@@ -30,7 +33,17 @@ impl<'a, V: JSValueImpl> ParamsAccessor<'a, V> {
     }
 
     fn next_arg(&mut self) -> Option<V> {
-        self.args.pop_front()
+        let arg = self.args.pop_front();
+        if arg.is_some() {
+            self.taken += 1;
+        }
+        arg
+    }
+
+    /// Converts the argument just taken, naming its position in a refusal.
+    fn convert<T: FromJSValue<V>>(&self, value: V) -> JSResult<T> {
+        T::from_js_value(self.ctx, JSValue::from_raw(self.ctx, value))
+            .map_err(|e| e.at_argument(self.taken))
     }
 
     pub fn get_this(&self) -> V {
@@ -302,7 +315,7 @@ where
 
     fn get_param(accessor: &mut ParamsAccessor<V>) -> JSResult<Self> {
         let value = accessor.next_arg().unwrap(); // it's safe, since RustFunc::call ensures
-        T::from_js_value(accessor.ctx, JSValue::from_raw(accessor.ctx, value))
+        accessor.convert(value)
     }
 }
 
@@ -365,11 +378,10 @@ where
     fn get_param(accessor: &mut ParamsAccessor<V>) -> JSResult<Self> {
         match accessor.next_arg() {
             Some(v) => {
-                let value = JSValue::from_raw(accessor.ctx, v);
-                if value.is_undefined() {
+                if v.is_undefined() {
                     return Ok(Optional(None));
                 }
-                T::from_js_value(accessor.ctx, value).map(|t| Optional(Some(t)))
+                accessor.convert(v).map(|t| Optional(Some(t)))
             }
             None => Ok(Optional(None)),
         }
@@ -387,10 +399,7 @@ where
         let mut values = Vec::new();
         if accessor.is_last_param {
             while let Some(value) = accessor.next_arg() {
-                values.push(T::from_js_value(
-                    accessor.ctx,
-                    JSValue::from_raw(accessor.ctx, value),
-                )?);
+                values.push(accessor.convert(value)?);
             }
         }
         Ok(Rest(values))
@@ -408,10 +417,7 @@ where
 
     fn get_param(accessor: &mut ParamsAccessor<V>) -> JSResult<Self> {
         let value = accessor.next_arg().unwrap(); // safe: call site ensures arg exists
-        <Vec<T> as FromJSValue<V>>::from_js_value(
-            accessor.ctx,
-            JSValue::from_raw(accessor.ctx, value),
-        )
+        accessor.convert::<Vec<T>>(value)
     }
 }
 
@@ -449,14 +455,16 @@ where
     T: JSClass<V>,
 {
     fn from_js_value(ctx: &JSContext<V::Context>, value: JSValue<V>) -> JSResult<Self> {
+        let refuse = |got: String| -> crate::RongJSError {
+            crate::HostError::type_mismatch(format!("a {} instance", T::NAME), got).into()
+        };
+        let got = value.type_of().to_string();
+        if !value.is_object() {
+            return Err(refuse(got));
+        }
         let obj = JSObject::from_js_value(ctx, value)?;
         if !crate::Class::instance_of::<T>(&obj) {
-            return Err(crate::HostError::new(
-                crate::error::E_TYPE,
-                format!("Not instance of {}", std::any::type_name::<T>()),
-            )
-            .with_name("TypeError")
-            .into());
+            return Err(refuse(got));
         }
         Ok(Self(obj, PhantomData))
     }

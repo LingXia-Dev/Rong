@@ -308,8 +308,8 @@ pub fn js_method(_attr: TokenStream, item: TokenStream) -> TokenStream {
 ///
 /// # Attributes
 /// - `js_name = "name"`: Use a different name for the field in JavaScript
-/// - `js_default`: Use `Default::default()` if the field is missing
-/// - `js_default = "value"`: Use a specific default value if the field is missing
+/// - `js_default`: Use `Default::default()` if the field is missing or `undefined` (`null` is a value)
+/// - `js_default = "value"`: Use a specific default value if the field is missing or `undefined`
 ///
 /// # Field Types
 /// - **Required fields**: Must exist in the JavaScript object, will error if missing
@@ -365,13 +365,15 @@ pub fn js_method(_attr: TokenStream, item: TokenStream) -> TokenStream {
 ///     lastName: "Doe"
 ///     // Missing required field 'age'
 /// };
-/// // Error: "Required field 'age' is missing"
+/// // Error: "`age` is required"
 /// ```
 ///
 /// # Error Handling
 /// The macro provides detailed error messages:
-/// - Missing required fields: "Required field 'field_name' is missing"
-/// - Type conversion errors: "Failed to convert field 'field_name': [original error]"
+/// - Missing required fields: "`field_name` is required" (`inner.url` when nested)
+/// - Wrong types: "`field_name` must be a string, got number", prefixed with the
+///   argument position when the object is a host-function argument
+/// - Other failures (a throwing getter): "Failed to convert field 'field_name': [original error]"
 #[proc_macro_derive(FromJSObject, attributes(js_name, js_default, ts_type, ts_skip))]
 pub fn derive_from_js_object(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);

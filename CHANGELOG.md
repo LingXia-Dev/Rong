@@ -6,6 +6,103 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 
 ## [Unreleased]
 
+Proposed release: `rong_core` 0.8.0 with every crate that depends on it
+(`rong`, the engine crates, `rong_modules`, `rong_cli` and the module crates)
+at 0.8.0, `rong_macro` 0.7.0 and `rong_typegen` 0.7.0. Argument conversion
+becomes strict, which changes behaviour for existing embedders.
+
+### Errors
+
+- `JSContext::register_error_class(name, constructor)` makes host errors with
+  that `name` instances of an embedder class on every engine: the error is
+  built as `new constructor(message)`, so `instanceof` holds and the engine
+  records a stack, and `code`, `reason`, `detail` and `data` are set on it.
+  Registering `"Error"` covers every `HostError::new`. The constructor is held
+  by the context, so replacing the global does not change it; a constructor
+  that throws falls back to the built-in error.
+- JavaScriptCore no longer builds a host error from an arbitrary global
+  constructor of the error's name; like QuickJS and ArkJS it uses only the
+  built-in error types (`Error`, `TypeError`, `RangeError`, `ReferenceError`,
+  `SyntaxError`, `EvalError`, `URIError`). Use `register_error_class` for
+  anything else. QuickJS gains `EvalError` and `URIError`.
+- `HostError` has optional `reason` (a short stable string) and `detail`
+  (free-form text), set with `with_reason` and `with_detail` and read with
+  `reason()` and `detail()`. They become own, non-enumerable `reason` and
+  `detail` properties of the JS error, absent when unset, and survive a JS
+  rethrow converted back with `into_host_in`.
+- `RongJSError` boxes its `HostError`, so `JSResult` stays small.
+
+### Strict conversion
+
+- Converting a JS value to `String`, `bool`, `f64` or an integer type through
+  `FromJSValue` (host-function parameters, `JSObject::get`, `eval`, call
+  results, `#[derive(FromJSObject)]` fields) accepts only that JS type. A
+  string no longer comes from `undefined` or `42`, an integer no longer comes
+  from `1.5`, `NaN` or a value out of range (no truncation, no wrapping), and
+  an `i64`/`u64` takes a safe integer or a BigInt that fits.
+- A refusal is a `TypeError` (`RangeError` for an integer out of range).
+  For a host-function argument the code is `E_INVALID_ARG` and the message
+  names the position and the field: `argument 1 must be a string, got
+  undefined`, `` argument 2: `url` must be a string, got number ``,
+  `` argument 2: `url` is required ``. `data` carries `argument`, `path`,
+  `expected` and `got`. Outside arguments the codes are `E_TYPE`,
+  `E_OUT_OF_RANGE` and `E_MISSING_PROPERTY`.
+- `Coerced<T>` opts back into JavaScript conversion: `Coerced<String>` runs
+  `ToString`, `Coerced<i32>`/`Coerced<u32>` truncate and wrap like `ToInt32`/
+  `ToUint32`. `JSValue::to_string_coerced()` formats any value.
+  `RongJSError::at_argument`, `at_field`, `at_index` and `is_value_mismatch`
+  let custom `FromJSValue` impls locate a refusal the same way.
+- Web APIs whose parameters are `DOMString`, `USVString` or `ByteString` keep
+  their standard conversion through `Coerced<String>`: `URL`,
+  `URLSearchParams`, `Headers` (including init records), `FormData`, `atob`,
+  `btoa`, `TextEncoder`, `TextDecoder`, `Event`, `CustomEvent`,
+  `DOMException`, `File`, `Blob` parts, `Request` input and body, `Response.redirect`
+  and the `console` labels. Rong's own APIs (`Rong.*`, storage, file system,
+  commands, Redis, S3, SQLite) are strict.
+- `Vec<T>`, `JSObject`, `JSArray`, `JSFunc`, `JSArrayBuffer`, `AnyJSTypedArray`,
+  `JSTypedArray<T>`, `JSSymbol` and `JSDate` refuse the wrong kind of value as
+  a type mismatch too: `argument 1 must be an array, got object`
+  (`E_INVALID_ARG`, `data.argument`) instead of `E_NOT_ARRAY` "Not JS Array",
+  `E_NOT_FUNCTION`, `E_NOT_TYPED_ARRAY` or `E_TYPE` "Not JS Object"; fields
+  and array elements name their path (`` `items[2]` ``).
+- `#[derive(FromJSObject)]` decides a field is absent from the property
+  lookup itself, so a nested object missing a required field is reported with
+  its full path (`` `inner.url` is required ``) instead of being taken as an
+  absent `Option` or `#[js_default]` field, or reported as `` `inner` is
+  required ``. `RongJSError::is_property_not_found` no longer matches a
+  nested missing-field refusal.
+- `Coerced<f64>` and `Coerced<bool>` use the strict conversion of the plain
+  type, with the same error and location; `Coerced<i32>`/`Coerced<u32>`
+  refuse a non-number and `Coerced<i64>`/`Coerced<u64>` a value that is
+  neither a number nor a BigInt the same way (`must be a number, got string`).
+- `undefined` means omitted everywhere: an own property whose value is
+  `undefined` takes the `#[js_default]` default, as an absent one does and as
+  `Optional<T>` and `Option<T>` already treat it. `null` is a value except for
+  `Option<T>` (where it is `None`), so `#[js_default]` and `Optional<T>`
+  refuse it for a non-nullable type.
+- `JSTypedArray<T>` given a non-typed-array names its kind (`must be a
+  Uint8Array, got number`); `JSClassRef<T>` and `#[js_class(clone)]` types
+  report `must be a Foo instance`; `JSBytes`/`Bytes` report `must be a JSBytes
+  instance`; `#[js_union]` lists its alternatives (`must be a string or a
+  number`); `#[js_numeric_enum]` lists its values (`must be one of Read (0),
+  Write (1), got 7`). All are type mismatches with the argument position or
+  field path.
+- `JSContext::new_error_value` and `throw_named_error` (and `throw_type_error`
+  and the other `throw_*` helpers) build an instance of the class registered
+  for the name, like host errors. `JSErrorFactory::new_error` still builds the
+  engine's built-in error.
+- ArkJS: `Coerced<String>` fails when `ToString` throws (a Symbol, a throwing
+  `toString`) instead of returning `""`, as on QuickJS and JavaScriptCore.
+- `assert.ok(0.5)` passes; it truncated the number before.
+
+### Types
+
+- The `logic-web` typegen profile declares `Rong.SSE` (`RongSSE`,
+  `RongSSEOptions`, `RongSSEEvent`), so Logic code can use it without a cast.
+  `RongSSE` is an `AsyncIterableIterator<RongSSEEvent>` with `next()`,
+  `return()` and `[Symbol.asyncIterator](): this`.
+- `rong_typegen` maps `Coerced<T>` to the type of `T`.
+
 ## [0.7.1] - 2026-11-18
 
 Crate releases: `rong_quickjs_sys` 0.7.0 and `rong_quickjs` 0.7.1. QuickJS

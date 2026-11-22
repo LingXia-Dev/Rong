@@ -41,7 +41,7 @@ where
         if value.is_function() {
             JSObject::from_js_value(ctx, value).map(Self)
         } else {
-            Err(HostError::not_function().into())
+            Err(HostError::type_mismatch("a function", value.type_of().to_string()).into())
         }
     }
 }

@@ -21,6 +21,29 @@ pub enum JSTypedArrayKind {
     Float64,
 }
 
+fn typed_array_name(kind: JSTypedArrayKind) -> &'static str {
+    match kind {
+        JSTypedArrayKind::Int8 => "Int8Array",
+        JSTypedArrayKind::Uint8 => "Uint8Array",
+        JSTypedArrayKind::Uint8Clamped => "Uint8ClampedArray",
+        JSTypedArrayKind::Int16 => "Int16Array",
+        JSTypedArrayKind::Uint16 => "Uint16Array",
+        JSTypedArrayKind::Int32 => "Int32Array",
+        JSTypedArrayKind::Uint32 => "Uint32Array",
+        JSTypedArrayKind::BigInt64 => "BigInt64Array",
+        JSTypedArrayKind::BigUint64 => "BigUint64Array",
+        JSTypedArrayKind::Float32 => "Float32Array",
+        JSTypedArrayKind::Float64 => "Float64Array",
+    }
+}
+
+/// "a Uint8Array", "an Int8Array", ...
+fn typed_array_expected(kind: JSTypedArrayKind) -> String {
+    let name = typed_array_name(kind);
+    let article = if name.starts_with("Int") { "an" } else { "a" };
+    format!("{article} {name}")
+}
+
 /// Trait for types that can be used as compile-time typed array view markers.
 pub trait TypedArrayElement: Sized {
     /// Number of bytes per element.
@@ -124,7 +147,7 @@ where
         if value.is_object() && value.as_value().get_kind().is_some() {
             JSObject::from_js_value(ctx, value).map(Self)
         } else {
-            Err(HostError::not_typed_array().into())
+            Err(HostError::type_mismatch("a typed array", value.type_of().to_string()).into())
         }
     }
 }
@@ -165,8 +188,14 @@ where
     T: TypedArrayElement,
 {
     fn from_js_value(ctx: &JSContext<V::Context>, value: JSValue<V>) -> JSResult<Self> {
-        let inner = AnyJSTypedArray::from_js_value(ctx, value)?;
-        Self::from_any(inner)
+        if !(value.is_object() && value.as_value().get_kind().is_some()) {
+            return Err(HostError::type_mismatch(
+                typed_array_expected(T::TYPE),
+                value.type_of().to_string(),
+            )
+            .into());
+        }
+        Self::from_any(AnyJSTypedArray::from_js_value(ctx, value)?)
     }
 }
 
@@ -188,7 +217,11 @@ where
     pub fn from_any(inner: AnyJSTypedArray<V>) -> JSResult<Self> {
         let actual = inner.kind();
         if actual != T::TYPE {
-            return Err(HostError::typed_array_kind_mismatch(T::TYPE, actual).into());
+            return Err(HostError::type_mismatch(
+                typed_array_expected(T::TYPE),
+                typed_array_name(actual),
+            )
+            .into());
         }
 
         Ok(Self {

@@ -38,7 +38,7 @@ where
         if value.is_array() {
             JSObject::from_js_value(ctx, value).map(Self)
         } else {
-            Err(HostError::not_array().into())
+            Err(HostError::type_mismatch("an array", value.type_of().to_string()).into())
         }
     }
 }
@@ -384,9 +384,13 @@ where
     fn from_js_value(ctx: &JSContext<V::Context>, value: JSValue<V>) -> JSResult<Self> {
         if value.is_array() {
             let array = JSArray::from_js_value(ctx, value)?;
-            array.iter::<T>()?.collect::<JSResult<Vec<_>>>()
+            array
+                .iter::<T>()?
+                .enumerate()
+                .map(|(i, item)| item.map_err(|e| e.at_index(i)))
+                .collect::<JSResult<Vec<_>>>()
         } else {
-            Err(HostError::not_array().into())
+            Err(HostError::type_mismatch("an array", value.type_of().to_string()).into())
         }
     }
 }

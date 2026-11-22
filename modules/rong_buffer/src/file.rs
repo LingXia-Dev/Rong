@@ -23,7 +23,12 @@ impl File {
     }
 
     #[js_method(constructor)]
-    fn new(data: JSArray, filename: String, options: Optional<JSObject>) -> JSResult<Self> {
+    fn new(
+        data: JSArray,
+        filename: Coerced<String>,
+        options: Optional<JSObject>,
+    ) -> JSResult<Self> {
+        let filename = filename.0;
         // Validate filename
         if filename.is_empty() {
             return Err(

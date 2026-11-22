@@ -326,7 +326,13 @@ impl JSErrorFactory for QJSContext {
 
             let ctor_name = if matches!(
                 name,
-                "Error" | "TypeError" | "RangeError" | "ReferenceError" | "SyntaxError"
+                "Error"
+                    | "TypeError"
+                    | "RangeError"
+                    | "ReferenceError"
+                    | "SyntaxError"
+                    | "EvalError"
+                    | "URIError"
             ) {
                 name
             } else {
