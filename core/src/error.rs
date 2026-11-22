@@ -1003,8 +1003,15 @@ impl RongJSError {
         }
     }
 
+    /// Whether a property lookup found no such property on the object it was
+    /// asked of. A nested conversion that reports a missing field (see
+    /// [`HostError::missing_field`]) is a value refusal, not this.
     pub fn is_property_not_found(&self) -> bool {
-        matches!(self.0, RongJSErrorKind::Host(ref host) if host.code == E_MISSING_PROPERTY)
+        matches!(
+            self.0,
+            RongJSErrorKind::Host(ref host)
+                if host.code == E_MISSING_PROPERTY && !host.is_value_mismatch()
+        )
     }
 
     pub fn is_not_support_bytecode(&self) -> bool {

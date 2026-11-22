@@ -65,35 +65,35 @@ pub(crate) fn impl_deserialize(input: syn::DeriveInput) -> syn::Result<TokenStre
 
             let js_name_lit = syn::LitStr::new(&js_name, field_name.span());
 
-            // Check if field type is Option<T>
+            // Presence comes from `get_opt` itself, so a nested conversion that
+            // reports a missing field is never mistaken for this field being absent.
             if let Some(inner_type) = extract_option_inner_type(field_type) {
-                // Optional field
+                // Optional field: absent, `undefined` and `null` are `None`.
                 Ok(quote! {
-                    #field_name: match obj.get::<_, Option<#inner_type>>(#js_name_lit) {
-                        Ok(val) => val,
-                        Err(e) if e.is_property_not_found() => None,
+                    #field_name: match obj.get_opt::<_, Option<#inner_type>>(#js_name_lit) {
+                        Ok(val) => val.flatten(),
                         Err(e) => return Err(e.into_field_error(#js_name_lit)),
                     }
                 })
             } else if let Some(js_default_expr) = js_default_value {
-                // Field with default value
+                // Field with default value: used only when the property is absent.
                 Ok(quote! {
-                    #field_name: match obj.get(#js_name_lit) {
-                        Ok(val) => val,
-                        Err(e) if e.is_property_not_found() => #js_default_expr,
+                    #field_name: match obj.get_opt::<_, #field_type>(#js_name_lit) {
+                        Ok(Some(val)) => val,
+                        Ok(None) => #js_default_expr,
                         Err(e) => return Err(e.into_field_error(#js_name_lit)),
                     }
                 })
             } else {
                 // Required field
                 Ok(quote! {
-                    #field_name: obj.get(#js_name_lit).map_err(|e| {
-                        if e.is_property_not_found() {
-                            rong::HostError::missing_field(#js_name_lit).into()
-                        } else {
-                            e.into_field_error(#js_name_lit)
+                    #field_name: match obj.get_opt::<_, #field_type>(#js_name_lit) {
+                        Ok(Some(val)) => val,
+                        Ok(None) => {
+                            return Err(rong::HostError::missing_field(#js_name_lit).into());
                         }
-                    })?
+                        Err(e) => return Err(e.into_field_error(#js_name_lit)),
+                    }
                 })
             }
         })

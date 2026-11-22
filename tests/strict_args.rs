@@ -254,3 +254,95 @@ fn conversions_outside_arguments_are_strict_too() {
         Ok(())
     });
 }
+
+#[derive(FromJSObject, Default)]
+struct Endpoint {
+    url: String,
+}
+
+#[derive(FromJSObject)]
+struct WithRequired {
+    inner: Endpoint,
+}
+
+#[derive(FromJSObject)]
+struct WithOptional {
+    inner: Option<Endpoint>,
+}
+
+#[derive(FromJSObject)]
+struct WithDefault {
+    #[js_default]
+    inner: Endpoint,
+}
+
+#[derive(FromJSObject)]
+struct TwoLevels {
+    outer: WithRequired,
+}
+
+fn install_nested(ctx: &JSContext) -> JSResult<()> {
+    let global = ctx.global();
+    global.set(
+        "takeRequired",
+        JSFunc::new(ctx, |o: WithRequired| o.inner.url)?,
+    )?;
+    global.set(
+        "takeOptionalInner",
+        JSFunc::new(ctx, |o: WithOptional| {
+            o.inner.map(|e| e.url).unwrap_or_else(|| "none".into())
+        })?,
+    )?;
+    global.set(
+        "takeDefault",
+        JSFunc::new(ctx, |o: WithDefault| format!("<{}>", o.inner.url))?,
+    )?;
+    global.set(
+        "takeTwoLevels",
+        JSFunc::new(ctx, |o: TwoLevels| o.outer.inner.url)?,
+    )?;
+    Ok(())
+}
+
+#[test]
+fn a_nested_missing_field_is_reported_with_its_full_path() {
+    run(|ctx| {
+        install_nested(ctx)?;
+        let nested_missing = "TypeError|E_INVALID_ARG|argument 1: `inner.url` is required|1";
+
+        assert_eq!(thrown(ctx, "takeRequired({ inner: {} })")?, nested_missing);
+        assert_eq!(
+            thrown(ctx, "takeRequired({})")?,
+            "TypeError|E_INVALID_ARG|argument 1: `inner` is required|1"
+        );
+
+        // Inside `Option`, a present but incomplete object is an error, not `None`.
+        assert_eq!(
+            thrown(ctx, "takeOptionalInner({ inner: {} })")?,
+            nested_missing
+        );
+        let s: String = ctx.eval(Source::from_bytes("takeOptionalInner({})"))?;
+        assert_eq!(s, "none");
+        let s: String = ctx.eval(Source::from_bytes("takeOptionalInner({ inner: null })"))?;
+        assert_eq!(s, "none");
+
+        // With `#[js_default]`, only an absent property takes the default.
+        assert_eq!(thrown(ctx, "takeDefault({ inner: {} })")?, nested_missing);
+        let s: String = ctx.eval(Source::from_bytes("takeDefault({})"))?;
+        assert_eq!(s, "<>");
+
+        assert_eq!(
+            thrown(ctx, "takeTwoLevels({ outer: { inner: {} } })")?,
+            "TypeError|E_INVALID_ARG|argument 1: `outer.inner.url` is required|1"
+        );
+        assert_eq!(
+            thrown(ctx, "takeTwoLevels({ outer: { inner: { url: 5 } } })")?,
+            "TypeError|E_INVALID_ARG|argument 1: `outer.inner.url` must be a string, got number|1"
+        );
+        let s: String = ctx.eval(Source::from_bytes(
+            "takeTwoLevels({ outer: { inner: { url: 'u' } } })",
+        ))?;
+        assert_eq!(s, "u");
+        Ok(())
+    });
+}
