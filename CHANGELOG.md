@@ -59,12 +59,28 @@ becomes strict, which changes behaviour for existing embedders.
   `DOMException`, `File`, `Blob` parts, `Request` input and body, `Response.redirect`
   and the `console` labels. Rong's own APIs (`Rong.*`, storage, file system,
   commands, Redis, S3, SQLite) are strict.
+- `Vec<T>`, `JSObject`, `JSArray`, `JSFunc`, `JSArrayBuffer`, `AnyJSTypedArray`,
+  `JSTypedArray<T>`, `JSSymbol` and `JSDate` refuse the wrong kind of value as
+  a type mismatch too: `argument 1 must be an array, got object`
+  (`E_INVALID_ARG`, `data.argument`) instead of `E_NOT_ARRAY` "Not JS Array",
+  `E_NOT_FUNCTION`, `E_NOT_TYPED_ARRAY` or `E_TYPE` "Not JS Object"; fields
+  and array elements name their path (`` `items[2]` ``).
+- `#[derive(FromJSObject)]` decides a field is absent from the property
+  lookup itself, so a nested object missing a required field is reported with
+  its full path (`` `inner.url` is required ``) instead of being taken as an
+  absent `Option` or `#[js_default]` field, or reported as `` `inner` is
+  required ``. `RongJSError::is_property_not_found` no longer matches a
+  nested missing-field refusal.
+- `Coerced<f64>` and `Coerced<bool>` use the strict conversion of the plain
+  type, with the same error and location.
 - `assert.ok(0.5)` passes; it truncated the number before.
 
 ### Types
 
 - The `logic-web` typegen profile declares `Rong.SSE` (`RongSSE`,
   `RongSSEOptions`, `RongSSEEvent`), so Logic code can use it without a cast.
+  `RongSSE` is an `AsyncIterableIterator<RongSSEEvent>` with `next()`,
+  `return()` and `[Symbol.asyncIterator](): this`.
 - `rong_typegen` maps `Coerced<T>` to the type of `T`.
 
 ## [0.7.1] - 2026-11-18

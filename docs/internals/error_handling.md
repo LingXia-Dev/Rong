@@ -250,8 +250,14 @@ A `String`, `bool`, `f64` or integer parameter accepts only that JS type, and
 the refusal names the argument: `argument 1 must be a string, got undefined`
 (`E_INVALID_ARG`). Take `Coerced<String>` (or `Coerced<i32>`, …) where a Web
 API calls for `DOMString`/`long` conversion, and `JSValue::to_string_coerced()`
-to format a value. A custom `FromJSValue` that converts parts of a value can
-locate a refusal with `err.at_field("name")` or `err.at_index(i)`.
+to format a value. `Vec<T>`, `JSObject`, `JSArray`, `JSFunc`, `JSArrayBuffer`,
+typed arrays and `JSDate` refuse the wrong kind of value the same way
+(`argument 1 must be an array, got object`), and a derived field or array
+element names its path (`` argument 1: `inner.url` is required ``,
+`` `items[2]` must be a string ``). `Coerced<f64>` and `Coerced<bool>` are the
+strict conversions. A custom `FromJSValue` that converts parts of a value can
+locate a refusal with `err.at_field("name")` or `err.at_index(i)`, and build
+one with `HostError::type_mismatch(expected, got)`.
 
 ### Embedder error classes
 

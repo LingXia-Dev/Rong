@@ -689,13 +689,13 @@ where
     fn from_js_value(ctx: &JSContext<V::Context>, value: JSValue<V>) -> JSResult<Self> {
         if value.is_array() {
             let array = JSArray::from_js_value(ctx, value)?;
-            array.iter::<T>().collect::<JSResult<Vec<_>>>()
+            array
+                .iter::<T>()?
+                .enumerate()
+                .map(|(i, item)| item.map_err(|e| e.at_index(i)))
+                .collect::<JSResult<Vec<_>>>()
         } else {
-            Err(
-                HostError::new(rong::error::E_NOT_ARRAY, "Not JS Array")
-                    .with_name("TypeError")
-                    .into(),
-            )
+            Err(HostError::type_mismatch("an array", value.type_of().to_string()).into())
         }
     }
 }
@@ -703,7 +703,10 @@ where
 
 #### Wrapper Types
 
-Each wrapper type validates the JS type before wrapping:
+Each wrapper type validates the JS type before wrapping. A refusal is a type
+mismatch like a primitive's (`HostError::type_mismatch`), so as a parameter it
+reads `argument 2 must be a function, got object` (`E_INVALID_ARG`) and as a
+field it names the path (`` `items[1]` must be a string, got number ``):
 
 | JavaScript Type | Rust Type     | Validation      |
 | :---            | :---          | :---            |
@@ -722,11 +725,7 @@ impl<V: JSTypeOf> FromJSValue<V> for JSObject<V> {
         if value.is_object() {
             Ok(value.into())
         } else {
-            Err(
-                HostError::new(rong::error::E_TYPE, "Not JS Object")
-                    .with_name("TypeError")
-                    .into(),
-            )
+            Err(HostError::type_mismatch("an object", value.type_of().to_string()).into())
         }
     }
 }
@@ -737,11 +736,7 @@ impl<V: JSTypeOf> FromJSValue<V> for JSArray<V> {
         if value.is_array() {
             JSObject::from_js_value(ctx, value).map(Self)
         } else {
-            Err(
-                HostError::new(rong::error::E_NOT_ARRAY, "Not JS Array")
-                    .with_name("TypeError")
-                    .into(),
-            )
+            Err(HostError::type_mismatch("an array", value.type_of().to_string()).into())
         }
     }
 }
@@ -750,9 +745,7 @@ impl<V: JSTypeOf> FromJSValue<V> for JSArray<V> {
 impl<V: JSTypeOf> FromJSValue<V> for JSDate<V> {
     fn from_js_value(_ctx: &JSContext<V::Context>, value: JSValue<V>) -> JSResult<Self> {
         if !value.is_date() {
-            return Err(HostError::new(E_TYPE, "Value is not a Date")
-                .with_name("TypeError")
-                .into());
+            return Err(HostError::type_mismatch("a Date", value.type_of().to_string()).into());
         }
         Ok(JSDate { inner: value })
     }
