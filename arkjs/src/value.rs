@@ -467,8 +467,15 @@ impl_js_converter!(
         if value_type != arkjs::JSVM_ValueType_JSVM_STRING {
             let status = arkjs::OH_JSVM_CoerceToString(env, value, &mut string_value);
             if status != arkjs::JSVM_Status_JSVM_OK {
-                *result = String::new();
-                return 0;
+                // `ToString` threw (a Symbol, a throwing `toString`): fail like the
+                // other engines, and clear the exception so later JSVM calls work.
+                let mut is_pending = false;
+                arkjs::OH_JSVM_IsExceptionPending(env, &mut is_pending);
+                if is_pending {
+                    let mut exception: arkjs::JSVM_Value = ptr::null_mut();
+                    arkjs::OH_JSVM_GetAndClearLastException(env, &mut exception);
+                }
+                return -1;
             }
         }
 

@@ -317,3 +317,22 @@ fn test_string_with_null() {
         Ok(())
     });
 }
+
+#[test]
+fn coerced_string_fails_when_to_string_throws() {
+    run(|ctx| {
+        let ok: Coerced<String> = ctx.eval(Source::from_bytes("42"))?;
+        assert_eq!(ok.0, "42");
+        assert!(
+            ctx.eval::<Coerced<String>>(Source::from_bytes("Symbol('s')"))
+                .is_err()
+        );
+        assert!(
+            ctx.eval::<Coerced<String>>(Source::from_bytes(
+                "({ toString() { throw new Error('no'); } })"
+            ))
+            .is_err()
+        );
+        Ok(())
+    });
+}
