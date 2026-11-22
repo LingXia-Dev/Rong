@@ -1171,6 +1171,8 @@ mod tests {
         assert!(profile.contains("declare function fetch"));
         assert!(profile.contains("interface Request"));
         assert!(profile.contains("declare var CompressionStream"));
+        assert!(profile.contains("readonly SSE: RongSSEConstructor"));
+        assert!(profile.contains("declare var Rong: RongLogicNamespace"));
         assert!(!profile.contains("interface Document"));
         assert!(!profile.contains("declare var window"));
     }

@@ -427,3 +427,42 @@ interface Console {
   clear(): void;
 }
 declare var console: Console;
+
+interface RongSSEOptions {
+  /** Request headers; values must be strings. */
+  headers?: Record<string, string>;
+  requestTimeoutMs?: number;
+  signal?: AbortSignal;
+  reconnect?: {
+    enabled?: boolean;
+    maxRetries?: number;
+    baseDelayMs?: number;
+    maxDelayMs?: number;
+  };
+}
+
+interface RongSSEEvent {
+  readonly type: string;
+  readonly data: string;
+  /** The event's `id:` field, or `""`. */
+  readonly id: string;
+  readonly origin: string;
+}
+
+/** A server-sent event stream; iterate it with `for await`. */
+interface RongSSE extends AsyncIterable<RongSSEEvent> {
+  readonly url: string;
+  close(): void;
+  [Symbol.asyncIterator](): AsyncIterator<RongSSEEvent>;
+}
+
+interface RongSSEConstructor {
+  new (url: string, options?: RongSSEOptions): RongSSE;
+  readonly prototype: RongSSE;
+}
+
+/** Host APIs on the `Rong` namespace that every Rong Logic runtime installs. */
+interface RongLogicNamespace {
+  readonly SSE: RongSSEConstructor;
+}
+declare var Rong: RongLogicNamespace;
