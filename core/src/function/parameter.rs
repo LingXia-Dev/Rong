@@ -455,14 +455,16 @@ where
     T: JSClass<V>,
 {
     fn from_js_value(ctx: &JSContext<V::Context>, value: JSValue<V>) -> JSResult<Self> {
+        let refuse = |got: String| -> crate::RongJSError {
+            crate::HostError::type_mismatch(format!("a {} instance", T::NAME), got).into()
+        };
+        let got = value.type_of().to_string();
+        if !value.is_object() {
+            return Err(refuse(got));
+        }
         let obj = JSObject::from_js_value(ctx, value)?;
         if !crate::Class::instance_of::<T>(&obj) {
-            return Err(crate::HostError::new(
-                crate::error::E_TYPE,
-                format!("Not instance of {}", std::any::type_name::<T>()),
-            )
-            .with_name("TypeError")
-            .into());
+            return Err(refuse(got));
         }
         Ok(Self(obj, PhantomData))
     }

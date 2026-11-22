@@ -37,6 +37,13 @@ fn typed_array_name(kind: JSTypedArrayKind) -> &'static str {
     }
 }
 
+/// "a Uint8Array", "an Int8Array", ...
+fn typed_array_expected(kind: JSTypedArrayKind) -> String {
+    let name = typed_array_name(kind);
+    let article = if name.starts_with("Int") { "an" } else { "a" };
+    format!("{article} {name}")
+}
+
 /// Trait for types that can be used as compile-time typed array view markers.
 pub trait TypedArrayElement: Sized {
     /// Number of bytes per element.
@@ -181,8 +188,14 @@ where
     T: TypedArrayElement,
 {
     fn from_js_value(ctx: &JSContext<V::Context>, value: JSValue<V>) -> JSResult<Self> {
-        let inner = AnyJSTypedArray::from_js_value(ctx, value)?;
-        Self::from_any(inner)
+        if !(value.is_object() && value.as_value().get_kind().is_some()) {
+            return Err(HostError::type_mismatch(
+                typed_array_expected(T::TYPE),
+                value.type_of().to_string(),
+            )
+            .into());
+        }
+        Self::from_any(AnyJSTypedArray::from_js_value(ctx, value)?)
     }
 }
 
@@ -204,14 +217,8 @@ where
     pub fn from_any(inner: AnyJSTypedArray<V>) -> JSResult<Self> {
         let actual = inner.kind();
         if actual != T::TYPE {
-            let expected = typed_array_name(T::TYPE);
-            let article = if expected.starts_with("Int") {
-                "an"
-            } else {
-                "a"
-            };
             return Err(HostError::type_mismatch(
-                format!("{article} {expected}"),
+                typed_array_expected(T::TYPE),
                 typed_array_name(actual),
             )
             .into());

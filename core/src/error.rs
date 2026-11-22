@@ -932,6 +932,23 @@ impl RongJSError {
             .is_some_and(HostError::is_value_mismatch)
     }
 
+    /// What a top-level type refusal expected (`"a string"`), for a union to
+    /// list its alternatives. `None` for other errors, including refusals
+    /// located inside the value.
+    #[doc(hidden)]
+    pub fn expected_kind(&self) -> Option<&str> {
+        let mismatch = self.as_host_error()?.extra.as_ref()?.mismatch.as_ref()?;
+        if !mismatch.path.is_empty() {
+            return None;
+        }
+        match &mismatch.kind {
+            MismatchKind::Type { expected, .. } | MismatchKind::Range { expected, .. } => {
+                Some(expected.as_ref())
+            }
+            MismatchKind::Missing => None,
+        }
+    }
+
     /// Restates a conversion refusal as coming from field `field` of an
     /// object (`` `url` must be a string ``). Other errors pass through.
     pub fn at_field(self, field: &str) -> Self {

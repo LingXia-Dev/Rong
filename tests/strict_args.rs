@@ -579,3 +579,75 @@ fn coerced_integers_refuse_non_numbers_with_a_location() {
         Ok(())
     });
 }
+
+#[js_union]
+enum TextOrNumber {
+    Text(String),
+    Number(f64),
+}
+
+#[js_numeric_enum]
+enum Mode {
+    Read = 0,
+    Write = 1,
+}
+
+#[test]
+fn typed_arrays_bytes_unions_and_numeric_enums_report_the_expected_kind() {
+    run(|ctx| {
+        let global = ctx.global();
+        global.set("takeBytes", JSFunc::new(ctx, |_t: JSTypedArray<u8>| true)?)?;
+        global.set("takeJSBytes", JSFunc::new(ctx, |_b: JSBytes| true)?)?;
+        global.set(
+            "takeUnion",
+            JSFunc::new(ctx, |v: TextOrNumber| match v {
+                TextOrNumber::Text(s) => s,
+                TextOrNumber::Number(n) => n.to_string(),
+            })?,
+        )?;
+        global.set(
+            "takeMode",
+            JSFunc::new(ctx, |m: Mode| matches!(m, Mode::Write))?,
+        )?;
+
+        let cases = [
+            (
+                "takeBytes(5)",
+                "argument 1 must be a Uint8Array, got number",
+            ),
+            (
+                "takeJSBytes(5)",
+                "argument 1 must be a JSBytes instance, got number",
+            ),
+            (
+                "takeJSBytes({})",
+                "argument 1 must be a JSBytes instance, got object",
+            ),
+            (
+                "takeUnion(true)",
+                "argument 1 must be a string or a number, got boolean",
+            ),
+            (
+                "takeMode(7)",
+                "argument 1 must be one of Read (0), Write (1), got 7",
+            ),
+            (
+                "takeMode('x')",
+                "argument 1 must be one of Read (0), Write (1), got string",
+            ),
+        ];
+        for (call, message) in cases {
+            assert_eq!(
+                thrown(ctx, call)?,
+                format!("TypeError|E_INVALID_ARG|{message}|1"),
+                "{call}"
+            );
+        }
+        let ok: bool = ctx.eval(Source::from_bytes(
+            "takeUnion('a') === 'a' && takeUnion(2) === '2' && takeMode(1)",
+        ))?;
+        assert!(ok);
+        assert_eq!(Mode::js_object(ctx)?.get::<_, u32>("Write")?, 1);
+        Ok(())
+    });
+}

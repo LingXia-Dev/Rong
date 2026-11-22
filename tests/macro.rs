@@ -469,4 +469,39 @@ mod tests {
             Ok(())
         });
     }
+
+    #[test]
+    fn a_class_parameter_names_the_class() {
+        run(|ctx| {
+            ctx.register_class::<Point>()?;
+            ctx.global()
+                .set("takePoint", JSFunc::new(ctx, |p: Point| p.x)?)?;
+            ctx.global().set(
+                "takePointRef",
+                JSFunc::new(ctx, |p: function::JSClassRef<Point>| -> JSResult<i32> {
+                    Ok(p.borrow()?.y)
+                })?,
+            )?;
+            let describe = |call: &str| -> JSResult<String> {
+                ctx.eval(Source::from_bytes(format!(
+                    "(() => {{ try {{ {call}; }} catch (e) {{ return e.code + '|' + e.message; }} return 'no error'; }})()"
+                )))
+            };
+            for call in ["takePoint", "takePointRef"] {
+                assert_eq!(
+                    describe(&format!("{call}(5)"))?,
+                    "E_INVALID_ARG|argument 1 must be a PointX instance, got number"
+                );
+                assert_eq!(
+                    describe(&format!("{call}({{}})"))?,
+                    "E_INVALID_ARG|argument 1 must be a PointX instance, got object"
+                );
+            }
+            let sum: i32 = ctx.eval(Source::from_bytes(
+                "takePoint(new PointX(2, 3)) + takePointRef(new PointX(2, 3))",
+            ))?;
+            assert_eq!(sum, 5);
+            Ok(())
+        });
+    }
 }
