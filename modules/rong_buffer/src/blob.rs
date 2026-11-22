@@ -207,7 +207,8 @@ fn process_blob_part(array: &JSArray, options: &BlobOptions) -> JSResult<Vec<u8>
             }
         }
 
-        if let Ok(string) = elem.to_rust::<String>() {
+        // Any other part is a USVString, so it is converted with `ToString`.
+        if let Ok(string) = elem.to_string_coerced() {
             match options.endings {
                 EndingType::Native => {
                     let mut chars = string.chars().peekable();

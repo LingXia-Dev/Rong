@@ -217,7 +217,7 @@ mod tests {
 
             assert!(result.is_err());
             let error_msg = result.unwrap_err().to_string();
-            assert!(error_msg.contains("Required field 'version' is missing"));
+            assert_eq!(error_msg, "E_MISSING_PROPERTY: `version` is required");
 
             // Test successful parsing with optional and default fields
             let config: Config = ctx.eval(Source::from_bytes(

@@ -51,7 +51,8 @@ impl TextEncoder {
         let input = if input.is_undefined() || input.is_null() {
             String::new()
         } else {
-            input.to_rust::<String>()?
+            // The input is a USVString.
+            input.to_string_coerced()?
         };
         // Convert the string to UTF-8 bytes
         let bytes = input.as_bytes();
@@ -72,7 +73,13 @@ impl TextEncoder {
     ///
     /// An object containing the number of bytes read and written.
     #[js_method(rename = "encodeInto")]
-    fn encode_into(&self, ctx: JSContext, input: String, dest: JSObject) -> JSResult<JSObject> {
+    fn encode_into(
+        &self,
+        ctx: JSContext,
+        input: Coerced<String>,
+        dest: JSObject,
+    ) -> JSResult<JSObject> {
+        let input = input.0;
         // First, check if dest can be converted to JSTypedArray
         if let Some(typed_array) = AnyJSTypedArray::from_object(dest) {
             // Then, check if the typed array is Uint8Array

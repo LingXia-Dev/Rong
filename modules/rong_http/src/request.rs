@@ -246,14 +246,15 @@ impl Request {
                     ..Default::default()
                 }
             } else {
-                let url_str = input.to_rust::<String>()?;
+                // RequestInfo is a Request or a USVString: anything else is stringified.
+                let url_str = input.to_string_coerced()?;
                 Self {
                     url: Self::parse_url(&url_str)?,
                     ..Default::default()
                 }
             }
         } else {
-            let url_str = input.to_rust::<String>()?;
+            let url_str = input.to_string_coerced()?;
             Self {
                 url: Self::parse_url(&url_str)?,
                 ..Default::default()
@@ -418,7 +419,7 @@ impl Request {
 
         let content_type = self
             .headers
-            .get("Content-Type".to_string())?
+            .get(Coerced("Content-Type".to_string()))?
             .unwrap_or_default();
         let form = FormData::from_bytes(&bytes, &content_type)?;
         Ok(Class::lookup::<FormData>(&ctx)?.instance(form))

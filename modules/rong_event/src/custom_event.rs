@@ -24,7 +24,8 @@ pub struct CustomEvent {
 #[js_class]
 impl CustomEvent {
     #[js_method(constructor)]
-    fn new(type_: String, options: Optional<CustomEventOptions>) -> Self {
+    fn new(type_: Coerced<String>, options: Optional<CustomEventOptions>) -> Self {
+        let type_ = type_.0;
         let opts = options.0.unwrap_or_default();
 
         // Create Event with the same options
@@ -37,7 +38,7 @@ impl CustomEvent {
 
         Self {
             detail: opts.detail,
-            event: Event::new(type_, Optional(Some(event_opts))),
+            event: Event::new(Coerced(type_), Optional(Some(event_opts))),
         }
     }
 

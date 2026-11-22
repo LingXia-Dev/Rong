@@ -458,10 +458,26 @@ impl JSCContext {
             let message_str = jsc::JSStringCreateWithUTF8CString(message_cstr.as_ptr());
             let error_name_str = jsc::JSStringCreateWithUTF8CString(error_name_cstr.as_ptr());
 
+            // Only the built-in error types come from a global constructor, as
+            // on the other engines; an embedder class goes through
+            // `JSContext::register_error_class`.
+            let builtin = matches!(
+                error_name,
+                "Error"
+                    | "TypeError"
+                    | "RangeError"
+                    | "ReferenceError"
+                    | "SyntaxError"
+                    | "EvalError"
+                    | "URIError"
+            );
             let mut exception: jsc::JSValueRef = ptr::null_mut();
             let global = jsc::JSContextGetGlobalObject(self.raw);
-            let ctor_value =
-                jsc::JSObjectGetProperty(self.raw, global, error_name_str, &mut exception);
+            let ctor_value = if builtin {
+                jsc::JSObjectGetProperty(self.raw, global, error_name_str, &mut exception)
+            } else {
+                ptr::null_mut()
+            };
 
             let mut error: jsc::JSObjectRef = ptr::null_mut();
             if exception.is_null()

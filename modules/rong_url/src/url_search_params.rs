@@ -43,16 +43,17 @@ impl URLSearchParams {
                     for pair in arr.iter_present::<JSArray>()? {
                         let pair = pair?;
                         if pair.len()? >= 2
-                            && let Some(key) = pair.get_opt::<String>(0)?
-                            && let Some(value) = pair.get_opt::<String>(1)?
+                            && let Some(Coerced(key)) = pair.get_opt::<Coerced<String>>(0)?
+                            && let Some(Coerced(value)) = pair.get_opt::<Coerced<String>>(1)?
                         {
                             params.push((key, value));
                         }
                     }
                 } else {
                     // Initialize from object {k1: v1, k2: v2}
-                    for item in obj.entries_as()?.into_iter() {
-                        params.push((item.0, item.1));
+                    // Record<USVString, USVString>: values are stringified.
+                    for (key, Coerced(value)) in obj.entries_as::<String, Coerced<String>>()? {
+                        params.push((key, value));
                     }
                 }
             }
@@ -81,7 +82,9 @@ impl URLSearchParams {
 
     /// Append a value without removing existing values.
     #[js_method]
-    fn append(&mut self, name: String, value: String) {
+    fn append(&mut self, name: Coerced<String>, value: Coerced<String>) {
+        let name = name.0;
+        let value = value.0;
         {
             let mut params = self.params.borrow_mut();
             params.push((name, value));
@@ -91,7 +94,8 @@ impl URLSearchParams {
 
     /// Delete every value associated with a name.
     #[js_method]
-    fn delete(&mut self, name: String) {
+    fn delete(&mut self, name: Coerced<String>) {
+        let name = name.0;
         {
             let mut params = self.params.borrow_mut();
             params.retain(|(k, _)| k != &name);
@@ -101,7 +105,8 @@ impl URLSearchParams {
 
     /// Return the first value for a name, or null.
     #[js_method]
-    fn get(&self, name: String) -> Option<String> {
+    fn get(&self, name: Coerced<String>) -> Option<String> {
+        let name = name.0;
         self.params
             .borrow()
             .iter()
@@ -111,7 +116,8 @@ impl URLSearchParams {
 
     /// Return every value associated with a name.
     #[js_method(rename = "getAll")]
-    fn get_all(&self, name: String) -> Vec<String> {
+    fn get_all(&self, name: Coerced<String>) -> Vec<String> {
+        let name = name.0;
         self.params
             .borrow()
             .iter()
@@ -122,13 +128,16 @@ impl URLSearchParams {
 
     /// Test whether a name is present.
     #[js_method]
-    fn has(&self, name: String) -> bool {
+    fn has(&self, name: Coerced<String>) -> bool {
+        let name = name.0;
         self.params.borrow().iter().any(|(k, _)| k == &name)
     }
 
     /// Replace existing values for a name.
     #[js_method]
-    fn set(&mut self, name: String, value: String) {
+    fn set(&mut self, name: Coerced<String>, value: Coerced<String>) {
+        let name = name.0;
+        let value = value.0;
         {
             let mut params = self.params.borrow_mut();
             let mut found = false;

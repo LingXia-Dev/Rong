@@ -90,9 +90,7 @@ fn serialize_worker_value(ctx: &JSContext, data: &JSValue) -> JSResult<Serialize
         return Ok(SerializedWorkerValue::Undefined);
     }
     if data.is_bigint() {
-        return Ok(SerializedWorkerValue::BigInt(
-            data.clone().to_rust::<String>()?,
-        ));
+        return Ok(SerializedWorkerValue::BigInt(data.to_string_coerced()?));
     }
     if data.is_number() {
         let number = data.clone().to_rust::<f64>()?;

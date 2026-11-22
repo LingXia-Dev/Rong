@@ -1026,6 +1026,10 @@ impl<C: JSContextImpl> JSContext<C> {
 /// - `ctx_inner`: Weak reference to the JSContextInner used to build JSContext from callback case
 struct ContextOpaque<V: JSValueImpl> {
     registry: RefCell<HashMap<TypeId, V>>,
+    /// Constructors for host errors by error name, and the `Reflect.construct`
+    /// captured when the first one was registered.
+    error_classes: RefCell<HashMap<String, V>>,
+    reflect_construct: RefCell<Option<V>>,
     ctx_inner: Weak<JSContextInner<V::Context>>,
     thrown: RefCell<ThrownValueStore<V>>,
     /// `None` until the context is set up, and if its built-ins are missing.
@@ -1036,6 +1040,8 @@ impl<V: JSValueImpl> ContextOpaque<V> {
     fn new(ctx_inner: Weak<JSContextInner<V::Context>>) -> Box<Self> {
         Box::new(Self {
             registry: RefCell::new(HashMap::new()),
+            error_classes: RefCell::new(HashMap::new()),
+            reflect_construct: RefCell::new(None),
             ctx_inner,
             thrown: RefCell::new(ThrownValueStore::new()),
             thrown_reader: RefCell::new(None),
@@ -1048,6 +1054,90 @@ impl<V: JSValueImpl> ContextOpaque<V> {
 // that's why we introduce general solution CTX_OPAQUE
 static CTX_OPAQUE: LazyLock<RwLock<HashMap<usize, usize>>> =
     LazyLock::new(|| RwLock::new(HashMap::new()));
+
+impl<C> JSContext<C>
+where
+    C: JSContextImpl + crate::JSErrorFactory,
+    C::Value: JSObjectOps + crate::JSArrayOps,
+{
+    /// Makes host errors named `name` instances of `constructor`.
+    ///
+    /// A [`HostError`] whose `name` matches is built as `new constructor(message)`,
+    /// so `instanceof` holds and the engine records a stack; `code`, `reason`,
+    /// `detail` and `data` are then set on it as for any host error. The class
+    /// decides the error's `name`. Registering `"Error"` covers every host
+    /// error built with [`HostError::new`]. Unregistered names keep the
+    /// engine's built-in error types. If the constructor throws, the built-in
+    /// error is used instead.
+    ///
+    /// The constructor is held by the context, not looked up on the global
+    /// object, so script that replaces the global cannot change it.
+    pub fn register_error_class(
+        &self,
+        name: &str,
+        constructor: crate::JSFunc<C::Value>,
+    ) -> JSResult<()> {
+        if !constructor.as_js_value().is_constructor() {
+            return Err(HostError::new(
+                crate::error::E_INVALID_ARG,
+                format!("error class for '{name}' is not a constructor"),
+            )
+            .with_name("TypeError")
+            .into());
+        }
+        let data = self.get_opaque();
+        if data.is_null() {
+            return Err(HostError::new(crate::error::E_INTERNAL, "No context data").into());
+        }
+        let opaque = unsafe { &*data };
+        if opaque.reflect_construct.borrow().is_none() {
+            let reflect: JSObject<C::Value> = self.global().get("Reflect")?;
+            let construct: crate::JSFunc<C::Value> = reflect.get("construct")?;
+            *opaque.reflect_construct.borrow_mut() = Some(construct.as_value().clone());
+        }
+        opaque
+            .error_classes
+            .borrow_mut()
+            .insert(name.to_string(), constructor.as_value().clone());
+        Ok(())
+    }
+
+    /// Creates an error object (does not throw): from the class registered for
+    /// `name` when there is one, otherwise the engine's built-in error.
+    pub(crate) fn create_error(&self, name: &str, message: &str, code: Option<&str>) -> C::Value {
+        if let Some(obj) = self.construct_registered_error(name, message) {
+            if let Some(code) = code {
+                let descriptor = crate::PropertyDescriptor::from_rust(self, code)
+                    .writable()
+                    .configurable()
+                    .hidden();
+                let _ = obj.define_property("code", descriptor);
+            }
+            return obj.into_value();
+        }
+        self.as_ref().new_error(name, message, code)
+    }
+
+    fn construct_registered_error(&self, name: &str, message: &str) -> Option<JSObject<C::Value>> {
+        let data = self.get_opaque();
+        if data.is_null() {
+            return None;
+        }
+        let opaque = unsafe { &*data };
+        let ctor = opaque.error_classes.borrow().get(name).cloned()?;
+        let construct = opaque.reflect_construct.borrow().clone()?;
+
+        let args = crate::JSArray::<C::Value>::new(self).ok()?;
+        args.set(0, message).ok()?;
+        let undefined = C::Value::create_undefined(self.as_ref());
+        // Raw call: no promise-job checkpoint while an error is being built.
+        let result = self
+            .as_ref()
+            .call(&construct, undefined, &[ctor, args.as_value().clone()]);
+        let value = result.try_map(|v| JSValue::from_raw(self, v)).ok()?;
+        value.into_object()
+    }
+}
 
 impl<C: JSContextImpl> Drop for JSContext<C> {
     fn drop(&mut self) {
@@ -1079,6 +1169,8 @@ impl<C: JSContextImpl> Drop for JSContext<C> {
                     // cleanup class registry
                     let registry = &(*data).registry;
                     registry.borrow_mut().clear();
+                    (*data).error_classes.borrow_mut().clear();
+                    (*data).reflect_construct.borrow_mut().take();
 
                     // cleanup ContextOpaque
                     let _ = Box::from_raw(data);

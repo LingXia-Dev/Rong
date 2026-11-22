@@ -21,7 +21,9 @@ pub(crate) struct SharedUrlData {
 impl URL {
     /// Parse an absolute URL or resolve a relative URL against a base.
     #[js_method(constructor)]
-    fn new(url: String, base: Optional<String>) -> JSResult<Self> {
+    fn new(url: Coerced<String>, base: Optional<Coerced<String>>) -> JSResult<Self> {
+        let base = Optional(base.0.map(Coerced::into_inner));
+        let url = url.0;
         let inner = if let Some(base) = base.0 {
             let base = Url::parse(&base).map_err(|e| {
                 HostError::new(
@@ -61,7 +63,8 @@ impl URL {
     }
 
     #[js_method(setter, rename = "hash")]
-    fn set_hash(&mut self, value: String) {
+    fn set_hash(&mut self, value: Coerced<String>) {
+        let value = value.0;
         let mut url = self.inner_mut();
         url.set_fragment(if value.is_empty() {
             None
@@ -82,7 +85,8 @@ impl URL {
     }
 
     #[js_method(setter, rename = "host")]
-    fn set_host(&mut self, value: String) {
+    fn set_host(&mut self, value: Coerced<String>) {
+        let value = value.0;
         let mut url = self.inner_mut();
         let _ = url.set_host(Some(&value));
     }
@@ -94,7 +98,8 @@ impl URL {
     }
 
     #[js_method(setter, rename = "hostname")]
-    fn set_hostname(&mut self, value: String) {
+    fn set_hostname(&mut self, value: Coerced<String>) {
+        let value = value.0;
         let mut url = self.inner_mut();
         let _ = url.set_host(Some(&value));
     }
@@ -106,7 +111,8 @@ impl URL {
     }
 
     #[js_method(setter, rename = "href")]
-    fn set_href(&mut self, value: String) -> JSResult<()> {
+    fn set_href(&mut self, value: Coerced<String>) -> JSResult<()> {
+        let value = value.0;
         let new_url = Url::parse(&value).map_err(|e| {
             HostError::new(rong::error::E_INVALID_ARG, format!("Invalid URL: {}", e))
                 .with_name("TypeError")
@@ -137,7 +143,8 @@ impl URL {
     }
 
     #[js_method(setter, rename = "password")]
-    fn set_password(&mut self, value: String) {
+    fn set_password(&mut self, value: Coerced<String>) {
+        let value = value.0;
         let mut url = self.inner_mut();
         let _ = url.set_password(Some(&value));
     }
@@ -149,7 +156,8 @@ impl URL {
     }
 
     #[js_method(setter, rename = "pathname")]
-    fn set_pathname(&mut self, value: String) {
+    fn set_pathname(&mut self, value: Coerced<String>) {
+        let value = value.0;
         let path = if !value.starts_with('/') {
             format!("/{}", value)
         } else {
@@ -170,7 +178,8 @@ impl URL {
     }
 
     #[js_method(setter, rename = "port")]
-    fn set_port(&mut self, value: String) {
+    fn set_port(&mut self, value: Coerced<String>) {
+        let value = value.0;
         let port = if value.is_empty() {
             None
         } else if let Ok(port) = value.parse() {
@@ -190,7 +199,8 @@ impl URL {
     }
 
     #[js_method(setter, rename = "protocol")]
-    fn set_protocol(&mut self, value: String) {
+    fn set_protocol(&mut self, value: Coerced<String>) {
+        let value = value.0;
         let protocol = value.trim_end_matches(':');
         let mut url = self.inner_mut();
         if url.set_scheme(protocol).is_err() {
@@ -215,7 +225,8 @@ impl URL {
     }
 
     #[js_method(setter, rename = "search")]
-    fn set_search(&mut self, value: String) {
+    fn set_search(&mut self, value: Coerced<String>) {
+        let value = value.0;
         {
             let mut url = self.inner_mut();
             let query = value.strip_prefix('?').unwrap_or(&value);
@@ -233,7 +244,8 @@ impl URL {
     }
 
     #[js_method(setter, rename = "username")]
-    fn set_username(&mut self, value: String) {
+    fn set_username(&mut self, value: Coerced<String>) {
+        let value = value.0;
         let mut url = self.inner_mut();
         let _ = url.set_username(&value);
     }

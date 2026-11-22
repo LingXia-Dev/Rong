@@ -350,7 +350,7 @@ where
                 }
             }
             JSValueType::Date => {
-                if let Ok(val) = self.clone().to_rust::<String>() {
+                if let Ok(val) = self.to_string_coerced() {
                     write!(f, "{}", val)
                 } else {
                     write!(f, "Date")

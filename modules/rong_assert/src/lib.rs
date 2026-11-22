@@ -60,7 +60,10 @@ fn ok(ctx: JSContext, value: JSValue, message: Optional<JSValue>) -> JSValue {
     let undefined = JSValue::undefined(&ctx);
     let is_truthy = match value.type_of() {
         JSValueType::Boolean => value.to_rust::<bool>().unwrap_or(false),
-        JSValueType::Number => value.to_rust::<i32>().map(|b| b != 0).unwrap_or(false),
+        JSValueType::Number => value
+            .to_rust::<f64>()
+            .map(|n| n != 0.0 && !n.is_nan())
+            .unwrap_or(false),
         JSValueType::String => value
             .to_rust::<String>()
             .map(|s| !s.is_empty())

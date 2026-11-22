@@ -25,7 +25,8 @@ pub struct Event {
 #[js_class]
 impl Event {
     #[js_method(constructor)]
-    pub(crate) fn new(type_: String, options: Optional<EventOptions>) -> Self {
+    pub(crate) fn new(type_: Coerced<String>, options: Optional<EventOptions>) -> Self {
+        let type_ = type_.0;
         let opts = options.0.unwrap_or_default();
         Self {
             type_,

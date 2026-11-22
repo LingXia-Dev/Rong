@@ -126,7 +126,9 @@ pub struct DOMException {
 #[js_class]
 impl DOMException {
     #[js_method(constructor)]
-    fn new(message: Optional<String>, name: Optional<String>) -> Self {
+    fn new(message: Optional<Coerced<String>>, name: Optional<Coerced<String>>) -> Self {
+        let message = Optional(message.0.map(Coerced::into_inner));
+        let name = Optional(name.0.map(Coerced::into_inner));
         Self {
             message: message.0.unwrap_or_default(),
             name: name.0.into(),

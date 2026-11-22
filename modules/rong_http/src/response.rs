@@ -448,7 +448,7 @@ impl Response {
         let bytes = self.body_to_bytes().await?;
         let mime = self
             .headers
-            .get("Content-Type".to_string())?
+            .get(Coerced("Content-Type".to_string()))?
             .unwrap_or_else(|| "".to_string());
         Ok(Blob::from_parts(mime, bytes))
     }
@@ -483,7 +483,7 @@ impl Response {
         let bytes = self.body_to_bytes().await?;
         let content_type = self
             .headers
-            .get("Content-Type".to_string())?
+            .get(Coerced("Content-Type".to_string()))?
             .unwrap_or_default();
         let form = FormData::from_bytes(&bytes, &content_type)?;
         Ok(Class::lookup::<FormData>(&ctx)?.instance(form))
@@ -500,7 +500,8 @@ impl Response {
     }
 
     #[js_method]
-    fn redirect(url: String, status: Optional<u16>) -> JSResult<Self> {
+    fn redirect(url: Coerced<String>, status: Optional<u16>) -> JSResult<Self> {
+        let url = url.0;
         let status = status.0.unwrap_or(302);
 
         // Validate redirect status
@@ -523,7 +524,7 @@ impl Response {
         })?;
 
         let mut headers = Headers::default();
-        headers.set("Location".to_string(), url)?;
+        headers.set(Coerced("Location".to_string()), Coerced(url))?;
 
         Ok(Self {
             url: uri,
@@ -637,7 +638,7 @@ impl Response {
         let mut headers = Headers::default();
         for (name, value) in headers_in.iter() {
             if let Ok(value_str) = value.to_str() {
-                let _ = headers.set(name.to_string(), value_str.to_string());
+                let _ = headers.set(Coerced(name.to_string()), Coerced(value_str.to_string()));
             }
         }
 

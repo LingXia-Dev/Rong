@@ -23,7 +23,7 @@ pub(crate) fn impl_enum_conversions(input: &DeriveInput) -> Result<TokenStream, 
                         if fields.unnamed.len() == 1 {
                             let ty = &fields.unnamed.first().unwrap().ty;
                             from_js_variants.push(quote! {
-                                if let Ok(val) = #ty::from_js_value(ctx, value.clone()) {
+                                if let Ok(val) = <#ty as rong::FromJSValue<rong::JSEngineValue>>::from_js_value(ctx, value.clone()) {
                                     return Ok(Self::#variant_name(val));
                                 }
                             });

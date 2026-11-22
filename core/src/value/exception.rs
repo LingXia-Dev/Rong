@@ -80,7 +80,7 @@ where
         } else {
             let js_value = self.into_js_value(&ctx);
             JSError {
-                message: String::from_js_value(&ctx, js_value).ok(),
+                message: js_value.to_string_coerced().ok(),
                 stack: None,
             }
         }
@@ -164,9 +164,11 @@ impl<V: JSObjectOps> fmt::Display for JSException<V> {
                 stack.fmt(f)?;
             }
         } else {
-            let ctx = self.context();
             let value = self.as_js_value().clone();
-            String::from_js_value(&ctx, value).unwrap().fmt(f)?;
+            match value.to_string_coerced() {
+                Ok(text) => text.fmt(f)?,
+                Err(_) => value.type_of().fmt(f)?,
+            }
         }
         Ok(())
     }

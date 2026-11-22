@@ -40,6 +40,7 @@ use crate::{
     FromJSValue, IntoJSValue, JSArray, JSArrayOps, JSContext, JSContextImpl, JSErrorFactory,
     JSExceptionThrower, JSObject, JSObjectOps, JSValue, JSValueImpl,
 };
+use std::borrow::Cow;
 use std::collections::{BTreeMap, HashMap};
 use thiserror::Error;
 use tokio::sync::oneshot;
@@ -288,6 +289,96 @@ pub struct HostError {
     pub message: String,
     pub data: Option<ErrorData>,
     pub(crate) thrown: Option<ThrownValueHandle>,
+    /// Rarely set fields, boxed so `Result<_, HostError>` stays small.
+    extra: Option<Box<HostErrorExtra>>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct HostErrorExtra {
+    reason: Option<Cow<'static, str>>,
+    detail: Option<String>,
+    /// Set when a conversion refused a value, so an argument or field layer
+    /// can restate where the value came from.
+    mismatch: Option<ValueMismatch>,
+}
+
+/// Why a JS value was refused by a strict conversion, and where it sat.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ValueMismatch {
+    kind: MismatchKind,
+    /// Field path inside the value, such as `headers.accept` or `[2]`.
+    path: String,
+    /// 1-based position of the host-function argument the value came from.
+    argument: Option<usize>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum MismatchKind {
+    /// The value has the wrong type (or, for an integer, is fractional).
+    Type {
+        expected: Cow<'static, str>,
+        got: String,
+    },
+    /// A number outside the target integer's range.
+    Range {
+        expected: Cow<'static, str>,
+        got: String,
+    },
+    /// A required field is absent.
+    Missing,
+}
+
+impl ValueMismatch {
+    fn subject(&self) -> String {
+        match (self.argument, self.path.is_empty()) {
+            (Some(n), true) => format!("argument {n}"),
+            (Some(n), false) => format!("argument {n}: `{}`", self.path),
+            (None, false) => format!("`{}`", self.path),
+            (None, true) => "value".to_string(),
+        }
+    }
+
+    fn message(&self) -> String {
+        let subject = self.subject();
+        match &self.kind {
+            MismatchKind::Type { expected, got } | MismatchKind::Range { expected, got } => {
+                format!("{subject} must be {expected}, got {got}")
+            }
+            MismatchKind::Missing => format!("{subject} is required"),
+        }
+    }
+
+    fn data(&self) -> ErrorData {
+        let mut map = BTreeMap::new();
+        if let Some(n) = self.argument {
+            map.insert("argument".to_string(), ErrorData::from(n));
+        }
+        if !self.path.is_empty() {
+            map.insert("path".to_string(), ErrorData::from(self.path.as_str()));
+        }
+        match &self.kind {
+            MismatchKind::Type { expected, got } | MismatchKind::Range { expected, got } => {
+                map.insert("expected".to_string(), ErrorData::from(expected.as_ref()));
+                map.insert("got".to_string(), ErrorData::from(got.as_str()));
+            }
+            MismatchKind::Missing => {}
+        }
+        ErrorData::Object(map)
+    }
+
+    fn into_host_error(self) -> HostError {
+        let (name, code) = match (&self.kind, self.argument.is_some()) {
+            (MismatchKind::Range { .. }, true) => ("RangeError", E_INVALID_ARG),
+            (MismatchKind::Range { .. }, false) => ("RangeError", E_OUT_OF_RANGE),
+            (_, true) => ("TypeError", E_INVALID_ARG),
+            (MismatchKind::Missing, false) => ("TypeError", E_MISSING_PROPERTY),
+            (MismatchKind::Type { .. }, false) => ("TypeError", E_TYPE),
+        };
+        let mut err = HostError::new(code, self.message()).with_name(name);
+        err.data = Some(self.data());
+        err.extra_mut().mismatch = Some(self);
+        err
+    }
 }
 
 impl HostError {
@@ -298,7 +389,120 @@ impl HostError {
             message: message.into(),
             data: None,
             thrown: None,
+            extra: None,
         }
+    }
+
+    /// A value of the wrong type: `TypeError` `E_TYPE`, restated as
+    /// `E_INVALID_ARG` naming the argument when it reaches a host-function
+    /// parameter. `expected` reads after "must be" (`"a string"`), `got`
+    /// describes the value (`"undefined"`, `"1.5"`).
+    pub fn type_mismatch(expected: impl Into<Cow<'static, str>>, got: impl Into<String>) -> Self {
+        ValueMismatch {
+            kind: MismatchKind::Type {
+                expected: expected.into(),
+                got: got.into(),
+            },
+            path: String::new(),
+            argument: None,
+        }
+        .into_host_error()
+    }
+
+    /// A number outside the target range: `RangeError` `E_OUT_OF_RANGE`,
+    /// restated like [`HostError::type_mismatch`].
+    pub fn range_mismatch(expected: impl Into<Cow<'static, str>>, got: impl Into<String>) -> Self {
+        ValueMismatch {
+            kind: MismatchKind::Range {
+                expected: expected.into(),
+                got: got.into(),
+            },
+            path: String::new(),
+            argument: None,
+        }
+        .into_host_error()
+    }
+
+    /// A required field that is absent: `TypeError` `E_MISSING_PROPERTY`.
+    pub fn missing_field(field: impl Into<String>) -> Self {
+        ValueMismatch {
+            kind: MismatchKind::Missing,
+            path: field.into(),
+            argument: None,
+        }
+        .into_host_error()
+    }
+
+    fn extra_mut(&mut self) -> &mut HostErrorExtra {
+        self.extra.get_or_insert_with(Box::default)
+    }
+
+    /// Restates a refusal after `locate` moves it; other errors pass through.
+    fn relocate(mut self, locate: impl FnOnce(&mut ValueMismatch) -> bool) -> Self {
+        let Some(extra) = self.extra.as_mut() else {
+            return self;
+        };
+        let Some(mut mismatch) = extra.mismatch.take() else {
+            return self;
+        };
+        if !locate(&mut mismatch) {
+            extra.mismatch = Some(mismatch);
+            return self;
+        }
+        let mut err = mismatch.into_host_error();
+        let extra = err.extra_mut();
+        let old = self.extra.take().unwrap_or_default();
+        extra.reason = old.reason;
+        extra.detail = old.detail;
+        err
+    }
+
+    /// The same refusal, located at `field` of the converted object.
+    fn at_field(self, field: &str) -> Self {
+        self.relocate(|m| {
+            m.path = join_path(field, &m.path);
+            true
+        })
+    }
+
+    /// The same refusal, located at host-function argument `index` (1-based).
+    fn at_argument(self, index: usize) -> Self {
+        self.relocate(|m| {
+            if m.argument.is_some() {
+                return false;
+            }
+            m.argument = Some(index);
+            true
+        })
+    }
+
+    /// The same refusal, located at element `index` of the converted array.
+    fn at_index(self, index: usize) -> Self {
+        self.relocate(|m| {
+            let rest = if m.path.is_empty() || m.path.starts_with('[') {
+                std::mem::take(&mut m.path)
+            } else {
+                format!(".{}", m.path)
+            };
+            m.path = format!("[{index}]{rest}");
+            true
+        })
+    }
+
+    /// Whether a strict conversion refused the value (wrong type, out of
+    /// range, or a missing required field).
+    pub fn is_value_mismatch(&self) -> bool {
+        self.extra.as_ref().is_some_and(|e| e.mismatch.is_some())
+    }
+
+    /// The stable `reason` set with [`HostError::with_reason`].
+    pub fn reason(&self) -> Option<&str> {
+        self.extra.as_ref()?.reason.as_deref()
+    }
+
+    /// The developer `detail` set with [`HostError::with_detail`].
+    pub fn detail(&self) -> Option<&str> {
+        self.extra.as_ref()?.detail.as_deref()
     }
 
     pub(crate) fn type_error(code: &'static str, message: impl Into<String>) -> Self {
@@ -390,6 +594,18 @@ impl HostError {
         self
     }
 
+    /// Sets the stable `reason` that refines `code` (`"host_upgrade_required"`).
+    pub fn with_reason(mut self, reason: impl Into<Cow<'static, str>>) -> Self {
+        self.extra_mut().reason = Some(reason.into());
+        self
+    }
+
+    /// Sets the free-form developer `detail`.
+    pub fn with_detail(mut self, detail: impl Into<String>) -> Self {
+        self.extra_mut().detail = Some(detail.into());
+        self
+    }
+
     pub fn with_data<D>(mut self, data: D) -> Self
     where
         D: Into<ErrorData>,
@@ -404,6 +620,18 @@ impl HostError {
             err.data = Some(crate::err_data!({ reason: reason }));
         }
         err
+    }
+}
+
+/// `field` in front of a path that is either empty, a field chain, or starts
+/// with an index (`[2]`).
+fn join_path(field: &str, rest: &str) -> String {
+    if rest.is_empty() {
+        field.to_string()
+    } else if rest.starts_with('[') {
+        format!("{field}{rest}")
+    } else {
+        format!("{field}.{rest}")
     }
 }
 
@@ -443,7 +671,7 @@ pub struct RongJSError(pub(crate) RongJSErrorKind);
 pub(crate) enum RongJSErrorKind {
     /// Host-originated failure that must be surfaced to JS as an `Error` object.
     #[error("{0}")]
-    Host(HostError),
+    Host(Box<HostError>),
 
     /// Thrown/rejected JS payload (can be any JS value, including primitives).
     #[error("{}", .0.describe())]
@@ -498,15 +726,31 @@ impl RongJSError {
         }
     }
 
+    /// An own, non-enumerable, writable string property, like `code`.
+    fn define_hidden<V>(ctx: &JSContext<V::Context>, obj: &JSObject<V>, key: &str, value: &str)
+    where
+        V: JSObjectOps,
+    {
+        let descriptor = crate::PropertyDescriptor::from_rust(ctx, value)
+            .writable()
+            .configurable()
+            .hidden();
+        let _ = obj.define_property(key, descriptor);
+    }
+
     fn host_error_object<V>(host: &HostError, ctx: &JSContext<V::Context>) -> JSObject<V>
     where
         V: JSValueImpl + JSObjectOps + JSArrayOps,
         V::Context: JSErrorFactory,
     {
-        let raw = ctx
-            .as_ref()
-            .new_error(host.name, &host.message, Some(host.code));
+        let raw = ctx.create_error(host.name, &host.message, Some(host.code));
         let obj = JSObject::from_js_value(ctx, JSValue::from_raw(ctx, raw)).unwrap();
+        if let Some(reason) = host.reason() {
+            Self::define_hidden(ctx, &obj, "reason", reason);
+        }
+        if let Some(detail) = host.detail() {
+            Self::define_hidden(ctx, &obj, "detail", detail);
+        }
 
         if host.code == E_JS_THROWN {
             let data_obj = host
@@ -544,9 +788,19 @@ impl RongJSError {
                 let thrown = ctx.resolve_thrown(handle);
 
                 let mut data = BTreeMap::<String, ErrorData>::new();
+                let mut reason = None;
+                let mut detail = None;
                 if let Some(thrown) = &thrown {
-                    if let Ok(s) = String::from_js_value(ctx, thrown.clone()) {
+                    if let Ok(s) = thrown.to_string_coerced() {
                         data.insert("thrown".to_string(), ErrorData::from(s));
+                    }
+                    if let Some(obj) = thrown.clone().into_object() {
+                        reason = obj
+                            .get_opt::<_, String>("reason")
+                            .ok()
+                            .flatten()
+                            .map(Cow::Owned);
+                        detail = obj.get_opt::<_, String>("detail").ok().flatten();
                     }
                     data.insert("is_error".to_string(), ErrorData::from(thrown.is_error()));
                 } else {
@@ -559,16 +813,18 @@ impl RongJSError {
                         v.into_object()
                             .and_then(|o| o.get::<_, String>("message").ok())
                     })
-                    .or_else(|| thrown.and_then(|v| String::from_js_value(ctx, v).ok()))
+                    .or_else(|| thrown.and_then(|v| v.to_string_coerced().ok()))
                     .unwrap_or_else(|| "JavaScript threw a value".to_string());
 
-                Self(RongJSErrorKind::Host(HostError {
-                    name: "Error",
-                    code: E_JS_THROWN,
-                    message,
-                    data: Some(ErrorData::Object(data)),
-                    thrown: Some(handle),
-                }))
+                let mut host = HostError::new(E_JS_THROWN, message);
+                host.data = Some(ErrorData::Object(data));
+                host.thrown = Some(handle);
+                if reason.is_some() || detail.is_some() {
+                    let extra = host.extra_mut();
+                    extra.reason = reason;
+                    extra.detail = detail;
+                }
+                Self(RongJSErrorKind::Host(Box::new(host)))
             }
         }
     }
@@ -661,14 +917,14 @@ impl RongJSError {
 
     pub fn as_host_error(&self) -> Option<&HostError> {
         match &self.0 {
-            RongJSErrorKind::Host(host) => Some(host),
+            RongJSErrorKind::Host(host) => Some(&**host),
             RongJSErrorKind::Thrown(_) => None,
         }
     }
 
     pub fn into_host_error(self) -> Option<HostError> {
         match self.0 {
-            RongJSErrorKind::Host(host) => Some(host),
+            RongJSErrorKind::Host(host) => Some(*host),
             RongJSErrorKind::Thrown(_) => None,
         }
     }
@@ -696,6 +952,55 @@ impl RongJSError {
 
     pub fn is_thrown(&self) -> bool {
         matches!(self.0, RongJSErrorKind::Thrown(_))
+    }
+
+    /// Whether a strict conversion refused the value; see
+    /// [`HostError::type_mismatch`].
+    pub fn is_value_mismatch(&self) -> bool {
+        self.as_host_error()
+            .is_some_and(HostError::is_value_mismatch)
+    }
+
+    /// Restates a conversion refusal as coming from field `field` of an
+    /// object (`` `url` must be a string ``). Other errors pass through.
+    pub fn at_field(self, field: &str) -> Self {
+        self.map_host(|host| host.at_field(field))
+    }
+
+    /// Restates a conversion refusal as coming from element `index` of an
+    /// array. Other errors pass through.
+    pub fn at_index(self, index: usize) -> Self {
+        self.map_host(|host| host.at_index(index))
+    }
+
+    /// Restates a conversion refusal as coming from host-function argument
+    /// `index` (1-based): `E_INVALID_ARG`, `argument 1 must be a string, got
+    /// undefined`. Other errors pass through.
+    pub fn at_argument(self, index: usize) -> Self {
+        self.map_host(|host| host.at_argument(index))
+    }
+
+    /// Field conversion error for `#[derive(FromJSObject)]`: a refusal is
+    /// located at `field`; any other failure keeps its text behind the field
+    /// name as `E_INVALID_ARG`.
+    #[doc(hidden)]
+    pub fn into_field_error(self, field: &str) -> Self {
+        if self.is_value_mismatch() {
+            return self.at_field(field);
+        }
+        HostError::new(
+            E_INVALID_ARG,
+            format!("Failed to convert field '{field}': {self}"),
+        )
+        .with_name("TypeError")
+        .into()
+    }
+
+    fn map_host(self, f: impl FnOnce(HostError) -> HostError) -> Self {
+        match self.0 {
+            RongJSErrorKind::Host(host) => Self(RongJSErrorKind::Host(Box::new(f(*host)))),
+            thrown => Self(thrown),
+        }
     }
 
     pub fn is_property_not_found(&self) -> bool {
@@ -735,7 +1040,7 @@ where
 
 impl From<HostError> for RongJSError {
     fn from(err: HostError) -> Self {
-        RongJSError(RongJSErrorKind::Host(err))
+        RongJSError(RongJSErrorKind::Host(Box::new(err)))
     }
 }
 

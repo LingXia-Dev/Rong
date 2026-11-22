@@ -162,25 +162,32 @@ fn test_option_conversion_from_js() {
 #[test]
 fn test_jscore_i32_u32_conversion_semantics() {
     run(|ctx| {
-        // JS ToInt32 semantics (wrap modulo 2^32, then signed).
-        let i32_over_max: i32 = ctx.eval(Source::from_bytes(b"2147483648"))?;
-        assert_eq!(i32::MIN, i32_over_max);
+        // Plain integers refuse what does not fit; `Coerced` keeps ToInt32 /
+        // ToUint32 (wrap modulo 2^32).
+        let err = ctx
+            .eval::<i32>(Source::from_bytes(b"2147483648"))
+            .unwrap_err();
+        assert!(err.is_code(rong::error::E_OUT_OF_RANGE));
+        assert!(ctx.eval::<u32>(Source::from_bytes(b"-1")).is_err());
+        assert!(ctx.eval::<i32>(Source::from_bytes(b"NaN")).is_err());
 
-        let i32_mod_zero: i32 = ctx.eval(Source::from_bytes(b"4294967296"))?;
-        assert_eq!(0, i32_mod_zero);
+        let i32_over_max: Coerced<i32> = ctx.eval(Source::from_bytes(b"2147483648"))?;
+        assert_eq!(i32::MIN, i32_over_max.0);
 
-        let i32_nan: i32 = ctx.eval(Source::from_bytes(b"NaN"))?;
-        assert_eq!(0, i32_nan);
+        let i32_mod_zero: Coerced<i32> = ctx.eval(Source::from_bytes(b"4294967296"))?;
+        assert_eq!(0, i32_mod_zero.0);
 
-        // JS ToUint32 semantics (wrap modulo 2^32).
-        let u32_neg_one: u32 = ctx.eval(Source::from_bytes(b"-1"))?;
-        assert_eq!(u32::MAX, u32_neg_one);
+        let i32_nan: Coerced<i32> = ctx.eval(Source::from_bytes(b"NaN"))?;
+        assert_eq!(0, i32_nan.0);
 
-        let u32_over_mod: u32 = ctx.eval(Source::from_bytes(b"4294967297"))?;
-        assert_eq!(1, u32_over_mod);
+        let u32_neg_one: Coerced<u32> = ctx.eval(Source::from_bytes(b"-1"))?;
+        assert_eq!(u32::MAX, u32_neg_one.0);
 
-        let u32_nan: u32 = ctx.eval(Source::from_bytes(b"NaN"))?;
-        assert_eq!(0, u32_nan);
+        let u32_over_mod: Coerced<u32> = ctx.eval(Source::from_bytes(b"4294967297"))?;
+        assert_eq!(1, u32_over_mod.0);
+
+        let u32_nan: Coerced<u32> = ctx.eval(Source::from_bytes(b"NaN"))?;
+        assert_eq!(0, u32_nan.0);
 
         Ok(())
     });
