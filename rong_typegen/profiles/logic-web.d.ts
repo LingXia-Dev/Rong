@@ -450,10 +450,12 @@ interface RongSSEEvent {
 }
 
 /** A server-sent event stream; iterate it with `for await`. */
-interface RongSSE extends AsyncIterable<RongSSEEvent> {
+interface RongSSE extends AsyncIterableIterator<RongSSEEvent> {
   readonly url: string;
   close(): void;
-  [Symbol.asyncIterator](): AsyncIterator<RongSSEEvent>;
+  next(): Promise<IteratorResult<RongSSEEvent, undefined>>;
+  return(): Promise<IteratorResult<RongSSEEvent, undefined>>;
+  [Symbol.asyncIterator](): this;
 }
 
 interface RongSSEConstructor {

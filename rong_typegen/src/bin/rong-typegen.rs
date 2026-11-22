@@ -1173,6 +1173,8 @@ mod tests {
         assert!(profile.contains("declare var CompressionStream"));
         assert!(profile.contains("readonly SSE: RongSSEConstructor"));
         assert!(profile.contains("declare var Rong: RongLogicNamespace"));
+        assert!(profile.contains("interface RongSSE extends AsyncIterableIterator<RongSSEEvent>"));
+        assert!(profile.contains("[Symbol.asyncIterator](): this;"));
         assert!(!profile.contains("interface Document"));
         assert!(!profile.contains("declare var window"));
     }
