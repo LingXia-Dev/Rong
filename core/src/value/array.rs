@@ -38,7 +38,7 @@ where
         if value.is_array() {
             JSObject::from_js_value(ctx, value).map(Self)
         } else {
-            Err(HostError::not_array().into())
+            Err(HostError::type_mismatch("an array", value.type_of().to_string()).into())
         }
     }
 }
@@ -390,7 +390,7 @@ where
                 .map(|(i, item)| item.map_err(|e| e.at_index(i)))
                 .collect::<JSResult<Vec<_>>>()
         } else {
-            Err(HostError::not_array().into())
+            Err(HostError::type_mismatch("an array", value.type_of().to_string()).into())
         }
     }
 }

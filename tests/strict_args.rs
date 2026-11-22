@@ -346,3 +346,138 @@ fn a_nested_missing_field_is_reported_with_its_full_path() {
         Ok(())
     });
 }
+
+#[derive(FromJSObject)]
+struct Kinds {
+    items: Vec<String>,
+    callback: Option<JSFunc>,
+    config: Option<JSObject>,
+    list: Option<JSArray>,
+    buffer: Option<JSArrayBuffer>,
+    bytes: Option<JSTypedArray<u8>>,
+    view: Option<AnyJSTypedArray>,
+    when: Option<JSDate>,
+}
+
+#[test]
+fn object_array_and_function_parameters_name_the_position() {
+    run(|ctx| {
+        let global = ctx.global();
+        global.set("takeObject", JSFunc::new(ctx, |_o: JSObject| true)?)?;
+        global.set("takeArray", JSFunc::new(ctx, |_a: JSArray| true)?)?;
+        global.set(
+            "takeVecArg",
+            JSFunc::new(ctx, |v: Vec<String>| v.len() as u32)?,
+        )?;
+        global.set("takeFunc", JSFunc::new(ctx, |_f: JSFunc| true)?)?;
+        global.set("takeBuffer", JSFunc::new(ctx, |_b: JSArrayBuffer| true)?)?;
+        global.set("takeBytes", JSFunc::new(ctx, |_t: JSTypedArray<u8>| true)?)?;
+        global.set("takeView", JSFunc::new(ctx, |_t: AnyJSTypedArray| true)?)?;
+
+        let cases = [
+            ("takeObject(5)", "argument 1 must be an object, got number"),
+            ("takeObject(null)", "argument 1 must be an object, got null"),
+            ("takeArray({})", "argument 1 must be an array, got object"),
+            (
+                "takeVecArg('ab')",
+                "argument 1 must be an array, got string",
+            ),
+            ("takeFunc({})", "argument 1 must be a function, got object"),
+            (
+                "takeBuffer([])",
+                "argument 1 must be an ArrayBuffer, got array",
+            ),
+            (
+                "takeBytes(new Int8Array(2))",
+                "argument 1 must be a Uint8Array, got Int8Array",
+            ),
+            (
+                "takeView(1)",
+                "argument 1 must be a typed array, got number",
+            ),
+        ];
+        for (call, message) in cases {
+            assert_eq!(
+                thrown(ctx, call)?,
+                format!("TypeError|E_INVALID_ARG|{message}|1"),
+                "{call}"
+            );
+        }
+        let ok: bool = ctx.eval(Source::from_bytes(
+            "takeObject({}) && takeArray([]) && takeFunc(() => 1) \
+             && takeBuffer(new ArrayBuffer(1)) && takeBytes(new Uint8Array(1)) \
+             && takeView(new Int8Array(1))",
+        ))?;
+        assert!(ok);
+        Ok(())
+    });
+}
+
+#[test]
+fn object_array_and_function_fields_name_the_path() {
+    run(|ctx| {
+        ctx.global().set(
+            "takeKinds",
+            JSFunc::new(ctx, |k: Kinds| {
+                (k.items.len()
+                    + usize::from(k.callback.is_some())
+                    + usize::from(k.config.is_some())
+                    + usize::from(k.list.is_some())
+                    + usize::from(k.buffer.is_some())
+                    + usize::from(k.bytes.is_some())
+                    + usize::from(k.view.is_some())
+                    + usize::from(k.when.is_some())) as u32
+            })?,
+        )?;
+
+        let cases = [
+            ("{ items: 'x' }", "`items` must be an array, got string"),
+            (
+                "{ items: ['a', 2] }",
+                "`items[1]` must be a string, got number",
+            ),
+            (
+                "{ items: [], callback: 1 }",
+                "`callback` must be a function, got number",
+            ),
+            (
+                "{ items: [], config: 'x' }",
+                "`config` must be an object, got string",
+            ),
+            (
+                "{ items: [], list: {} }",
+                "`list` must be an array, got object",
+            ),
+            (
+                "{ items: [], buffer: [] }",
+                "`buffer` must be an ArrayBuffer, got array",
+            ),
+            (
+                "{ items: [], bytes: new Int8Array(1) }",
+                "`bytes` must be a Uint8Array, got Int8Array",
+            ),
+            (
+                "{ items: [], view: 5 }",
+                "`view` must be a typed array, got number",
+            ),
+            (
+                "{ items: [], when: 0 }",
+                "`when` must be a Date, got number",
+            ),
+        ];
+        for (arg, message) in cases {
+            assert_eq!(
+                thrown(ctx, &format!("takeKinds({arg})"))?,
+                format!("TypeError|E_INVALID_ARG|argument 1: {message}|1"),
+                "{arg}"
+            );
+        }
+        let n: u32 = ctx.eval(Source::from_bytes(
+            "takeKinds({ items: ['a'], callback() {}, config: {}, list: [], \
+             buffer: new ArrayBuffer(1), bytes: new Uint8Array(1), \
+             view: new Float32Array(1), when: new Date() })",
+        ))?;
+        assert_eq!(n, 8);
+        Ok(())
+    });
+}

@@ -521,10 +521,6 @@ impl HostError {
         .with_data(crate::err_data!({ expected: expected, got: got }))
     }
 
-    pub(crate) fn not_array() -> Self {
-        Self::type_error(E_NOT_ARRAY, "Not JS Array")
-    }
-
     pub(crate) fn not_array_buffer() -> Self {
         Self::type_error(E_NOT_ARRAY_BUFFER, "Not JS ArrayBuffer")
     }
@@ -537,20 +533,8 @@ impl HostError {
         Self::type_error(E_NOT_FUNCTION, "Not JS Function")
     }
 
-    pub(crate) fn not_object() -> Self {
-        Self::type_error(E_TYPE, "Not JS Object")
-    }
-
-    pub(crate) fn not_symbol() -> Self {
-        Self::type_error(E_TYPE, "Not JS Symbol")
-    }
-
     pub(crate) fn not_proxy() -> Self {
         Self::type_error(E_TYPE, "Not JS Proxy")
-    }
-
-    pub(crate) fn not_typed_array() -> Self {
-        Self::type_error(E_NOT_TYPED_ARRAY, "Not JS TypedArray")
     }
 
     pub(crate) fn property_not_found(name: impl std::fmt::Display) -> Self {
@@ -560,19 +544,6 @@ impl HostError {
 
     pub(crate) fn once_fn_called() -> Self {
         Self::new(E_INVALID_STATE, "OnceFn had been called")
-    }
-
-    pub(crate) fn typed_array_kind_mismatch(
-        expected: impl std::fmt::Debug,
-        actual: impl std::fmt::Debug,
-    ) -> Self {
-        Self::type_error(
-            E_TYPE,
-            format!(
-                "TypedArray kind mismatch: expected {:?}, got {:?}",
-                expected, actual
-            ),
-        )
     }
 
     pub(crate) fn typed_array_alignment_error() -> Self {

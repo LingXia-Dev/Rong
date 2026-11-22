@@ -55,7 +55,7 @@ where
         if value.is_symbol() {
             Ok(Self(value.into()))
         } else {
-            Err(HostError::not_symbol().into())
+            Err(HostError::type_mismatch("a symbol", value.type_of().to_string()).into())
         }
     }
 }

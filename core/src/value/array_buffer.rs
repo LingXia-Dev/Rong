@@ -49,7 +49,7 @@ where
                 inner: JSObject::from_js_value(ctx, value)?,
             })
         } else {
-            Err(HostError::not_array_buffer().into())
+            Err(HostError::type_mismatch("an ArrayBuffer", value.type_of().to_string()).into())
         }
     }
 }

@@ -36,7 +36,7 @@ where
         if value.is_object() {
             Ok(value.into())
         } else {
-            Err(HostError::not_object().into())
+            Err(HostError::type_mismatch("an object", value.type_of().to_string()).into())
         }
     }
 }
