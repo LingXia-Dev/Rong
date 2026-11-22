@@ -501,3 +501,56 @@ fn coerced_f64_and_bool_are_the_strict_conversion() {
         Ok(())
     });
 }
+
+#[derive(FromJSObject)]
+struct Retries {
+    #[js_default]
+    retries: u32,
+    limit: Option<u32>,
+}
+
+#[test]
+fn undefined_is_omitted_for_option_js_default_and_optional() {
+    run(|ctx| {
+        install(ctx)?;
+        ctx.global().set(
+            "takeRetries",
+            JSFunc::new(ctx, |r: Retries| {
+                format!(
+                    "{}:{}",
+                    r.retries,
+                    r.limit.map_or("none".to_string(), |n| n.to_string())
+                )
+            })?,
+        )?;
+
+        // `#[js_default]`: absent and `undefined` take the default; `null` is a value.
+        let s: String = ctx.eval(Source::from_bytes("takeRetries({})"))?;
+        assert_eq!(s, "0:none");
+        let s: String = ctx.eval(Source::from_bytes("takeRetries({ retries: undefined })"))?;
+        assert_eq!(s, "0:none");
+        assert_eq!(
+            thrown(ctx, "takeRetries({ retries: null })")?,
+            "TypeError|E_INVALID_ARG|argument 1: `retries` must be an integer, got null|1"
+        );
+
+        // `Option<T>`: absent, `undefined` and `null` are all `None`.
+        let s: String = ctx.eval(Source::from_bytes("takeRetries({ limit: undefined })"))?;
+        assert_eq!(s, "0:none");
+        let s: String = ctx.eval(Source::from_bytes("takeRetries({ limit: null })"))?;
+        assert_eq!(s, "0:none");
+        let s: String = ctx.eval(Source::from_bytes("takeRetries({ retries: 2, limit: 3 })"))?;
+        assert_eq!(s, "2:3");
+
+        // `Optional<T>`: omitted and `undefined` are `None`; `null` is a value.
+        let s: String = ctx.eval(Source::from_bytes("takeOptional('a')"))?;
+        assert_eq!(s, "a:");
+        let s: String = ctx.eval(Source::from_bytes("takeOptional('a', undefined)"))?;
+        assert_eq!(s, "a:");
+        assert_eq!(
+            thrown(ctx, "takeOptional('a', null)")?,
+            "TypeError|E_INVALID_ARG|argument 2 must be a string, got null|2"
+        );
+        Ok(())
+    });
+}

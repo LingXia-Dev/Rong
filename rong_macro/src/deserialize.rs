@@ -76,11 +76,15 @@ pub(crate) fn impl_deserialize(input: syn::DeriveInput) -> syn::Result<TokenStre
                     }
                 })
             } else if let Some(js_default_expr) = js_default_value {
-                // Field with default value: used only when the property is absent.
+                // Field with default value: used when the property is absent or
+                // `undefined`, like an omitted `Optional` argument; `null` is a value.
                 Ok(quote! {
-                    #field_name: match obj.get_opt::<_, #field_type>(#js_name_lit) {
-                        Ok(Some(val)) => val,
-                        Ok(None) => #js_default_expr,
+                    #field_name: match obj.get_opt::<_, rong::JSValue>(#js_name_lit) {
+                        Ok(Some(val)) if !val.is_undefined() => {
+                            <#field_type as rong::FromJSValue<rong::JSEngineValue>>::from_js_value(ctx, val)
+                                .map_err(|e| e.into_field_error(#js_name_lit))?
+                        }
+                        Ok(_) => #js_default_expr,
                         Err(e) => return Err(e.into_field_error(#js_name_lit)),
                     }
                 })

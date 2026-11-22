@@ -308,8 +308,8 @@ pub fn js_method(_attr: TokenStream, item: TokenStream) -> TokenStream {
 ///
 /// # Attributes
 /// - `js_name = "name"`: Use a different name for the field in JavaScript
-/// - `js_default`: Use `Default::default()` if the field is missing
-/// - `js_default = "value"`: Use a specific default value if the field is missing
+/// - `js_default`: Use `Default::default()` if the field is missing or `undefined` (`null` is a value)
+/// - `js_default = "value"`: Use a specific default value if the field is missing or `undefined`
 ///
 /// # Field Types
 /// - **Required fields**: Must exist in the JavaScript object, will error if missing
