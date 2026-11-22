@@ -1,6 +1,6 @@
 use rong::{function::*, *};
 use std::cell::RefCell;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::io::{self, IsTerminal, Write};
 use std::time::Instant;
@@ -390,7 +390,7 @@ pub fn inspect_value(value: JSValue) -> String {
 
 fn inspect_value_with_options(value: JSValue, options: InspectOptions) -> String {
     let mut result = String::new();
-    format_raw_inner(&mut result, value, &mut HashSet::default(), 0, options);
+    format_raw_inner(&mut result, value, &mut Vec::new(), 0, options);
     result
 }
 
@@ -416,7 +416,7 @@ fn format_values_internal(result: &mut String, args: Vec<JSValue>) {
                                     format_raw_inner(
                                         result,
                                         next_arg,
-                                        &mut HashSet::default(),
+                                        &mut Vec::new(),
                                         0,
                                         InspectOptions::default(),
                                     );
@@ -434,7 +434,7 @@ fn format_values_internal(result: &mut String, args: Vec<JSValue>) {
                                     format_raw_inner(
                                         result,
                                         next_arg,
-                                        &mut HashSet::default(),
+                                        &mut Vec::new(),
                                         0,
                                         InspectOptions::default(),
                                     );
@@ -452,7 +452,7 @@ fn format_values_internal(result: &mut String, args: Vec<JSValue>) {
                                     format_raw_inner(
                                         result,
                                         next_arg,
-                                        &mut HashSet::default(),
+                                        &mut Vec::new(),
                                         0,
                                         InspectOptions::default(),
                                     );
@@ -467,7 +467,7 @@ fn format_values_internal(result: &mut String, args: Vec<JSValue>) {
                                 format_raw_inner(
                                     result,
                                     next_arg,
-                                    &mut HashSet::default(),
+                                    &mut Vec::new(),
                                     0,
                                     InspectOptions::default(),
                                 );
@@ -496,13 +496,7 @@ fn format_values_internal(result: &mut String, args: Vec<JSValue>) {
 
             for (_, extra) in iter.by_ref() {
                 result.push(' ');
-                format_raw_inner(
-                    result,
-                    extra,
-                    &mut HashSet::default(),
-                    0,
-                    InspectOptions::default(),
-                );
+                format_raw_inner(result, extra, &mut Vec::new(), 0, InspectOptions::default());
             }
             continue;
         }
@@ -513,20 +507,14 @@ fn format_values_internal(result: &mut String, args: Vec<JSValue>) {
         }
 
         // handle next arg
-        format_raw_inner(
-            result,
-            arg,
-            &mut HashSet::default(),
-            0,
-            InspectOptions::default(),
-        );
+        format_raw_inner(result, arg, &mut Vec::new(), 0, InspectOptions::default());
     }
 }
 
 fn format_raw_inner(
     result: &mut String,
     value: JSValue,
-    visited: &mut HashSet<usize>,
+    visited: &mut Vec<JSValue>,
     depth: usize,
     options: InspectOptions,
 ) {
@@ -577,12 +565,13 @@ fn format_raw_inner(
 
         JSValueType::Object | JSValueType::Array => {
             let obj: JSObject = value.clone().into();
-            let hash = default_hash(&value);
-            if visited.contains(&hash) {
+            // Compare by identity along the current path; a hash of the value
+            // is not identity on every engine.
+            if visited.iter().any(|seen| seen == &value) {
                 result.push_str("[Circular]");
                 return;
             }
-            visited.insert(hash);
+            visited.push(value.clone());
 
             if let Some(typed_array) = AnyJSTypedArray::from_object(obj.clone()) {
                 format_typed_array(result, obj, typed_array, visited, depth, options);
@@ -596,7 +585,7 @@ fn format_raw_inner(
             } else {
                 format_object(result, obj, visited, depth, options);
             }
-            visited.remove(&hash);
+            visited.pop();
         }
 
         JSValueType::Function => {
@@ -674,7 +663,7 @@ fn format_raw_inner(
 fn format_array(
     result: &mut String,
     array: JSArray,
-    visited: &mut HashSet<usize>,
+    visited: &mut Vec<JSValue>,
     depth: usize,
     options: InspectOptions,
 ) {
@@ -704,7 +693,7 @@ fn format_array(
 fn format_object(
     result: &mut String,
     obj: JSObject,
-    visited: &mut HashSet<usize>,
+    visited: &mut Vec<JSValue>,
     depth: usize,
     options: InspectOptions,
 ) {
@@ -804,7 +793,7 @@ fn format_typed_array(
     result: &mut String,
     obj: JSObject,
     typed_array: AnyJSTypedArray,
-    visited: &mut HashSet<usize>,
+    visited: &mut Vec<JSValue>,
     depth: usize,
     options: InspectOptions,
 ) {
