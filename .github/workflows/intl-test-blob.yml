@@ -52,6 +52,39 @@ jobs:
               TimezoneNamesSpecificLongV1 TimezoneNamesSpecificShortV1 TimezoneNamesStandardLongV1 \
               TimezoneIdentifiersIanaCoreV1 TimezoneIdentifiersIanaExtendedV1 TimezonePeriodsV1 \
               CalendarJapaneseModernV1 CalendarPreferredV1 CalendarWeekV1 \
+              CaseMapV1 CollationDiacriticsV1 CollationJamoV1 CollationMetadataV1 \
+              CollationReorderingV1 CollationRootV1 CollationSpecialPrimariesV1 CollationTailoringV1 \
+              CurrencyDecimalSymbolsV1 CurrencyDisplaynameV1 CurrencyEssentialsV1 \
+              CurrencyExtendedDataV1 CurrencyPatternsDataV1 CurrencyPatternsNoCurrencyV1 \
+              CurrencySymbolsV1 DatetimeRelativeDayLongV1 DatetimeRelativeDayNarrowV1 \
+              DatetimeRelativeDayShortV1 DatetimeRelativeHourLongV1 DatetimeRelativeHourNarrowV1 \
+              DatetimeRelativeHourShortV1 DatetimeRelativeMinuteLongV1 DatetimeRelativeMinuteNarrowV1 \
+              DatetimeRelativeMinuteShortV1 DatetimeRelativeMonthLongV1 DatetimeRelativeMonthNarrowV1 \
+              DatetimeRelativeMonthShortV1 DatetimeRelativeQuarterLongV1 \
+              DatetimeRelativeQuarterNarrowV1 DatetimeRelativeQuarterShortV1 \
+              DatetimeRelativeSecondLongV1 DatetimeRelativeSecondNarrowV1 \
+              DatetimeRelativeSecondShortV1 DatetimeRelativeWeekLongV1 DatetimeRelativeWeekNarrowV1 \
+              DatetimeRelativeWeekShortV1 DatetimeRelativeYearLongV1 DatetimeRelativeYearNarrowV1 \
+              DatetimeRelativeYearShortV1 ListAndV1 ListOrV1 ListUnitV1 LocaleNamesEssentialsV1 \
+              LocaleNamesLanguageLongHeavyV1 LocaleNamesLanguageLongLightV1 \
+              LocaleNamesLanguageMediumHeavyV1 LocaleNamesLanguageMediumLightV1 \
+              LocaleNamesLanguageMediumTinyV1 LocaleNamesLanguageMenuMediumHeavyV1 \
+              LocaleNamesLanguageMenuMediumLightV1 LocaleNamesLanguageShortHeavyV1 \
+              LocaleNamesLanguageShortLightV1 LocaleNamesRegionMediumLightV1 \
+              LocaleNamesRegionMediumTinyV1 LocaleNamesRegionShortLightV1 LocaleNamesRegionShortTinyV1 \
+              LocaleNamesScriptMediumHeavyV1 LocaleNamesScriptMediumLightV1 \
+              LocaleNamesScriptMediumTinyV1 LocaleNamesScriptShortHeavyV1 \
+              LocaleNamesVariantMediumHeavyV1 LocaleScriptDirectionV1 NormalizerNfdDataV1 \
+              NormalizerNfdSupplementV1 NormalizerNfdTablesV1 NormalizerNfkdDataV1 \
+              NormalizerNfkdTablesV1 PropertyBinaryRegionalIndicatorV1 PropertyBinarySegmentStarterV1 \
+              SegmenterBreakGraphemeClusterV1 SegmenterBreakSentenceOverrideV1 \
+              SegmenterBreakSentenceV1 SegmenterBreakWordOverrideV1 SegmenterBreakWordV1 \
+              UnitsDurationDigitalV1 UnitsEssentialsV1 UnitsIdV1 UnitsInfoV1 UnitsNamesAreaCoreV1 \
+              UnitsNamesAreaExtendedV1 UnitsNamesAreaOutlierV1 UnitsNamesDurationCoreV1 \
+              UnitsNamesDurationExtendedV1 UnitsNamesDurationOutlierV1 UnitsNamesLengthCoreV1 \
+              UnitsNamesLengthExtendedV1 UnitsNamesLengthOutlierV1 UnitsNamesMassCoreV1 \
+              UnitsNamesMassExtendedV1 UnitsNamesMassOutlierV1 UnitsNamesVolumeCoreV1 \
+              UnitsNamesVolumeExtendedV1 UnitsNamesVolumeOutlierV1 \
             --locales en en-US en-GB fr de es it pt ru pl uk cs ar he ja zh ko hi cy sl lt ga br mt ro fa gv zh-Hant en-IN pt-PT de-AT ar-EG sv tr th zh-CN sr sr-Thai si ln pl-PL
           echo "BLOB intl-test $(stat -c %s intl-test.postcard) bytes, gzip $(gzip -9c intl-test.postcard | wc -c)"
           sha256sum intl-test.postcard
