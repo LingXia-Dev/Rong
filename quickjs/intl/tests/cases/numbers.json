@@ -45,5 +45,6 @@
   ["new Intl.NumberFormat('en', {unit: 'furlong'})", "throws RangeError"],
   ["new Intl.NumberFormat('en', {numberingSystem: 'a'})", "throws RangeError"],
   ["new Intl.NumberFormat('en', {useGrouping: 'sometimes'})", "throws RangeError"],
-  ["Intl.NumberFormat.prototype.formatToParts.call({}, 1)", "throws TypeError"]
+  ["Intl.NumberFormat.prototype.formatToParts.call({}, 1)", "throws TypeError"],
+  ["new Intl.NumberFormat('en', {notation: 'compact'}).resolvedOptions().useGrouping", "\"min2\""]
 ]

@@ -454,6 +454,11 @@ fn number_format_options<E: JSEngine>(
         "percent" => Style::Percent,
         _ => return Err(bad("this style is not supported yet")),
     };
+    // Formatting compact, scientific or engineering as standard would be a
+    // wrong answer, not a fallback.
+    if text("notation")? != "standard" {
+        return Err(bad("this notation is not supported yet"));
+    }
     // [[UseGrouping]] is a string or false.
     let grouping: Option<String> = slots.get_opt::<_, String>("useGrouping").ok().flatten();
     let grouping = match grouping.as_deref() {
