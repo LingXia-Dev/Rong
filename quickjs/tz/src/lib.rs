@@ -1,8 +1,9 @@
 //! Time zones for the `Intl` that rong provides on QuickJS.
 //!
-//! Internal to `rong_intl`: it is linked only through `rong_intl`'s QuickJS
-//! build, so an engine with its own `Intl` (JavaScriptCore, ArkJS) carries none
-//! of it. Embedders reach zones through the standard `Intl`, not this crate.
+//! Internal to QuickJS's `Intl` (`rong_quickjs_intl`, behind `rong`'s
+//! `quickjs-intl` feature); not for direct use. An engine with its own `Intl`
+//! (JavaScriptCore, ArkJS) carries none of it, and embedders reach zones
+//! through the standard `Intl`.
 //!
 //! Three questions, answered from one tz database per process:
 //! - [`offset_seconds`]: a zone's UTC offset at an instant;
@@ -201,7 +202,7 @@ impl Registry {
     }
 }
 
-/// Sets where rong_tz's one report (which database it chose) goes, such as
+/// Sets where rong_quickjs_tz's one report (which database it chose) goes, such as
 /// the host's device log. The first call wins; returns whether this one did.
 pub fn set_reporter(report: impl Fn(&str) + Send + Sync + 'static) -> bool {
     REPORTER.set(Box::new(report)).is_ok()
@@ -239,7 +240,7 @@ fn open_source(source: Source, skipped: &mut Vec<String>) -> Result<Database, Co
 }
 
 fn report_line(database: &Database, skipped: &[String]) -> String {
-    let mut line = format!("rong_tz: time zone database: {}", database.source);
+    let mut line = format!("rong_quickjs_tz: time zone database: {}", database.source);
     for note in skipped {
         line.push_str("; skipped ");
         line.push_str(note);
