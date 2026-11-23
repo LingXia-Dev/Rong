@@ -10,11 +10,11 @@ use std::io::Write;
 const BLOB: &[u8] = include_bytes!("data/locale-services.postcard");
 
 const RUN: &str = r#"
-(cases) => cases.map(([expr, expect]) => {
+(cases) => cases.map(([expr, expect, note]) => {
   let got;
   try { got = JSON.stringify((0, eval)(expr)); }
   catch (e) { got = 'throws ' + (e && e.constructor ? e.constructor.name : String(e)); }
-  return [expr, got, expect];
+  return [expr, got, expect, note || ''];
 })
 "#;
 
@@ -54,14 +54,20 @@ fn locale_cases_match_on_every_engine() -> Result<(), String> {
     let results: Vec<Vec<String>> = run.call(None, (cases,)).map_err(|e| e.to_string())?;
     let mut failed = 0;
     for row in &results {
-        let (expr, got, expect) = (&row[0], &row[1], &row[2]);
+        let (expr, got, expect, note) = (&row[0], &row[1], &row[2], &row[3]);
+        // A case marked as data-dependent is reported, not failed: its answer
+        // follows the engine's CLDR version.
         let verdict = if got == expect {
             "ok"
+        } else if !note.is_empty() {
+            "data"
         } else {
             failed += 1;
             "DIFF"
         };
-        log(&format!("{verdict} | {expr} | got {got} | want {expect}"));
+        log(&format!(
+            "{verdict} | {expr} | got {got} | want {expect} {note}"
+        ));
     }
     if failed > 0 {
         return Err(format!("{failed} of {} cases differ", results.len()));
