@@ -767,6 +767,30 @@ impl<C: JSContextImpl> JSContext<C> {
             .map(|v| JSValue::from_raw(self, v))
     }
 
+    /// Runs `f` and frees, when it returns, the engine handles made inside it;
+    /// values kept in Rust survive. Inside one native call, the handles of
+    /// every operation are otherwise freed only when that call returns, so a
+    /// native function that does a large batch of work should run each
+    /// iteration in its own scope. Engines without handle scopes (QuickJS,
+    /// JavaScriptCore) just call `f`.
+    ///
+    /// ```rust,no_run
+    /// use rong_core::prelude::*;
+    ///
+    /// fn demo<E: JSEngine + 'static>() -> JSResult<()> {
+    ///     let runtime = E::runtime();
+    ///     let ctx = runtime.context();
+    ///     let items = JSArray::new(&ctx)?;
+    ///     for i in 0..100_000 {
+    ///         ctx.handle_scope(|| items.push(format!("item {i}")))?;
+    ///     }
+    ///     Ok(())
+    /// }
+    /// ```
+    pub fn handle_scope<R>(&self, f: impl FnOnce() -> R) -> R {
+        <C::Value as JSValueImpl>::in_new_handle_scope(self.rc.inner.as_raw(), f)
+    }
+
     pub fn runtime(&self) -> &JSRuntime<C::Runtime> {
         &self.rc.runtime
     }

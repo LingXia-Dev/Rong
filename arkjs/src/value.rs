@@ -301,10 +301,18 @@ impl JSValueImpl for ArkJSValue {
     type Context = ArkJSContext;
 
     fn in_handle_scope<R>(
-        ctx: <Self::Context as JSContextImpl>::RawContext,
+        ctx: &<Self::Context as JSContextImpl>::RawContext,
         f: impl FnOnce() -> R,
     ) -> R {
-        let _scope = crate::scope::OpScope::enter(ctx);
+        let _scope = crate::scope::OpScope::enter(*ctx);
+        f()
+    }
+
+    fn in_new_handle_scope<R>(
+        ctx: &<Self::Context as JSContextImpl>::RawContext,
+        f: impl FnOnce() -> R,
+    ) -> R {
+        let _scope = crate::scope::OpScope::enter_new(*ctx);
         f()
     }
 

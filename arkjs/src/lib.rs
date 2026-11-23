@@ -1,3 +1,15 @@
+//! The ArkJS (JSVM-API) backend for rong.
+//!
+//! # Handle scopes
+//!
+//! Each backend operation runs in a JSVM handle scope, so the handles it makes
+//! are freed when it returns; values kept in Rust hold persistent references
+//! and survive. Only the outermost operation on a context opens a scope: inside
+//! a native function called from JS that Rust started, every operation joins
+//! the running one, and its handles stay until that native call returns. A
+//! native function doing a large batch of work should run each step in
+//! `JSContext::handle_scope`, which always opens its own scope.
+
 #[cfg(target_env = "ohos")]
 mod class;
 #[cfg(target_env = "ohos")]
