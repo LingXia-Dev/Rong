@@ -38,13 +38,14 @@ test('sec-intl-pluralrules-constructor', 'a NewTarget whose prototype is not an 
   assert.sameValue(pr.select(2), 'other');
 });
 
-test('sec-intl-pluralrules-constructor', 'a NewTarget prototype is read once, after the options', () => {
+test('sec-intl-pluralrules-constructor', 'a NewTarget prototype is read once, before the options', () => {
   const log = [];
   const nt = new Proxy(function () {}, {
     get(target, key) { log.push(String(key)); return key === 'prototype' ? PR.prototype : target[key]; },
   });
   Reflect.construct(PR, ['en', loggingOptions(log, { type: 'ordinal' })], nt);
   assert.sameValue(log.filter((k) => k === 'prototype').length, 1);
+  assert.sameValue(log[0], 'prototype', 'OrdinaryCreateFromConstructor comes first: ' + log.join());
 });
 
 only('rong', 'the reference has no PluralRules notation yet', 'sec-intl-pluralrules-constructor',
@@ -279,8 +280,6 @@ const TABLE = [
     "other other other other other other other other other other other other other other other other other other other other other other"],
   ["es", "cardinal", "one many other",
     "other one other other other other other other other other other other other other other other other many other other one other"],
-  ["es", "ordinal", "other",
-    "other other other other other other other other other other other other other other other other other other other other other other"],
   ["it", "cardinal", "one many other",
     "other one other other other other other other other other other other other other other other other many other other one other"],
   ["it", "ordinal", "many other",
@@ -385,6 +384,14 @@ for (const [locale, type, categories, selections] of TABLE) {
     assert.sameValue(VALUES.map((v) => pr.select(v)).join(' '), selections, 'selections');
   });
 }
+
+only('rong', 'CLDR 49 gives Spanish ordinals a one category (1.\u00ba, 3.\u00ba); the reference\'s ICU predates it',
+  'sec-intl.pluralrules.prototype.select', 'es ordinal', () => {
+    const pr = new PR('es', { type: 'ordinal' });
+    assert.sameValue(pr.resolvedOptions().pluralCategories.join(' '), 'one other');
+    assert.sameValue(VALUES.map((v) => pr.select(v)).join(' '),
+      'other one other one other other other other other other other one other one other one other other other other one other');
+  });
 
 test('sec-intl.pluralrules.prototype.select', 'digit options change the category', () => {
   assert.sameValue(new PR('en').select(1), 'one');
