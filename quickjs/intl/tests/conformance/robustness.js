@@ -137,8 +137,8 @@ test('robustness', 'NumberFormat: a getter calling resolvedOptions on a half-bui
 only('rong', 'the reference formats a non-decimal literal past the Number range exactly', 'sec-tointlmathematicalvalue',
   'RoundMVResult: a long hex literal is an infinity', () => {
     const nf = new Intl.NumberFormat('en');
-    assert.sameValue(nf.format('0x' + 'f'.repeat(1000)), '∞');
-    assert.sameValue(nf.format('0b' + '1'.repeat(5000)), '∞');
+    assert.sameValue(nf.format('0x' + 'f'.repeat(1000)), '\u221e');
+    assert.sameValue(nf.format('0b' + '1'.repeat(5000)), '\u221e');
   });
 
 test('robustness', 'NumberFormat: long numeric strings', () => {
@@ -147,8 +147,8 @@ test('robustness', 'NumberFormat: long numeric strings', () => {
   assert.sameValue(nf.format('1e999999999'), nf.format('1e999999999'), 'a huge exponent returns');
   assert.sameValue(nf.format('1e-999999999'), '0');
   assert.sameValue(nf.format('-1e-999999999'), '-0');
-  assert.sameValue(nf.format('9'.repeat(100000)), '∞', 'RoundMVResult overflows');
-  assert.sameValue(nf.format('-' + '9'.repeat(100000)), '-∞');
+  assert.sameValue(nf.format('9'.repeat(100000)), '\u221e', 'RoundMVResult overflows');
+  assert.sameValue(nf.format('-' + '9'.repeat(100000)), '-\u221e');
   assert.sameValue(nf.format('0x' + 'f'.repeat(100)), nf.format(BigInt('0x' + 'f'.repeat(100))), 'within range it is exact');
   assert.sameValue(nf.format('1' + '0'.repeat(400) + 'x'), 'NaN');
 });

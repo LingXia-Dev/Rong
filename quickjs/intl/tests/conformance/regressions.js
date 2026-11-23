@@ -1,10 +1,10 @@
 // One named case for each defect found so far, so none comes back.
 
 const PERCENT_SIGNS = [
-  ['ar-EG', {}, '؜-٢٥٪؜'],
-  ['en', { numberingSystem: 'arab' }, '؜-٢٥٪؜'],
-  ['ar-EG', { numberingSystem: 'latn' }, '‎-25‎%‎'],
-  ['fa', {}, '‎−۲۵٪'],
+  ['ar-EG', {}, '\u061c-\u0662\u0665\u066a\u061c'],
+  ['en', { numberingSystem: 'arab' }, '\u061c-\u0662\u0665\u066a\u061c'],
+  ['ar-EG', { numberingSystem: 'latn' }, '\u200e-25\u200e%\u200e'],
+  ['fa', {}, '\u200e\u2212\u06f2\u06f5\u066a'],
 ];
 for (const [locale, options, want] of PERCENT_SIGNS) {
   test('regression', 'percent sign of ' + locale + ' ' + JSON.stringify(options), () => {
@@ -19,7 +19,7 @@ only('rong', 'ICU writes the bidi marks around a sign as literal parts; ICU4X\'s
   'the arab percent and minus signs carry their marks', () => {
     const parts = new Intl.NumberFormat('en', { style: 'percent', numberingSystem: 'arab' }).formatToParts(-0.25);
     assert.deepEqual(parts.map((p) => [p.type, p.value]),
-      [['minusSign', '؜-'], ['integer', '٢٥'], ['percentSign', '٪؜']]);
+      [['minusSign', '\u061c-'], ['integer', '\u0662\u0665'], ['percentSign', '\u066a\u061c']]);
   });
 
 test('regression', 'NaN under signDisplay takes the positive-zero pattern', () => {
@@ -114,5 +114,5 @@ only('rong', 'the reference reads select\'s value with ToNumber, from before ToI
   });
 
 only('rong', 'the reference has no such bound', 'regression', 'a BigInt past 32767 digits is an infinity (implementation limit)', () => {
-  assert.sameValue(new Intl.NumberFormat('en').format(10n ** 40000n), '∞');
+  assert.sameValue(new Intl.NumberFormat('en').format(10n ** 40000n), '\u221e');
 });

@@ -72,7 +72,7 @@ test('sec-canonicalizelocalelist', 'duplicates after canonicalization are droppe
 
 const INVALID_TAGS = ['', ' en', 'en ', 'en_US', 'e', 'en-', '-en', 'en--US', 'abcdefghi',
   'en-u', 'en-u-', 'en-x', 'en-a', 'en-US-US', 'en-latn-latn', 'de-1996-1996',
-  'en-u-ca-gregory-ca-buddhist-x', 'en-t-', '123', 'i-klingon', 'en-İ', 'en\u0000',
+  'en-u-ca-gregory-ca-buddhist-x', 'en-t-', '123', 'i-klingon', 'en-\u0130', 'en\u0000',
   'en-a-aaa-a-bbb', 'zh-cmn-Hans-CN', 'x-private', 'x', 'root', 'en-u-ca-gregorian-123456789'];
 for (const tag of INVALID_TAGS) {
   test('sec-canonicalizelocalelist', 'RangeError for ' + JSON.stringify(tag), () => {
