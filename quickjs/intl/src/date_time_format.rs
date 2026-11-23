@@ -763,9 +763,7 @@ fn shared_sources(mut parts: Vec<Part>) -> Vec<Part> {
             own[i].unwrap_or("shared")
         } else {
             let before = (0..i).rev().find(|&j| field[j]).and_then(|j| own[j]);
-            let after = (i + 1..parts.len())
-                .find(|&j| field[j])
-                .and_then(|j| own[j]);
+            let after = (i + 1..len).find(|&j| field[j]).and_then(|j| own[j]);
             match (before, after) {
                 (Some(a), Some(b)) if a == b => a,
                 _ => "shared",
