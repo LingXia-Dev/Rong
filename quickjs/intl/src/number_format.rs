@@ -537,3 +537,19 @@ pub(crate) static SIMPLE_DIGITS: &[(&str, Digits)] = &[
     ("wcho", Digits::Range('\u{1e2f0}')),
 ];
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Both are binary-searched.
+    #[test]
+    fn lookup_tables_are_sorted_without_duplicates() {
+        assert!(SIMPLE_DIGITS.windows(2).all(|w| w[0].0 < w[1].0));
+        assert!(ENTRIES.windows(2).all(|w| w[0].0 < w[1].0));
+        assert!(
+            ENTRIES
+                .iter()
+                .all(|(_, at)| usize::from(*at) < VALUES.len())
+        );
+    }
+}
