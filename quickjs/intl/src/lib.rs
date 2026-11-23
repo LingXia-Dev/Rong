@@ -647,6 +647,12 @@ fn available(data: &IntlData, service: &str, tag: &str) -> bool {
     match service {
         "PluralRules" => data.has_locale::<icu::plurals::provider::PluralsCardinalV1>(&locale),
         "NumberFormat" => data.has_locale::<icu::decimal::provider::DecimalSymbolsV1>(&locale),
+        "RelativeTimeFormat" => {
+            data.has_locale::<icu_experimental::relativetime::provider::DatetimeRelativeSecondLongV1>(
+                &locale,
+            )
+        }
+        "ListFormat" => data.has_locale::<icu::list::provider::ListAndV1>(&locale),
         "DateTimeFormat" => data.falls_back_into(&locale, &date_time_locales(data)),
         _ => false,
     }
