@@ -18,7 +18,9 @@ thread_local! {
 }
 
 /// Opens a handle scope for the outermost operation on its env; nested
-/// operations add to it. Lives on the stack of one synchronous backend
+/// operations add to it. Inside a native callback driven from Rust, every
+/// operation is nested, so its handles stay until the callback returns:
+/// [`OpScope::enter_new`] bounds a long batch there. Lives on the stack of one synchronous backend
 /// function: not `Send`, never held across an await.
 pub(crate) struct OpScope {
     env: arkjs::JSVM_Env,
@@ -28,6 +30,16 @@ pub(crate) struct OpScope {
 
 impl OpScope {
     pub(crate) fn enter(env: arkjs::JSVM_Env) -> Self {
+        Self::open(env, false)
+    }
+
+    /// Opens a scope even inside an operation in progress, so an embedder can
+    /// bound the handles of each step of a long batch within one native call.
+    pub(crate) fn enter_new(env: arkjs::JSVM_Env) -> Self {
+        Self::open(env, true)
+    }
+
+    fn open(env: arkjs::JSVM_Env, always: bool) -> Self {
         let key = env as usize;
         let outermost = DEPTH.with(|depth| {
             let mut depth = depth.borrow_mut();
@@ -43,7 +55,7 @@ impl OpScope {
             }
         });
         let mut scope: arkjs::JSVM_HandleScope = ptr::null_mut();
-        if outermost && !env.is_null() {
+        if (outermost || always) && !env.is_null() {
             let status = unsafe { arkjs::OH_JSVM_OpenHandleScope(env, &mut scope) };
             if status != arkjs::JSVM_Status_JSVM_OK {
                 scope = ptr::null_mut();

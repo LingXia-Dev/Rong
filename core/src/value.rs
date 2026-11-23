@@ -74,9 +74,25 @@ pub trait JSValueImpl: Clone + PartialEq + Hash {
     }
 
     /// Runs `f` in a scope that frees the raw handles `f` creates: none of them
-    /// may outlive the call. Engines without scoped handles just call `f`.
+    /// may outlive the call. Inside an operation already in progress on the
+    /// same context, `f` joins that operation's scope, so its handles are freed
+    /// only when that operation returns; [`Self::in_new_handle_scope`] bounds
+    /// them instead. Engines without scoped handles just call `f`.
+    ///
+    /// Pass `ctx` borrowed from the value or context that owns it: the borrow
+    /// stops that owner moving into `f`, where dropping it would destroy the
+    /// context while the scope is open.
     fn in_handle_scope<R>(
-        _ctx: <Self::Context as JSContextImpl>::RawContext,
+        _ctx: &<Self::Context as JSContextImpl>::RawContext,
+        f: impl FnOnce() -> R,
+    ) -> R {
+        f()
+    }
+
+    /// Like [`Self::in_handle_scope`], but always opens a scope of its own,
+    /// even inside an operation in progress.
+    fn in_new_handle_scope<R>(
+        _ctx: &<Self::Context as JSContextImpl>::RawContext,
         f: impl FnOnce() -> R,
     ) -> R {
         f()
@@ -285,7 +301,7 @@ macro_rules! impl_js_converter {
         {
             type Error = RongJSError;
             fn try_into(self) -> Result<$out_type, Self::Error> {
-                <Self as JSValueImpl>::in_handle_scope(*self.as_raw_context(), || {
+                <Self as JSValueImpl>::in_handle_scope(self.as_raw_context(), || {
                     let mut result: $out_type = Default::default();
                     if unsafe {
                         $to_fn(
@@ -318,10 +334,10 @@ macro_rules! impl_js_converter {
             $target: JSValueImpl<Context = T>,
         {
             fn from(t: (&T, $in_type)) -> Self {
-                let ctx = *t.0.as_raw();
+                let ctx = t.0.as_raw();
                 <Self as JSValueImpl>::in_handle_scope(ctx, || {
-                    let raw = unsafe { $create_fn(ctx, t.1) };
-                    Self::from_owned_raw(ctx, raw)
+                    let raw = unsafe { $create_fn(*ctx, t.1) };
+                    Self::from_owned_raw(*ctx, raw)
                 })
             }
         }
