@@ -1,0 +1,523 @@
+//! Intl.NumberFormat's PartitionNumberPattern for the decimal and percent
+//! styles, written over ICU4X's data rather than its `DecimalFormatter`:
+//! grouping honours `useGrouping: "always"` and every part keeps the type
+//! ECMA-402 gives it.
+
+use crate::cldr_numbers::{ENTRIES, VALUES, Values};
+use crate::data::IntlData;
+use crate::number::{self, DigitOptions, IntlMV};
+use fixed_decimal::UnsignedDecimal;
+use icu::decimal::provider::{DecimalDigitsV1, DecimalSymbolsV1};
+use icu_experimental::dimension::provider::percent::DecimalPercentV1;
+use icu_pattern::{DoublePlaceholderKey, PatternItem};
+use icu_provider::prelude::*;
+use std::cell::RefCell;
+use std::collections::HashMap;
+use std::rc::Rc;
+
+/// [[Style]], for the styles this module formats.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(crate) enum Style {
+    Decimal,
+    Percent,
+}
+
+/// [[UseGrouping]].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Grouping {
+    Always,
+    Auto,
+    Min2,
+    Off,
+}
+
+/// [[SignDisplay]].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum SignDisplay {
+    Auto,
+    Never,
+    Always,
+    ExceptZero,
+    Negative,
+}
+
+/// One Intl.NumberFormat's resolved slots, as Rust reads them.
+pub(crate) struct Options {
+    pub locale: String,
+    pub numbering_system: String,
+    pub style: Style,
+    pub digits: DigitOptions,
+    pub grouping: Grouping,
+    pub sign: SignDisplay,
+}
+
+/// A part of the result: ECMA-402's [[Type]] and [[Value]].
+pub(crate) type Part = (&'static str, String);
+
+/// The digits of a numbering system.
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum Digits {
+    /// Ten consecutive code points from this one.
+    Range(char),
+    List([char; 10]),
+}
+
+impl Digits {
+    fn digit(&self, d: u32) -> char {
+        match self {
+            Digits::Range(zero) => char::from_u32(u32::from(*zero) + d).unwrap_or('?'),
+            Digits::List(list) => list[d as usize],
+        }
+    }
+}
+
+/// A piece of a sign-dependent pattern.
+#[derive(Clone, Debug)]
+enum Piece {
+    Literal(String),
+    Number,
+    Plus(String),
+    Minus(String),
+    PercentSign(String),
+}
+
+/// What formatting needs for one locale, numbering system and style.
+pub(crate) struct LocaleFormat {
+    pub numbering_system: String,
+    decimal: String,
+    group: String,
+    primary: u8,
+    secondary: u8,
+    min_grouping: u8,
+    digits: Digits,
+    cldr: &'static Values,
+    zero: Vec<Piece>,
+    positive: Vec<Piece>,
+    negative: Vec<Piece>,
+}
+
+/// ICU4X data per context, loaded on first use.
+#[derive(Default)]
+pub(crate) struct Cache {
+    formats: RefCell<HashMap<(String, String, Style), Rc<LocaleFormat>>>,
+}
+
+impl Cache {
+    pub(crate) fn get(
+        &self,
+        data: &IntlData,
+        locale: &str,
+        numbering_system: &str,
+        style: Style,
+    ) -> Result<Rc<LocaleFormat>, String> {
+        let key = (locale.to_string(), numbering_system.to_string(), style);
+        if let Some(found) = self.formats.borrow().get(&key) {
+            return Ok(found.clone());
+        }
+        let built = Rc::new(load(data, locale, numbering_system, style)?);
+        self.formats.borrow_mut().insert(key, built.clone());
+        Ok(built)
+    }
+}
+
+fn request<'a>(locale: &'a DataLocale, attributes: &'a DataMarkerAttributes) -> DataRequest<'a> {
+    DataRequest {
+        id: DataIdentifierBorrowed::for_marker_attributes_and_locale(attributes, locale),
+        ..Default::default()
+    }
+}
+
+fn attributes(numbering_system: &str) -> Option<&DataMarkerAttributes> {
+    DataMarkerAttributes::try_from_str(numbering_system).ok()
+}
+
+/// The locale's own numbering system ([[LocaleData]]'s first `nu` value).
+pub(crate) fn default_numbering_system(data: &IntlData, locale: &str) -> Option<String> {
+    let locale = DataLocale::from(&locale.parse::<icu::locale::Locale>().ok()?);
+    let response: DataResponse<DecimalSymbolsV1> = data
+        .provider()
+        .load(request(&locale, Default::default()))
+        .ok()?;
+    Some(response.payload.get().strings.numsys().to_string())
+}
+
+/// The `nu` values a locale supports: its own first, then every numbering
+/// system with a simple digit mapping.
+pub(crate) fn numbering_systems(data: &IntlData, locale: &str) -> Vec<String> {
+    let mut list: Vec<String> = default_numbering_system(data, locale).into_iter().collect();
+    for (name, _) in SIMPLE_DIGITS {
+        if list.first().is_none_or(|first| first != name) {
+            list.push(name.to_string());
+        }
+    }
+    list
+}
+
+fn load(
+    data: &IntlData,
+    locale: &str,
+    numbering_system: &str,
+    style: Style,
+) -> Result<LocaleFormat, String> {
+    let parsed = locale
+        .parse::<icu::locale::Locale>()
+        .map_err(|_| format!("{locale} is not a locale"))?;
+    let data_locale = DataLocale::from(&parsed);
+    let provider = data.provider();
+    // Symbols for the numbering system, else the locale's own (as ICU4X's
+    // DecimalFormatter resolves them).
+    let symbols: DataResponse<DecimalSymbolsV1> = attributes(numbering_system)
+        .and_then(|a| provider.load(request(&data_locale, a)).ok())
+        .map_or_else(
+            || provider.load(request(&data_locale, Default::default())),
+            Ok,
+        )
+        .map_err(|_| {
+            format!("the data blob has no number symbols for {locale} or its fallbacks")
+        })?;
+    let symbols = symbols.payload.get();
+    let strings = &symbols.strings;
+    let digits = match SIMPLE_DIGITS.binary_search_by(|(n, _)| (*n).cmp(numbering_system)) {
+        Ok(at) => SIMPLE_DIGITS[at].1,
+        Err(_) => {
+            let id = attributes(numbering_system).unwrap_or_default();
+            let response: DataResponse<DecimalDigitsV1> = provider
+                .load(DataRequest {
+                    id: DataIdentifierBorrowed::for_marker_attributes(id),
+                    ..Default::default()
+                })
+                .map_err(|_| format!("the data blob has no digits for {numbering_system}"))?;
+            Digits::List(*response.payload.get())
+        }
+    };
+    let cldr = cldr_values(data, &parsed, numbering_system);
+    let signed = |prefix: &str, suffix: &str, sign: fn(String) -> Piece| {
+        let mut pieces = Vec::new();
+        if !prefix.is_empty() {
+            pieces.push(sign(prefix.to_string()));
+        }
+        pieces.push(Piece::Number);
+        if !suffix.is_empty() {
+            pieces.push(sign(suffix.to_string()));
+        }
+        pieces
+    };
+    let (zero, positive, negative) = match style {
+        Style::Decimal => (
+            vec![Piece::Number],
+            signed(
+                strings.plus_sign_prefix(),
+                strings.plus_sign_suffix(),
+                Piece::Plus,
+            ),
+            signed(
+                strings.minus_sign_prefix(),
+                strings.minus_sign_suffix(),
+                Piece::Minus,
+            ),
+        ),
+        Style::Percent => {
+            let response: DataResponse<DecimalPercentV1> = provider
+                .load(request(&data_locale, Default::default()))
+                .map_err(|_| {
+                    format!("the data blob has no percent patterns for {locale} or its fallbacks")
+                })?;
+            let percent = response.payload.get();
+            let percent_sign = cldr[6];
+            let literal = |text: &str, out: &mut Vec<Piece>| {
+                let mut rest = text;
+                while let Some(at) = rest.find(percent_sign).filter(|_| !percent_sign.is_empty()) {
+                    if at > 0 {
+                        out.push(Piece::Literal(rest[..at].to_string()));
+                    }
+                    out.push(Piece::PercentSign(percent_sign.to_string()));
+                    rest = &rest[at + percent_sign.len()..];
+                }
+                if !rest.is_empty() {
+                    out.push(Piece::Literal(rest.to_string()));
+                }
+            };
+            let mut zero = Vec::new();
+            for item in percent.unsigned_pattern.iter() {
+                match item {
+                    PatternItem::Literal(text) => literal(text, &mut zero),
+                    PatternItem::Placeholder(_) => zero.push(Piece::Number),
+                }
+            }
+            let with_sign = |sign: Piece| {
+                let mut out = Vec::new();
+                for item in percent.signed_pattern.iter() {
+                    match item {
+                        PatternItem::Literal(text) => literal(text, &mut out),
+                        PatternItem::Placeholder(DoublePlaceholderKey::Place0) => {
+                            out.push(Piece::Number)
+                        }
+                        PatternItem::Placeholder(DoublePlaceholderKey::Place1) => {
+                            out.push(sign.clone())
+                        }
+                    }
+                }
+                out
+            };
+            (
+                zero,
+                with_sign(Piece::Plus(percent.plus_sign.to_string())),
+                with_sign(Piece::Minus(percent.minus_sign.to_string())),
+            )
+        }
+    };
+    Ok(LocaleFormat {
+        numbering_system: numbering_system.to_string(),
+        decimal: strings.decimal_separator().to_string(),
+        group: strings.grouping_separator().to_string(),
+        primary: symbols.grouping_sizes.primary,
+        secondary: symbols.grouping_sizes.secondary,
+        min_grouping: symbols.grouping_sizes.min_grouping,
+        digits,
+        cldr,
+        zero,
+        positive,
+        negative,
+    })
+}
+
+/// The CLDR values for the locale (through its fallbacks) in the numbering
+/// system, else in `latn`, else the root's.
+fn cldr_values(data: &IntlData, locale: &icu::locale::Locale, system: &str) -> &'static Values {
+    let chain = data.fallback_chain(locale);
+    for system in [system, "latn"] {
+        for candidate in &chain {
+            let key = format!("{candidate}/{system}");
+            if let Ok(at) = ENTRIES.binary_search_by(|(k, _)| (*k).cmp(key.as_str())) {
+                return &VALUES[usize::from(ENTRIES[at].1)];
+            }
+        }
+    }
+    let root = ENTRIES
+        .binary_search_by(|(k, _)| (*k).cmp("und/latn"))
+        .map_or(0, |at| usize::from(ENTRIES[at].1));
+    &VALUES[root]
+}
+
+/// The sign category GetNumberFormatPattern decides on.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Category {
+    PositiveZero,
+    NegativeZero,
+    PositiveNonZero,
+    NegativeNonZero,
+}
+
+/// PartitionNumberPattern for the decimal and percent styles in standard
+/// notation.
+pub(crate) fn format_to_parts(format: &LocaleFormat, options: &Options, x: &IntlMV) -> Vec<Part> {
+    // The number's own parts, and the category of the rounded value.
+    let (number, category): (Vec<Part>, Category) = match x {
+        IntlMV::NotANumber => (
+            vec![("nan", format.cldr[1].to_string())],
+            Category::PositiveZero,
+        ),
+        IntlMV::PositiveInfinity => (
+            vec![("infinity", format.cldr[2].to_string())],
+            Category::PositiveNonZero,
+        ),
+        IntlMV::NegativeInfinity => (
+            vec![("infinity", format.cldr[2].to_string())],
+            Category::NegativeNonZero,
+        ),
+        IntlMV::NegativeZero => {
+            let rounded = number::format_numeric_to_string(
+                &options.digits,
+                true,
+                &UnsignedDecimal::default(),
+            );
+            (
+                digits_parts(format, options, &rounded.string),
+                Category::NegativeZero,
+            )
+        }
+        IntlMV::Finite { negative, value } => {
+            let mut value = value.clone();
+            if options.style == Style::Percent {
+                value.multiply_pow10(2);
+            }
+            let rounded = number::format_numeric_to_string(&options.digits, *negative, &value);
+            let category = match (*negative, rounded.value.is_zero()) {
+                (false, true) => Category::PositiveZero,
+                (true, true) => Category::NegativeZero,
+                (false, false) => Category::PositiveNonZero,
+                (true, false) => Category::NegativeNonZero,
+            };
+            (digits_parts(format, options, &rounded.string), category)
+        }
+    };
+    use Category::*;
+    let pattern = match (options.sign, category) {
+        (SignDisplay::Never, _) => &format.zero,
+        (SignDisplay::Auto, PositiveZero | PositiveNonZero) => &format.zero,
+        (SignDisplay::Auto, _) => &format.negative,
+        (SignDisplay::Always, PositiveZero | PositiveNonZero) => &format.positive,
+        (SignDisplay::Always, _) => &format.negative,
+        (SignDisplay::ExceptZero, PositiveZero | NegativeZero) => &format.zero,
+        (SignDisplay::ExceptZero, PositiveNonZero) => &format.positive,
+        (SignDisplay::ExceptZero, NegativeNonZero) => &format.negative,
+        (SignDisplay::Negative, NegativeNonZero) => &format.negative,
+        (SignDisplay::Negative, _) => &format.zero,
+    };
+    let mut parts = Vec::new();
+    for piece in pattern {
+        match piece {
+            Piece::Literal(text) => parts.push(("literal", text.clone())),
+            Piece::Number => parts.extend(number.iter().cloned()),
+            Piece::Plus(sign) => parts.push(("plusSign", sign.clone())),
+            Piece::Minus(sign) => parts.push(("minusSign", sign.clone())),
+            Piece::PercentSign(sign) => parts.push(("percentSign", sign.clone())),
+        }
+    }
+    parts
+}
+
+/// The integer, group, decimal and fraction parts of FormatNumericToString's
+/// unsigned ASCII string, in the numbering system's digits.
+fn digits_parts(format: &LocaleFormat, options: &Options, string: &str) -> Vec<Part> {
+    let transliterate = |s: &str| -> String {
+        s.chars()
+            .map(|c| c.to_digit(10).map_or(c, |d| format.digits.digit(d)))
+            .collect()
+    };
+    let (int, fraction) = match string.split_once('.') {
+        Some((int, fraction)) => (int, Some(fraction)),
+        None => (string, None),
+    };
+    let mut parts = Vec::new();
+    for (i, group) in groups(format, options.grouping, int)
+        .into_iter()
+        .enumerate()
+    {
+        if i > 0 {
+            parts.push(("group", format.group.clone()));
+        }
+        parts.push(("integer", transliterate(group)));
+    }
+    if let Some(fraction) = fraction {
+        parts.push(("decimal", format.decimal.clone()));
+        parts.push(("fraction", transliterate(fraction)));
+    }
+    parts
+}
+
+/// The integer digits split where the locale groups them. `auto` uses the
+/// locale's minimum grouping digits, `min2` two, `always` one.
+fn groups<'s>(format: &LocaleFormat, grouping: Grouping, int: &'s str) -> Vec<&'s str> {
+    let primary = usize::from(format.primary);
+    let secondary = match format.secondary {
+        0 => primary,
+        s => usize::from(s),
+    };
+    let min = match grouping {
+        Grouping::Off => return vec![int],
+        Grouping::Always => 1,
+        Grouping::Min2 => 2,
+        Grouping::Auto => usize::from(format.min_grouping.max(1)),
+    };
+    if primary == 0 || int.len() < primary + min {
+        return vec![int];
+    }
+    let mut ends = vec![int.len()];
+    let mut end = int.len() - primary;
+    while end > 0 {
+        ends.push(end);
+        end = end.saturating_sub(secondary);
+    }
+    ends.push(0);
+    ends.reverse();
+    ends.windows(2).map(|w| &int[w[0]..w[1]]).collect()
+}
+
+/// ECMA-402's numbering systems with simple digit mappings, sorted.
+pub(crate) static SIMPLE_DIGITS: &[(&str, Digits)] = &[
+    ("adlm", Digits::Range('\u{1e950}')),
+    ("ahom", Digits::Range('\u{11730}')),
+    ("arab", Digits::Range('\u{660}')),
+    ("arabext", Digits::Range('\u{6f0}')),
+    ("bali", Digits::Range('\u{1b50}')),
+    ("beng", Digits::Range('\u{9e6}')),
+    ("bhks", Digits::Range('\u{11c50}')),
+    ("brah", Digits::Range('\u{11066}')),
+    ("cakm", Digits::Range('\u{11136}')),
+    ("cham", Digits::Range('\u{aa50}')),
+    ("deva", Digits::Range('\u{966}')),
+    ("diak", Digits::Range('\u{11950}')),
+    ("fullwide", Digits::Range('\u{ff10}')),
+    ("gara", Digits::Range('\u{10d40}')),
+    ("gong", Digits::Range('\u{11da0}')),
+    ("gonm", Digits::Range('\u{11d50}')),
+    ("gujr", Digits::Range('\u{ae6}')),
+    ("gukh", Digits::Range('\u{16130}')),
+    ("guru", Digits::Range('\u{a66}')),
+    (
+        "hanidec",
+        Digits::List([
+            '\u{3007}', '\u{4e00}', '\u{4e8c}', '\u{4e09}', '\u{56db}', '\u{4e94}', '\u{516d}',
+            '\u{4e03}', '\u{516b}', '\u{4e5d}',
+        ]),
+    ),
+    ("hmng", Digits::Range('\u{16b50}')),
+    ("hmnp", Digits::Range('\u{1e140}')),
+    ("java", Digits::Range('\u{a9d0}')),
+    ("kali", Digits::Range('\u{a900}')),
+    ("kawi", Digits::Range('\u{11f50}')),
+    ("khmr", Digits::Range('\u{17e0}')),
+    ("knda", Digits::Range('\u{ce6}')),
+    ("krai", Digits::Range('\u{16d70}')),
+    ("lana", Digits::Range('\u{1a80}')),
+    ("lanatham", Digits::Range('\u{1a90}')),
+    ("laoo", Digits::Range('\u{ed0}')),
+    ("latn", Digits::Range('\u{30}')),
+    ("lepc", Digits::Range('\u{1c40}')),
+    ("limb", Digits::Range('\u{1946}')),
+    ("mathbold", Digits::Range('\u{1d7ce}')),
+    ("mathdbl", Digits::Range('\u{1d7d8}')),
+    ("mathmono", Digits::Range('\u{1d7f6}')),
+    ("mathsanb", Digits::Range('\u{1d7ec}')),
+    ("mathsans", Digits::Range('\u{1d7e2}')),
+    ("mlym", Digits::Range('\u{d66}')),
+    ("modi", Digits::Range('\u{11650}')),
+    ("mong", Digits::Range('\u{1810}')),
+    ("mroo", Digits::Range('\u{16a60}')),
+    ("mtei", Digits::Range('\u{abf0}')),
+    ("mymr", Digits::Range('\u{1040}')),
+    ("mymrepka", Digits::Range('\u{116da}')),
+    ("mymrpao", Digits::Range('\u{116d0}')),
+    ("mymrshan", Digits::Range('\u{1090}')),
+    ("mymrtlng", Digits::Range('\u{a9f0}')),
+    ("nagm", Digits::Range('\u{1e4f0}')),
+    ("newa", Digits::Range('\u{11450}')),
+    ("nkoo", Digits::Range('\u{7c0}')),
+    ("olck", Digits::Range('\u{1c50}')),
+    ("onao", Digits::Range('\u{1e5f1}')),
+    ("orya", Digits::Range('\u{b66}')),
+    ("osma", Digits::Range('\u{104a0}')),
+    ("outlined", Digits::Range('\u{1ccf0}')),
+    ("rohg", Digits::Range('\u{10d30}')),
+    ("saur", Digits::Range('\u{a8d0}')),
+    ("segment", Digits::Range('\u{1fbf0}')),
+    ("shrd", Digits::Range('\u{111d0}')),
+    ("sind", Digits::Range('\u{112f0}')),
+    ("sinh", Digits::Range('\u{de6}')),
+    ("sora", Digits::Range('\u{110f0}')),
+    ("sund", Digits::Range('\u{1bb0}')),
+    ("sunu", Digits::Range('\u{11bf0}')),
+    ("takr", Digits::Range('\u{116c0}')),
+    ("talu", Digits::Range('\u{19d0}')),
+    ("tamldec", Digits::Range('\u{be6}')),
+    ("telu", Digits::Range('\u{c66}')),
+    ("thai", Digits::Range('\u{e50}')),
+    ("tibt", Digits::Range('\u{f20}')),
+    ("tirh", Digits::Range('\u{114d0}')),
+    ("tnsa", Digits::Range('\u{16ac0}')),
+    ("tols", Digits::Range('\u{11de0}')),
+    ("vaii", Digits::Range('\u{a620}')),
+    ("wara", Digits::Range('\u{118e0}')),
+    ("wcho", Digits::Range('\u{1e2f0}')),
+];

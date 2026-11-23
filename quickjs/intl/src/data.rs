@@ -70,6 +70,22 @@ impl IntlData {
         self.0.fallback_locale.get().map(String::as_str)
     }
 
+    /// `locale` and the locales it falls back through, short of the root,
+    /// as CLDR names them (`fr-CA`, `fr`).
+    pub(crate) fn fallback_chain(&self, locale: &icu::locale::Locale) -> Vec<String> {
+        let mut chain = self
+            .0
+            .fallbacker
+            .for_config(Default::default())
+            .fallback_for(DataLocale::from(locale));
+        let mut out = Vec::new();
+        while !chain.get().is_unknown() {
+            out.push(chain.get().to_string());
+            chain.step();
+        }
+        out
+    }
+
     /// The locales the blob holds for `M` itself, short of the root, in the
     /// blob's (sorted) order.
     pub(crate) fn locales<M: DataMarker>(&self) -> Vec<String> {

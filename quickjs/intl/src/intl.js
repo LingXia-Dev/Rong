@@ -6,6 +6,7 @@
   const {
     canonicalizeTag, defaultLocale, settingsGeneration, resolveLocale, supportedLocales,
     pluralResolve, pluralResolveRange, pluralCategories,
+    resolveNumberFormat, numberFormatParts, currencyDigits,
   } = natives;
   const $Object = Object;
   const $String = String;
@@ -26,6 +27,12 @@
   const $defineProperty = Object.defineProperty;
   const $push = Array.prototype.push;
   const $includes = Array.prototype.includes;
+  const $getPrototypeOf = Object.getPrototypeOf;
+  const $charCodeAt = String.prototype.charCodeAt;
+  const $indexOf = String.prototype.indexOf;
+  const $slice = String.prototype.slice;
+  const $fromCharCode = String.fromCharCode;
+  const $Symbol = Symbol;
   // No spreading or iteration anywhere here: a script may have replaced
   // the array iterator.
   const call = (f, self, ...args) => $apply(f, self, args);
@@ -334,6 +341,298 @@
     __proto__: null, value: 'Intl.PluralRules', writable: false, enumerable: false, configurable: true,
   });
 
+  // Intl.NumberFormat
+  const numberFormatSlots = new $WeakMap();
+  // %Intl%.[[FallbackSymbol]], for the normative optional constructor mode.
+  const FallbackSymbol = $Symbol('IntlLegacyConstructedSymbol');
+  const SANCTIONED_UNITS = ['acre', 'bit', 'byte', 'celsius', 'centimeter', 'day', 'degree',
+    'fahrenheit', 'fluid-ounce', 'foot', 'gallon', 'gigabit', 'gigabyte', 'gram', 'hectare',
+    'hour', 'inch', 'kilobit', 'kilobyte', 'kilogram', 'kilometer', 'liter', 'megabit',
+    'megabyte', 'meter', 'microsecond', 'mile', 'mile-scandinavian', 'milliliter',
+    'millimeter', 'millisecond', 'minute', 'month', 'nanosecond', 'ounce', 'percent',
+    'petabyte', 'pound', 'second', 'stone', 'terabit', 'terabyte', 'week', 'yard', 'year'];
+
+  // ASCII case mapping, without String.prototype methods a script can replace.
+  function asciiCase(s, upper) {
+    let out = '';
+    for (let i = 0; i < s.length; i++) {
+      let c = call($charCodeAt, s, i);
+      if (upper && c >= 97 && c <= 122) c -= 32;
+      else if (!upper && c >= 65 && c <= 90) c += 32;
+      out += $fromCharCode(c);
+    }
+    return out;
+  }
+
+  function isAlphanumeric(c) {
+    return (c >= 48 && c <= 57) || (c >= 65 && c <= 90) || (c >= 97 && c <= 122);
+  }
+
+  // The `type` nonterminal of a Unicode locale identifier: alphanum{3,8}
+  // subtags joined by hyphens.
+  function isUnicodeType(s) {
+    let run = 0;
+    for (let i = 0; i <= s.length; i++) {
+      const c = i < s.length ? call($charCodeAt, s, i) : 45;
+      if (c === 45) {
+        if (run < 3 || run > 8) return false;
+        run = 0;
+      } else if (isAlphanumeric(c)) {
+        run++;
+      } else {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  // IsWellFormedCurrencyCode
+  function IsWellFormedCurrencyCode(currency) {
+    if (currency.length !== 3) return false;
+    for (let i = 0; i < 3; i++) {
+      const c = call($charCodeAt, currency, i);
+      if (!((c >= 65 && c <= 90) || (c >= 97 && c <= 122))) return false;
+    }
+    return true;
+  }
+
+  // IsWellFormedUnitIdentifier
+  function IsWellFormedUnitIdentifier(unit) {
+    if (call($includes, SANCTIONED_UNITS, unit)) return true;
+    const at = call($indexOf, unit, '-per-');
+    if (at < 0) return false;
+    const numerator = call($slice, unit, 0, at);
+    const denominator = call($slice, unit, at + 5);
+    if (call($indexOf, denominator, '-per-') >= 0) return false;
+    return call($includes, SANCTIONED_UNITS, numerator) &&
+      call($includes, SANCTIONED_UNITS, denominator);
+  }
+
+  // GetBooleanOrStringNumberFormatOption
+  function GetBooleanOrStringNumberFormatOption(options, property, values, fallback) {
+    let value = options[property];
+    if (value === undefined) return fallback;
+    if (value === true) return true;
+    if (!value) return false;
+    if (typeof value === 'symbol') throw new $TypeError('Cannot convert a Symbol to a string');
+    value = $String(value);
+    if (!call($includes, values, value)) {
+      throw new $RangeError('Value ' + value + ' out of range for ' + property);
+    }
+    return value;
+  }
+
+  // SetNumberFormatUnitOptions
+  function SetNumberFormatUnitOptions(slots, options) {
+    const style = GetOption(options, 'style', 'string',
+      ['decimal', 'percent', 'currency', 'unit'], 'decimal');
+    slots.style = style;
+    const currency = GetOption(options, 'currency', 'string', undefined, undefined);
+    if (currency === undefined) {
+      if (style === 'currency') throw new $TypeError('Currency code is required with currency style');
+    } else if (!IsWellFormedCurrencyCode(currency)) {
+      throw new $RangeError('Invalid currency code: ' + currency);
+    }
+    const currencyDisplay = GetOption(options, 'currencyDisplay', 'string',
+      ['code', 'symbol', 'narrowSymbol', 'name'], 'symbol');
+    const currencySign = GetOption(options, 'currencySign', 'string',
+      ['standard', 'accounting'], 'standard');
+    const unit = GetOption(options, 'unit', 'string', undefined, undefined);
+    if (unit === undefined) {
+      if (style === 'unit') throw new $TypeError('Unit is required with unit style');
+    } else if (!IsWellFormedUnitIdentifier(unit)) {
+      throw new $RangeError('Invalid unit: ' + unit);
+    }
+    const unitDisplay = GetOption(options, 'unitDisplay', 'string',
+      ['short', 'narrow', 'long'], 'short');
+    if (style === 'currency') {
+      slots.currency = asciiCase(currency, true);
+      slots.currencyDisplay = currencyDisplay;
+      slots.currencySign = currencySign;
+    }
+    if (style === 'unit') {
+      slots.unit = unit;
+      slots.unitDisplay = unitDisplay;
+    }
+  }
+
+  // OrdinaryHasInstance(%Intl.NumberFormat%, value)
+  function isNumberFormatInstance(value) {
+    if (!isObject(value)) return false;
+    let proto = $getPrototypeOf(value);
+    while (proto !== null) {
+      if (proto === NumberFormatPrototype) return true;
+      proto = $getPrototypeOf(proto);
+    }
+    return false;
+  }
+
+  // UnwrapNumberFormat, then RequireInternalSlot.
+  function numberFormatOf(nf, method) {
+    if (!isObject(nf)) {
+      throw new $TypeError('Intl.NumberFormat.prototype.' + method + ' called on a non-object');
+    }
+    let slots = call($weakGet, numberFormatSlots, nf);
+    if (slots === undefined && isNumberFormatInstance(nf)) {
+      const inner = nf[FallbackSymbol];
+      slots = isObject(inner) ? call($weakGet, numberFormatSlots, inner) : undefined;
+    }
+    if (slots === undefined) {
+      throw new $TypeError('Intl.NumberFormat.prototype.' + method + ' called on an incompatible receiver');
+    }
+    return slots;
+  }
+
+  // RequireInternalSlot only (formatToParts does not unwrap).
+  function numberFormatSlotsOf(nf, method) {
+    const slots = isObject(nf) ? call($weakGet, numberFormatSlots, nf) : undefined;
+    if (slots === undefined) {
+      throw new $TypeError('Intl.NumberFormat.prototype.' + method + ' called on an incompatible receiver');
+    }
+    return slots;
+  }
+
+  // PartitionNumberPattern, as [type, value] pairs.
+  function partitionNumber(slots, value) {
+    return numberFormatParts(slots, ToIntlMathematicalValue(value));
+  }
+
+  function NumberFormat() {
+    const locales = arguments[0];
+    const newTarget = new.target === undefined ? NumberFormat : new.target;
+    let proto = newTarget.prototype;
+    if (!isObject(proto)) proto = NumberFormatPrototype;
+    const nf = $create(proto);
+    // ResolveOptions with the `nu` resolution option.
+    const requested = CanonicalizeLocaleList(locales);
+    const options = CoerceOptionsToObject(arguments[1]);
+    GetOption(options, 'localeMatcher', 'string', ['lookup', 'best fit'], 'best fit');
+    let nu = GetOption(options, 'numberingSystem', 'string', undefined, undefined);
+    if (nu !== undefined) {
+      if (!isUnicodeType(nu)) throw new $RangeError('Invalid numberingSystem: ' + nu);
+      nu = asciiCase(nu, false);
+    }
+    const resolved = resolveNumberFormat(requested, nu);
+    const slots = $create(null);
+    slots.locale = resolved[0];
+    slots.dataLocale = resolved[1];
+    slots.numberingSystem = resolved[2];
+    SetNumberFormatUnitOptions(slots, options);
+    const style = slots.style;
+    const notation = GetOption(options, 'notation', 'string',
+      ['standard', 'scientific', 'engineering', 'compact'], 'standard');
+    slots.notation = notation;
+    let minFD = 0;
+    let maxFD = 3;
+    if (style === 'currency' && notation === 'standard') {
+      minFD = maxFD = currencyDigits(slots.currency);
+    } else if (style === 'percent') {
+      minFD = maxFD = 0;
+    }
+    SetNumberFormatDigitOptions(slots, options, minFD, maxFD, notation);
+    const compactDisplay = GetOption(options, 'compactDisplay', 'string', ['short', 'long'], 'short');
+    let defaultUseGrouping = 'auto';
+    if (notation === 'compact') {
+      slots.compactDisplay = compactDisplay;
+      defaultUseGrouping = 'min2';
+    }
+    let useGrouping = GetBooleanOrStringNumberFormatOption(options, 'useGrouping',
+      ['min2', 'auto', 'always', 'true', 'false'], defaultUseGrouping);
+    if (useGrouping === 'true' || useGrouping === 'false') useGrouping = defaultUseGrouping;
+    if (useGrouping === true) useGrouping = 'always';
+    slots.useGrouping = useGrouping;
+    slots.signDisplay = GetOption(options, 'signDisplay', 'string',
+      ['auto', 'never', 'always', 'exceptZero', 'negative'], 'auto');
+    call($weakSet, numberFormatSlots, nf, slots);
+    // ChainNumberFormat
+    if (new.target === undefined && isNumberFormatInstance(this)) {
+      $defineProperty(this, FallbackSymbol, {
+        __proto__: null, value: nf, writable: false, enumerable: false, configurable: false,
+      });
+      return this;
+    }
+    return nf;
+  }
+  const NumberFormatPrototype = NumberFormat.prototype;
+  $defineProperty(NumberFormat, 'prototype', { writable: false });
+
+  const numberFormatMethods = {
+    supportedLocalesOf(locales) {
+      return SupportedLocales('NumberFormat', locales, arguments[1]);
+    },
+    get format() {
+      const slots = numberFormatOf(this, 'format');
+      if (slots.boundFormat === undefined) {
+        // An anonymous built-in of length 1, not a constructor.
+        const bound = { __proto__: null, f: (value) => FormatParts(slots, value, false) };
+        const format = bound.f;
+        $defineProperty(format, 'name', { value: '' });
+        slots.boundFormat = format;
+      }
+      return slots.boundFormat;
+    },
+    formatToParts(value) {
+      return FormatParts(numberFormatSlotsOf(this, 'formatToParts'), value, true);
+    },
+    resolvedOptions() {
+      const s = numberFormatOf(this, 'resolvedOptions');
+      const options = {};
+      const put = (key, value) => { if (value !== undefined) define(options, key, value, true, true); };
+      put('locale', s.locale);
+      put('numberingSystem', s.numberingSystem);
+      put('style', s.style);
+      put('currency', s.currency);
+      put('currencyDisplay', s.currencyDisplay);
+      put('currencySign', s.currencySign);
+      put('unit', s.unit);
+      put('unitDisplay', s.unitDisplay);
+      put('minimumIntegerDigits', s.minimumIntegerDigits);
+      put('minimumFractionDigits', s.minimumFractionDigits);
+      put('maximumFractionDigits', s.maximumFractionDigits);
+      put('minimumSignificantDigits', s.minimumSignificantDigits);
+      put('maximumSignificantDigits', s.maximumSignificantDigits);
+      put('useGrouping', s.useGrouping);
+      put('notation', s.notation);
+      put('compactDisplay', s.compactDisplay);
+      put('signDisplay', s.signDisplay);
+      put('roundingIncrement', s.roundingIncrement);
+      put('roundingMode', s.roundingMode);
+      put('roundingPriority', s.roundingPriority);
+      put('trailingZeroDisplay', s.trailingZeroDisplay);
+      return options;
+    },
+  };
+
+  // FormatNumeric (a string) or FormatNumericToParts (an array of parts).
+  function FormatParts(slots, value, asParts) {
+    const parts = partitionNumber(slots, value);
+    if (!asParts) {
+      let out = '';
+      for (let i = 0; i < parts.length; i++) out += parts[i][1];
+      return out;
+    }
+    const result = [];
+    for (let i = 0; i < parts.length; i++) {
+      const part = {};
+      define(part, 'type', parts[i][0], true, true);
+      define(part, 'value', parts[i][1], true, true);
+      define(result, $String(i), part, true, true);
+    }
+    return result;
+  }
+
+  define(NumberFormat, 'supportedLocalesOf', numberFormatMethods.supportedLocalesOf, false, true);
+  $defineProperty(NumberFormatPrototype, 'format', {
+    __proto__: null,
+    get: $Object.getOwnPropertyDescriptor(numberFormatMethods, 'format').get,
+    set: undefined, enumerable: false, configurable: true,
+  });
+  define(NumberFormatPrototype, 'formatToParts', numberFormatMethods.formatToParts, false, true);
+  define(NumberFormatPrototype, 'resolvedOptions', numberFormatMethods.resolvedOptions, false, true);
+  $defineProperty(NumberFormatPrototype, $toStringTag, {
+    __proto__: null, value: 'Intl.NumberFormat', writable: false, enumerable: false, configurable: true,
+  });
+
   const Intl = {};
   $defineProperty(Intl, Symbol.toStringTag, {
     value: 'Intl', writable: false, enumerable: false, configurable: true,
@@ -344,6 +643,7 @@
     },
   };
   define(Intl, 'getCanonicalLocales', methods.getCanonicalLocales, false, true);
+  define(Intl, 'NumberFormat', NumberFormat, false, true);
   define(Intl, 'PluralRules', PluralRules, false, true);
   $defineProperty(globalThis, 'Intl', {
     value: Intl, writable: true, enumerable: false, configurable: true,
