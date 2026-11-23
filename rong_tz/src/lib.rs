@@ -18,11 +18,12 @@
 //! | macOS, iOS, Linux | `/usr/share/zoneinfo` (TZif files) |
 //! | Android 10+ | `/apex/com.android.tzdata/etc/tz/tzdata` (packed) |
 //! | Android 9 and older | `/system/usr/share/zoneinfo/tzdata` (packed; its rules may be stale) |
-//! | HarmonyOS | `/system/etc/zoneinfo` (TZif or packed), then the general search |
+//! | HarmonyOS | `/system/etc/zoneinfo/tzdata` (packed), then `/system/etc/zoneinfo` (TZif), then the general search |
 //! | Windows | bundled (Windows has no IANA rules) |
 //!
-//! When no system database is found, the bundled copy is used (Android,
-//! HarmonyOS and Windows carry one). The choice is reported once, through
+//! A source counts only if it resolves `Etc/UTC` and `America/New_York`.
+//! When no system database answers, the bundled copy is used (Android,
+//! HarmonyOS and Windows carry one; Linux and Apple builds do not). The choice is reported once, through
 //! the reporter set with [`set_reporter`] (the `log` crate otherwise), so it
 //! is visible on devices. [`configure`] lets an embedder name a path or ask
 //! for the bundled copy; [`source`] reports which database is in use.
@@ -87,7 +88,8 @@ struct Database {
 /// What `configure` and the first lookup agree on, under one lock.
 enum State {
     Unset,
-    Set(Source),
+    /// Opened and checked by `configure`, with what it skipped.
+    Set(Database, Vec<String>),
     /// The first lookup has chosen; nothing changes after this.
     InUse,
 }
@@ -97,8 +99,10 @@ enum State {
 struct Registry {
     state: Mutex<State>,
     database: OnceLock<Database>,
-    open: fn(Source, &mut Vec<String>) -> Database,
+    open: Opener,
 }
+
+type Opener = fn(Source, &mut Vec<String>) -> Result<Database, ConfigureError>;
 
 static REGISTRY: Registry = Registry::new(open_source);
 type Reporter = Box<dyn Fn(&str) + Send + Sync>;
@@ -111,14 +115,18 @@ pub enum ConfigureError {
     AlreadyConfigured,
     /// A lookup already opened the database; it cannot change afterwards.
     AlreadyInUse,
+    /// The source cannot answer: a path that does not exist or holds no
+    /// zones, or `Bundled` in a build without bundled data.
+    Unavailable(String),
 }
 
 impl std::fmt::Display for ConfigureError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(match self {
-            Self::AlreadyConfigured => "the time zone database was already configured",
-            Self::AlreadyInUse => "the time zone database is already in use",
-        })
+        match self {
+            Self::AlreadyConfigured => f.write_str("the time zone database was already configured"),
+            Self::AlreadyInUse => f.write_str("the time zone database is already in use"),
+            Self::Unavailable(why) => write!(f, "time zone database unavailable: {why}"),
+        }
     }
 }
 
@@ -126,13 +134,15 @@ impl std::error::Error for ConfigureError {}
 
 /// Chooses the database. Call it at most once, before the first lookup of
 /// any kind (including [`source`]); a second call, or a call after a lookup,
-/// returns an error and changes nothing.
+/// returns an error and changes nothing. The source is opened and checked
+/// here, so a path that cannot answer, or `Bundled` where no data is bundled
+/// (Linux, macOS, iOS), is `Unavailable` at this call.
 pub fn configure(source: Source) -> Result<(), ConfigureError> {
     REGISTRY.configure(source)
 }
 
 impl Registry {
-    const fn new(open: fn(Source, &mut Vec<String>) -> Database) -> Self {
+    const fn new(open: Opener) -> Self {
         Self {
             state: Mutex::new(State::Unset),
             database: OnceLock::new(),
@@ -145,14 +155,21 @@ impl Registry {
     }
 
     fn configure(&self, source: Source) -> Result<(), ConfigureError> {
+        Self::accepts(&self.state())?;
+        // Open outside the lock; check again before storing.
+        let mut skipped = Vec::new();
+        let database = (self.open)(source, &mut skipped)?;
         let mut state = self.state();
-        match *state {
+        Self::accepts(&state)?;
+        *state = State::Set(database, skipped);
+        Ok(())
+    }
+
+    fn accepts(state: &State) -> Result<(), ConfigureError> {
+        match state {
+            State::Unset => Ok(()),
+            State::Set(..) => Err(ConfigureError::AlreadyConfigured),
             State::InUse => Err(ConfigureError::AlreadyInUse),
-            State::Set(_) => Err(ConfigureError::AlreadyConfigured),
-            State::Unset => {
-                *state = State::Set(source);
-                Ok(())
-            }
         }
     }
 
@@ -163,12 +180,16 @@ impl Registry {
         let mut line = None;
         let database = self.database.get_or_init(|| {
             let mut state = self.state();
-            let chosen = match std::mem::replace(&mut *state, State::InUse) {
-                State::Set(source) => source,
-                State::Unset | State::InUse => Source::System,
+            let (database, skipped) = match std::mem::replace(&mut *state, State::InUse) {
+                State::Set(database, skipped) => (database, skipped),
+                State::Unset | State::InUse => {
+                    let mut skipped = Vec::new();
+                    // System never fails; it falls back to bundled or none.
+                    let database = (self.open)(Source::System, &mut skipped)
+                        .unwrap_or_else(|_| none_database());
+                    (database, skipped)
+                }
             };
-            let mut skipped = Vec::new();
-            let database = (self.open)(chosen, &mut skipped);
             line = Some(report_line(&database, &skipped));
             database
         });
@@ -203,13 +224,18 @@ fn database() -> &'static Database {
     REGISTRY.database()
 }
 
-fn open_source(source: Source, skipped: &mut Vec<String>) -> Database {
-    let found = match source {
-        Source::System => system_database(SYSTEM_FIRST, skipped),
-        Source::Path(path) => open_path(&path),
-        Source::Bundled => None,
-    };
-    found.unwrap_or_else(bundled_or_none)
+fn open_source(source: Source, skipped: &mut Vec<String>) -> Result<Database, ConfigureError> {
+    match source {
+        Source::System => Ok(system_database(SYSTEM_FIRST, skipped)
+            .or_else(bundled)
+            .unwrap_or_else(none_database)),
+        Source::Path(path) => open_path(&path).ok_or_else(|| {
+            ConfigureError::Unavailable(format!("{} cannot answer", path.display()))
+        }),
+        Source::Bundled => bundled().ok_or_else(|| {
+            ConfigureError::Unavailable(String::from("no bundled data in this build"))
+        }),
+    }
 }
 
 fn report_line(database: &Database, skipped: &[String]) -> String {
@@ -227,18 +253,19 @@ fn answers(db: &TimeZoneDatabase) -> bool {
     db.get("Etc/UTC").is_ok() && db.get("America/New_York").is_ok()
 }
 
-fn bundled_or_none() -> Database {
+/// The copy built into this binary: Android, HarmonyOS and Windows only.
+fn bundled() -> Option<Database> {
     let db = TimeZoneDatabase::bundled();
-    if answers(&db) {
-        Database {
-            db,
-            source: String::from("bundled"),
-        }
-    } else {
-        Database {
-            db: TimeZoneDatabase::none(),
-            source: String::from("none: no usable system database and none bundled"),
-        }
+    answers(&db).then(|| Database {
+        db,
+        source: String::from("bundled"),
+    })
+}
+
+fn none_database() -> Database {
+    Database {
+        db: TimeZoneDatabase::none(),
+        source: String::from("none: no usable system database and none bundled"),
     }
 }
 
