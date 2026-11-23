@@ -115,3 +115,20 @@ fn a_host_locale_missing_from_the_blob_defaults_to_one_it_holds() -> Result<(), 
     assert_eq!(locale, "fr-CA");
     Ok(())
 }
+
+#[test]
+fn constructors_given_no_locale_agree_when_the_blob_holds_the_host_locale() -> Result<(), String> {
+    let rt = RongJS::runtime();
+    let data =
+        rong_quickjs_intl::IntlData::try_from_static_blob(TEST_BLOB).map_err(|e| e.to_string())?;
+    let Some(ctx) = context(&rt, data, "de-AT")? else {
+        return Ok(());
+    };
+    let got = eval(
+        &ctx,
+        "[new Intl.PluralRules().resolvedOptions().locale, \
+          new Intl.NumberFormat().resolvedOptions().locale].join()",
+    )?;
+    assert_eq!(got, "de-AT,de-AT");
+    Ok(())
+}
