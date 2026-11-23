@@ -149,14 +149,25 @@ fn a_thrown_value_outlives_the_call_that_threw_it() -> Result<(), String> {
 /// The next step of the chain and the context it belongs to.
 type Next = Rc<RefCell<Option<(JSFunc, JSContext)>>>;
 
-/// One level of the chain: a native function that, from inside its own
-/// native call, drives a call of `next` and checks a value it made before.
-/// A value thrown in another context cannot be rethrown here (thrown values
-/// live in their context's table), so a failure below crosses as text.
+const DEPTH: i32 = 8;
+
+/// The levels of the chain: native functions that, from inside their own
+/// native call, drive a call of `next` and check a value made before. Each
+/// level has its own function, since a native function cannot be re-entered
+/// while it runs. A value thrown in another context cannot be rethrown here
+/// (thrown values live in their context's table), so a failure below crosses
+/// as text.
 fn install_descend(ctx: &JSContext, next: Next) -> JSResult<()> {
+    for level in 0..=DEPTH {
+        install_level(ctx, level, next.clone())?;
+    }
+    Ok(())
+}
+
+fn install_level(ctx: &JSContext, level: i32, next: Next) -> JSResult<()> {
     let own = ctx.clone();
     ctx.global().set(
-        "descend",
+        format!("descend{level}"),
         JSFunc::new(ctx, move |n: i32| -> JSResult<String> {
             let before = JSObject::new(&own);
             before.set("n", n)?;
@@ -184,13 +195,12 @@ fn install_descend(ctx: &JSContext, next: Next) -> JSResult<()> {
 fn install_step(ctx: &JSContext, next: Next) -> JSResult<JSFunc> {
     install_descend(ctx, next)?;
     ctx.eval(Source::from_bytes(
-        "(n) => { const pad = 'p'.repeat(32); return 's' + n + ':' + descend(n) + pad.slice(32); }",
+        "(n) => { const pad = 'p'.repeat(32); return 's' + n + ':' + globalThis['descend' + n](n) + pad.slice(32); }",
     ))
 }
 
 /// Drives `step(DEPTH)` 100 times and checks the whole chain's result.
 fn drive(ctx: &JSContext, step: &JSFunc) -> Result<(), String> {
-    const DEPTH: i32 = 8;
     let mut expected = String::from("bottom");
     for n in 0..=DEPTH {
         expected = format!("s{n}:d{n}({expected})");
