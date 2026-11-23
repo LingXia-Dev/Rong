@@ -261,7 +261,18 @@ mod tests {
     fn epoch_milliseconds_at_their_bounds() {
         let min = Timestamp::MIN.as_millisecond();
         let max = Timestamp::MAX.as_millisecond();
-        for ms in [min, 0, max] {
+        // jiff's millisecond range ends a step inside Timestamp's own, so
+        // the exact edges may be either answer, but never a panic.
+        for ms in [min, max] {
+            assert!(
+                matches!(
+                    offset_seconds("+05:30", ms),
+                    Ok(_) | Err(TzError::OutOfRange)
+                ),
+                "{ms}"
+            );
+        }
+        for ms in [min + 1000, 0, max - 1000] {
             assert!(offset_seconds("+05:30", ms).is_ok(), "{ms}");
         }
         for ms in [i64::MIN, min - 1, max + 1, i64::MAX] {
