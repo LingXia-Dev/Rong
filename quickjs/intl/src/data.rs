@@ -170,6 +170,14 @@ where
                 Err(e) => return Err(e.with_req(M::INFO, req)),
             }
             if chain.get().is_unknown() {
+                // Silent: a miss is often expected (a numbering system the
+                // locale has no symbols for); callers report real gaps.
+                let mut metadata = req.metadata;
+                metadata.silent = true;
+                let req = DataRequest {
+                    id: req.id,
+                    metadata,
+                };
                 return Err(DataErrorKind::IdentifierNotFound.with_req(M::INFO, req));
             }
             chain.step();
