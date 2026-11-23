@@ -28,6 +28,7 @@ rong_exception = { workspace = true, optional = true }
 rong_abort = { workspace = true, optional = true }
 rong_console = { workspace = true, optional = true }
 rong_url = { workspace = true, optional = true }
+rong_intl = { workspace = true, optional = true }
 rong_buffer = { workspace = true, optional = true }
 rong_fs = { workspace = true, optional = true }
 rong_storage = { workspace = true, optional = true }
@@ -55,6 +56,7 @@ quickjs = [
     "rong_abort?/quickjs",
     "rong_console?/quickjs",
     "rong_url?/quickjs",
+    "rong_intl?/quickjs",
     "rong_buffer?/quickjs",
     "rong_fs?/quickjs",
     "rong_storage?/quickjs",
@@ -79,6 +81,7 @@ jscore = [
     "rong_abort?/jscore",
     "rong_console?/jscore",
     "rong_url?/jscore",
+    "rong_intl?/jscore",
     "rong_buffer?/jscore",
     "rong_fs?/jscore",
     "rong_storage?/jscore",
@@ -103,6 +106,7 @@ arkjs = [
     "rong_abort?/arkjs",
     "rong_console?/arkjs",
     "rong_url?/arkjs",
+    "rong_intl?/arkjs",
     "rong_buffer?/arkjs",
     "rong_fs?/arkjs",
     "rong_storage?/arkjs",
@@ -154,6 +158,8 @@ encoding = ["rong_encoding"]
 assert = ["rong_assert"]
 console = ["rong_console"]
 url = ["rong_url"]
+# ECMA-402 Intl where the engine has none; needs IntlData from the embedder.
+intl = ["rong_intl"]
 buffer = ["rong_buffer"]
 stream = ["rong_stream", "abort"]
 compression = ["rong_compression"]

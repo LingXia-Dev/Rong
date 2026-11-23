@@ -1,0 +1,34 @@
+[package]
+name = "rong_intl"
+version = "0.8.0"
+edition.workspace = true
+
+description = "ECMA-402 Intl for RongJS engines that have none"
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
+keywords.workspace = true
+categories.workspace = true
+documentation = "https://docs.rs/rong_intl"
+readme = "README.md"
+
+[package.metadata.docs.rs]
+features = ["quickjs"]
+
+[dependencies]
+rong = { workspace = true }
+icu = { version = "=2.4.0", default-features = false, features = ["serde"] }
+icu_provider = { version = "2.4", default-features = false, features = ["serde"] }
+icu_provider_blob = { version = "2.4", default-features = false, features = ["alloc"] }
+
+[features]
+default = []
+quickjs = ["rong/quickjs"]
+jscore = ["rong/jscore"]
+arkjs = ["rong/arkjs"]
+tls-aws-lc = ["rong/tls-aws-lc"]
+tls-ring = ["rong/tls-ring"]
+
+[dev-dependencies]
+rong_test = { path = "../../testing/rong_test" }
