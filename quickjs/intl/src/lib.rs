@@ -652,7 +652,9 @@ fn available(data: &IntlData, service: &str, tag: &str) -> bool {
                 &locale,
             )
         }
-        "ListFormat" => data.has_locale::<icu::list::provider::ListAndV1>(&locale),
+        "ListFormat" => {
+            data.falls_back_into(&locale, &data.locales_any::<icu::list::provider::ListAndV1>())
+        }
         "DateTimeFormat" => data.falls_back_into(&locale, &date_time_locales(data)),
         _ => false,
     }
@@ -851,7 +853,7 @@ fn service_locales(data: &IntlData, service: &str) -> Vec<String> {
         "RelativeTimeFormat" => {
             data.locales::<icu_experimental::relativetime::provider::DatetimeRelativeSecondLongV1>()
         }
-        "ListFormat" => data.locales::<icu::list::provider::ListAndV1>(),
+        "ListFormat" => data.locales_any::<icu::list::provider::ListAndV1>(),
         "DateTimeFormat" => date_time_locales(data),
         _ => Vec::new(),
     }
