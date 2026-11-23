@@ -419,14 +419,18 @@ const CYCLE_MS: i64 = 146_097 * 86_400_000;
 const NEAR_LIMIT_MS: i64 = 221_845_392_000_000;
 
 fn in_zone_range(epoch_ms: i64) -> i64 {
-    let cycles = |beyond: i64| beyond.div_euclid(CYCLE_MS) + 1;
-    if epoch_ms > NEAR_LIMIT_MS {
-        epoch_ms - cycles(epoch_ms - NEAR_LIMIT_MS) * CYCLE_MS
-    } else if epoch_ms < -NEAR_LIMIT_MS {
-        epoch_ms + cycles(-NEAR_LIMIT_MS - epoch_ms) * CYCLE_MS
+    let ms = i128::from(epoch_ms);
+    let cycle = i128::from(CYCLE_MS);
+    let limit = i128::from(NEAR_LIMIT_MS);
+    let cycles = |beyond: i128| beyond.div_euclid(cycle) + 1;
+    let moved = if ms > limit {
+        ms - cycles(ms - limit) * cycle
+    } else if ms < -limit {
+        ms + cycles(-limit - ms) * cycle
     } else {
-        epoch_ms
-    }
+        ms
+    };
+    moved as i64
 }
 
 #[cfg(test)]
