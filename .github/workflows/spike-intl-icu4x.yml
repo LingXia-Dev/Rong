@@ -111,6 +111,10 @@ jobs:
 
   parity:
     runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        icu: ["2.4.0", "2.2.0"]
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
       - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8
@@ -118,4 +122,8 @@ jobs:
           toolchain: stable
       - name: ICU4X against the CLDR 48 / ICU 78.2 table
         working-directory: ${{ env.SPIKE }}
-        run: cargo run --release --features parity --bin parity -- cases-cldr48.json
+        run: |
+          set -eu
+          sed -i 's/"=2.4.0"/"=${{ matrix.icu }}"/' Cargo.toml
+          echo "ICU4X ${{ matrix.icu }}"
+          cargo run --release --features parity --bin parity -- cases-cldr48.json
