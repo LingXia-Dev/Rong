@@ -736,7 +736,43 @@ pub(crate) fn format_range_to_parts(
         .format(&start, &end)
         .write_to_parts(&mut sink)
         .map_err(|_| String::from("formatting failed"))?;
-    Ok(adjust(&format.fixups, sink.parts(), start.time, end.time))
+    let parts = adjust(&format.fixups, sink.parts(), start.time, end.time);
+    Ok(shared_sources(parts))
+}
+
+/// ICU4X's range spans take in the fields written once and the separator;
+/// ECMA-402 marks them shared. A field is a side's own when the other side
+/// writes the same field; a literal is a side's own between two of that
+/// side's own fields.
+fn shared_sources(mut parts: Vec<Part>) -> Vec<Part> {
+    let written =
+        |kind: &str, source: &str| parts.iter().any(|(k, _, s)| *k == kind && *s == source);
+    let own: Vec<Option<&'static str>> = parts
+        .iter()
+        .map(|(kind, _, source)| match *source {
+            _ if *kind == "literal" => None,
+            "startRange" if written(kind, "endRange") => Some("startRange"),
+            "endRange" if written(kind, "startRange") => Some("endRange"),
+            _ => None,
+        })
+        .collect();
+    let field: Vec<bool> = parts.iter().map(|(kind, ..)| *kind != "literal").collect();
+    let len = parts.len();
+    for (i, part) in parts.iter_mut().enumerate() {
+        part.2 = if field[i] {
+            own[i].unwrap_or("shared")
+        } else {
+            let before = (0..i).rev().find(|&j| field[j]).and_then(|j| own[j]);
+            let after = (i + 1..parts.len())
+                .find(|&j| field[j])
+                .and_then(|j| own[j]);
+            match (before, after) {
+                (Some(a), Some(b)) if a == b => a,
+                _ => "shared",
+            }
+        };
+    }
+    parts
 }
 
 /// "0" or "00" as 24 in the same digits.
