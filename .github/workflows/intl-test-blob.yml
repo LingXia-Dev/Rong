@@ -46,12 +46,12 @@ jobs:
               DatetimePatternsRangeDateHijriV1 DatetimePatternsRangeDateIndianV1 \
               DatetimePatternsRangeDateJapaneseV1 DatetimePatternsRangeDatePersianV1 \
               DatetimePatternsRangeDateRocV1 DatetimePatternsRangeGlueV1 DatetimePatternsRangeTimeV1 \
-              DatetimePatternsTimeV1 TimezoneMetazonePeriodsV1 TimezoneNamesCitiesOverrideV1 \
+              DatetimePatternsTimeV1 TimezoneNamesCitiesOverrideV1 \
               TimezoneNamesCitiesRootV1 TimezoneNamesEssentialsV1 TimezoneNamesGenericLongV1 \
               TimezoneNamesGenericShortV1 TimezoneNamesLocationsOverrideV1 TimezoneNamesLocationsRootV1 \
               TimezoneNamesSpecificLongV1 TimezoneNamesSpecificShortV1 TimezoneNamesStandardLongV1 \
               TimezoneIdentifiersIanaCoreV1 TimezoneIdentifiersIanaExtendedV1 TimezonePeriodsV1 \
-              TimezoneVariantsOffsetsV1 CalendarJapaneseModernV1 CalendarPreferredV1 CalendarWeekV1 \
+              CalendarJapaneseModernV1 CalendarPreferredV1 CalendarWeekV1 \
             --locales en en-US en-GB fr de es it pt ru pl uk cs ar he ja zh ko hi cy sl lt ga br mt ro fa gv zh-Hant en-IN pt-PT de-AT ar-EG sv tr th zh-CN sr sr-Thai si ln pl-PL
           echo "BLOB intl-test $(stat -c %s intl-test.postcard) bytes, gzip $(gzip -9c intl-test.postcard | wc -c)"
           sha256sum intl-test.postcard
