@@ -15,6 +15,14 @@ env:
   TEST262_SHA: 2a1ade303f72d3de80565c921d685222405c32ce
 
 jobs:
+  cldr-table:
+    # The CLDR number symbols compiled into the crate match the CLDR of the
+    # pinned ICU4X data, and the table is what the generator makes from it.
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+      - run: python3 -I quickjs/intl/tools/cldr_numbers.py --check
+
   test262:
     strategy:
       fail-fast: false
