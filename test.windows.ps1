@@ -255,16 +255,16 @@ function Run-AllCoreTests([string]$EngineName, [string[]]$CoreTests) {
 
     # Engine-independent; it backs the Intl that rong provides on QuickJS.
     if ($EngineName -eq "quickjs") {
-        Log-Info "Running rong_tz shared zone table"
-        $tzArgs = @("-p", "rong_tz", "--quiet")
+        Log-Info "Running rong_quickjs_tz shared zone table"
+        $tzArgs = @("-p", "rong_quickjs_tz", "--quiet")
         if (-not $script:FailFast) {
             $tzArgs += "--no-fail-fast"
         }
         & cargo test @tzArgs -- --nocapture
-        Record-SuiteResult -Name "rong_tz zone table" -ExitCode $LASTEXITCODE
+        Record-SuiteResult -Name "rong_quickjs_tz zone table" -ExitCode $LASTEXITCODE
         # Release too: integer overflow wraps there instead of panicking.
         & cargo test @tzArgs --release
-        Record-SuiteResult -Name "rong_tz zone table (release)" -ExitCode $LASTEXITCODE
+        Record-SuiteResult -Name "rong_quickjs_tz zone table (release)" -ExitCode $LASTEXITCODE
     }
 }
 

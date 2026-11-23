@@ -232,7 +232,8 @@ mod tests {
 
     /// A directory with no zones in it opens without error in jiff.
     fn empty_dir(name: &str) -> std::path::PathBuf {
-        let dir = std::env::temp_dir().join(format!("rong_tz-{name}-{}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("rong_quickjs_tz-{name}-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         dir
     }
@@ -365,6 +366,9 @@ mod tests {
     #[test]
     fn shared_table_passes_on_this_host() {
         let passed = super::check().unwrap();
-        eprintln!("[rong_tz] {passed} cases passed on {}", crate::source());
+        eprintln!(
+            "[rong_quickjs_tz] {passed} cases passed on {}",
+            crate::source()
+        );
     }
 }

@@ -2,7 +2,7 @@
 members = [
     "core",
     "rong_macro",
-    "quickjs", "quickjs/sys",
+    "quickjs", "quickjs/sys", "quickjs/tz",
     "javascriptcore", "javascriptcore/sys",
     "arkjs", "arkjs/sys",
     "testing/rong_test",
@@ -25,7 +25,6 @@ members = [
     "modules/rong_s3",
     "rong_modules", "rong_cli",
     "rong_typegen",
-    "rong_tz",
 ]
 exclude = ["testing/harmony/rong_harmony_smoke"]
 
@@ -45,6 +44,7 @@ rong = { path = ".", default-features = false      , version = "0.8.0" }
 rong_core = { path = "core"      , version = "0.8.0" }
 rong_quickjs = { path = "quickjs"      , version = "0.8.0" }
 rong_quickjs_sys = { path = "quickjs/sys"      , version = "0.7.0" }
+rong_quickjs_tz = { path = "quickjs/tz"      , version = "0.8.0" }
 rong_jscore = { path = "javascriptcore"      , version = "0.8.0" }
 rong_jscore_sys = { path = "javascriptcore/sys"      , version = "0.6.1" }
 rong_arkjs = { path = "arkjs"      , version = "0.8.0" }
@@ -69,7 +69,6 @@ rong_event = { path = "modules/rong_event"   , default-features = false   , vers
 rong_exception = { path = "modules/rong_exception"   , default-features = false   , version = "0.8.0" }
 rong_abort = { path = "modules/rong_abort"   , default-features = false   , version = "0.8.0" }
 rong_url = { path = "modules/rong_url"   , default-features = false   , version = "0.8.0" }
-rong_tz = { path = "rong_tz", version = "0.8.0" }
 rong_buffer = { path = "modules/rong_buffer"   , default-features = false   , version = "0.8.0" }
 rong_stream = { path = "modules/rong_stream"   , default-features = false   , version = "0.8.0" }
 rong_crypto = { path = "modules/rong_crypto"   , default-features = false   , version = "0.8.0" }

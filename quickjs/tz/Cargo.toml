@@ -1,16 +1,16 @@
 [package]
-name = "rong_tz"
+name = "rong_quickjs_tz"
 version = "0.8.0"
 edition.workspace = true
 
-description = "Time zones for the Intl that RongJS provides on QuickJS; internal to rong_intl"
+description = "Time zones for the Intl that RongJS provides on QuickJS; internal, use rong::quickjs::intl"
 license.workspace = true
 repository.workspace = true
 homepage.workspace = true
 rust-version.workspace = true
 keywords.workspace = true
 categories.workspace = true
-documentation = "https://docs.rs/rong_tz"
+documentation = "https://docs.rs/rong"
 readme = "README.md"
 
 [dependencies]
