@@ -317,7 +317,8 @@ pub(crate) fn format_numeric_to_string(
         value.trim_end_if_integer();
     }
     if options.min_integer > 1 {
-        value.pad_start(i16::from(options.min_integer) - 1);
+        // pad_start takes a digit count, not a magnitude.
+        value.pad_start(i16::from(options.min_integer));
     }
     let string = value.to_string();
     Rounded { value, string }
