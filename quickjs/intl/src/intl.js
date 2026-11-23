@@ -9,6 +9,7 @@
     resolveNumberFormat, numberFormatParts, numberFormatRangeParts, currencyDigits,
     resolveDateTimeFormat, primaryTimeZone, systemTimeZone, dateTimeFormatFields,
     dateTimeFormatParts, dateTimeFormatRangeParts, transformCase,
+    relativeTimeParts, listParts,
   } = natives;
   const $Object = Object;
   const $String = String;
@@ -49,6 +50,7 @@
   const TypedArrayPrototype = Object.getPrototypeOf(Int8Array.prototype);
   const $typedArrayEntries = TypedArrayPrototype.entries;
   const $typedArrayLength = Object.getOwnPropertyDescriptor(TypedArrayPrototype, 'length').get;
+  const $iterator = Symbol.iterator;
   // No spreading or iteration anywhere here: a script may have replaced
   // the array iterator.
   const call = (f, self, ...args) => $apply(f, self, args);
@@ -542,7 +544,7 @@
       if (!isUnicodeType(nu)) throw new $RangeError('Invalid numberingSystem: ' + nu);
       nu = asciiCase(nu, false);
     }
-    const resolved = resolveNumberFormat(requested, nu);
+    const resolved = resolveNumberFormat(requested, nu, 'NumberFormat');
     const slots = $create(null);
     slots.locale = resolved[0];
     slots.dataLocale = resolved[1];
@@ -1145,6 +1147,203 @@
   installMethod(Array.prototype, 'toLocaleString', 'arrayToLocaleString');
   installMethod(TypedArrayPrototype, 'toLocaleString', 'typedArrayToLocaleString');
 
+  // Intl.RelativeTimeFormat
+  const relativeTimeFormatSlots = new $WeakMap();
+  function relativeTimeFormatOf(rtf, method) {
+    const slots = isObject(rtf) ? call($weakGet, relativeTimeFormatSlots, rtf) : undefined;
+    if (slots === undefined) {
+      throw new $TypeError('Intl.RelativeTimeFormat.prototype.' + method + ' called on an incompatible receiver');
+    }
+    return slots;
+  }
+
+  // SingularRelativeTimeUnit
+  const RELATIVE_UNITS = ['second', 'minute', 'hour', 'day', 'week', 'month', 'quarter', 'year'];
+  function SingularRelativeTimeUnit(unit) {
+    if (call($includes, RELATIVE_UNITS, unit)) return unit;
+    const last = unit.length - 1;
+    if (last > 0 && call($charCodeAt, unit, last) === 115) {
+      const singular = call($slice, unit, 0, last);
+      if (call($includes, RELATIVE_UNITS, singular)) return singular;
+    }
+    throw new $RangeError('Invalid unit: ' + unit);
+  }
+
+  // PartitionRelativeTimePattern, as [type, value, unit] triples.
+  function PartitionRelativeTimePattern(slots, value, unit) {
+    value = +value;
+    unit = ToString(unit);
+    if (!$isFinite(value)) throw new $RangeError('Invalid relative time value: ' + value);
+    unit = SingularRelativeTimeUnit(unit);
+    const x = value === 0 && 1 / value < 0 ? '-0' : $String(value);
+    return relativeTimeParts(slots, slots.numberFormat, unit, x);
+  }
+
+  // Derived and never calling super, as PluralRules.
+  class RelativeTimeFormat extends $Object {
+    constructor() {
+      let proto = new.target.prototype;
+      if (!isObject(proto)) proto = RelativeTimeFormatPrototype;
+      const rtf = $create(proto);
+      const requested = CanonicalizeLocaleList(arguments[0]);
+      const options = CoerceOptionsToObject(arguments[1]);
+      GetOption(options, 'localeMatcher', 'string', ['lookup', 'best fit'], 'best fit');
+      let nu = GetOption(options, 'numberingSystem', 'string', undefined, undefined);
+      if (nu !== undefined) {
+        if (!isUnicodeType(nu)) throw new $RangeError('Invalid numberingSystem: ' + nu);
+        nu = asciiCase(nu, false);
+      }
+      const resolved = resolveNumberFormat(requested, nu, 'RelativeTimeFormat');
+      const slots = $create(null);
+      slots.locale = resolved[0];
+      slots.dataLocale = resolved[1];
+      slots.numberingSystem = resolved[2];
+      slots.style = GetOption(options, 'style', 'string', ['long', 'short', 'narrow'], 'long');
+      slots.numeric = GetOption(options, 'numeric', 'string', ['always', 'auto'], 'always');
+      const nf = new NumberFormat(slots.locale, { __proto__: null, numberingSystem: slots.numberingSystem });
+      slots.numberFormat = call($weakGet, numberFormatSlots, nf);
+      call($weakSet, relativeTimeFormatSlots, rtf, slots);
+      return rtf;
+    }
+
+    static supportedLocalesOf(locales) {
+      return SupportedLocales('RelativeTimeFormat', locales, arguments[1]);
+    }
+
+    format(value, unit) {
+      const slots = relativeTimeFormatOf(this, 'format');
+      const parts = PartitionRelativeTimePattern(slots, value, unit);
+      let out = '';
+      for (let i = 0; i < parts.length; i++) out += parts[i][1];
+      return out;
+    }
+
+    formatToParts(value, unit) {
+      const slots = relativeTimeFormatOf(this, 'formatToParts');
+      const parts = PartitionRelativeTimePattern(slots, value, unit);
+      const result = [];
+      for (let i = 0; i < parts.length; i++) {
+        const part = {};
+        define(part, 'type', parts[i][0], true, true);
+        define(part, 'value', parts[i][1], true, true);
+        if (parts[i][2] !== '') define(part, 'unit', parts[i][2], true, true);
+        define(result, $String(i), part, true, true);
+      }
+      return result;
+    }
+
+    resolvedOptions() {
+      const s = relativeTimeFormatOf(this, 'resolvedOptions');
+      const options = {};
+      define(options, 'locale', s.locale, true, true);
+      define(options, 'style', s.style, true, true);
+      define(options, 'numeric', s.numeric, true, true);
+      define(options, 'numberingSystem', s.numberingSystem, true, true);
+      return options;
+    }
+  }
+  $setPrototypeOf(RelativeTimeFormat, $FunctionPrototype);
+  const RelativeTimeFormatPrototype = RelativeTimeFormat.prototype;
+  $defineProperty(RelativeTimeFormatPrototype, $toStringTag, {
+    __proto__: null, value: 'Intl.RelativeTimeFormat', writable: false, enumerable: false, configurable: true,
+  });
+
+  // Intl.ListFormat
+  const listFormatSlots = new $WeakMap();
+  function listFormatOf(lf, method) {
+    const slots = isObject(lf) ? call($weakGet, listFormatSlots, lf) : undefined;
+    if (slots === undefined) {
+      throw new $TypeError('Intl.ListFormat.prototype.' + method + ' called on an incompatible receiver');
+    }
+    return slots;
+  }
+
+  // StringListFromIterable, through the iterator protocol a script sees.
+  function StringListFromIterable(iterable) {
+    const list = [];
+    if (iterable === undefined) return list;
+    const method = iterable[$iterator];
+    if (typeof method !== 'function') throw new $TypeError('The list is not iterable');
+    const iterator = call(method, iterable);
+    if (!isObject(iterator)) throw new $TypeError('The iterator is not an object');
+    const next = iterator.next;
+    for (;;) {
+      const result = call(next, iterator);
+      if (!isObject(result)) throw new $TypeError('The iterator result is not an object');
+      if (result.done) return list;
+      const value = result.value;
+      if (typeof value !== 'string') {
+        const error = new $TypeError('The list holds a value that is not a string');
+        // IteratorClose with a throw completion: the TypeError wins.
+        try {
+          const close = iterator.return;
+          if (close !== undefined && close !== null) call(close, iterator);
+        } catch (e) {
+          // The original completion is thrown.
+        }
+        throw error;
+      }
+      call($push, list, value);
+    }
+  }
+
+  // Derived and never calling super, as PluralRules.
+  class ListFormat extends $Object {
+    constructor() {
+      let proto = new.target.prototype;
+      if (!isObject(proto)) proto = ListFormatPrototype;
+      const lf = $create(proto);
+      const requested = CanonicalizeLocaleList(arguments[0]);
+      const options = GetOptionsObject(arguments[1]);
+      GetOption(options, 'localeMatcher', 'string', ['lookup', 'best fit'], 'best fit');
+      const slots = $create(null);
+      slots.locale = resolveLocale('ListFormat', requested);
+      slots.type = GetOption(options, 'type', 'string', ['conjunction', 'disjunction', 'unit'], 'conjunction');
+      slots.style = GetOption(options, 'style', 'string', ['long', 'short', 'narrow'], 'long');
+      call($weakSet, listFormatSlots, lf, slots);
+      return lf;
+    }
+
+    static supportedLocalesOf(locales) {
+      return SupportedLocales('ListFormat', locales, arguments[1]);
+    }
+
+    format(list) {
+      const slots = listFormatOf(this, 'format');
+      const parts = listParts(slots, StringListFromIterable(list));
+      let out = '';
+      for (let i = 0; i < parts.length; i++) out += parts[i][1];
+      return out;
+    }
+
+    formatToParts(list) {
+      const slots = listFormatOf(this, 'formatToParts');
+      const parts = listParts(slots, StringListFromIterable(list));
+      const result = [];
+      for (let i = 0; i < parts.length; i++) {
+        const part = {};
+        define(part, 'type', parts[i][0], true, true);
+        define(part, 'value', parts[i][1], true, true);
+        define(result, $String(i), part, true, true);
+      }
+      return result;
+    }
+
+    resolvedOptions() {
+      const s = listFormatOf(this, 'resolvedOptions');
+      const options = {};
+      define(options, 'locale', s.locale, true, true);
+      define(options, 'type', s.type, true, true);
+      define(options, 'style', s.style, true, true);
+      return options;
+    }
+  }
+  $setPrototypeOf(ListFormat, $FunctionPrototype);
+  const ListFormatPrototype = ListFormat.prototype;
+  $defineProperty(ListFormatPrototype, $toStringTag, {
+    __proto__: null, value: 'Intl.ListFormat', writable: false, enumerable: false, configurable: true,
+  });
+
   const Intl = {};
   $defineProperty(Intl, Symbol.toStringTag, {
     value: 'Intl', writable: false, enumerable: false, configurable: true,
@@ -1158,6 +1357,8 @@
   define(Intl, 'DateTimeFormat', DateTimeFormat, false, true);
   define(Intl, 'NumberFormat', NumberFormat, false, true);
   define(Intl, 'PluralRules', PluralRules, false, true);
+  define(Intl, 'RelativeTimeFormat', RelativeTimeFormat, false, true);
+  define(Intl, 'ListFormat', ListFormat, false, true);
   $defineProperty(globalThis, 'Intl', {
     value: Intl, writable: true, enumerable: false, configurable: true,
   });

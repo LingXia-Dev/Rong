@@ -33,7 +33,7 @@ impl Notation {
     }
 }
 
-type Rules = Rc<PluralRulesWithRanges<PluralRules>>;
+pub(crate) type Rules = Rc<PluralRulesWithRanges<PluralRules>>;
 type Compact = Option<Rc<CompactDecimalFormatter>>;
 
 /// ICU4X objects for one context, built on first use per locale.
@@ -49,7 +49,7 @@ impl Cache {
     /// `None` means the blob has no plural data for this type at all (an
     /// app blob built without the plural markers): reported once, and
     /// selection answers `other`.
-    fn rules(&self, data: &IntlData, locale: &str, ordinal: bool) -> Option<Rules> {
+    pub(crate) fn rules(&self, data: &IntlData, locale: &str, ordinal: bool) -> Option<Rules> {
         let key = (locale.to_string(), ordinal);
         if let Some(found) = self.rules.borrow().get(&key) {
             return found.clone();
