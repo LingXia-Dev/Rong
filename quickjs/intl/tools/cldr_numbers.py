@@ -31,6 +31,7 @@ CLDR_XML_TAG = "release-49"
 
 CRATE = Path(__file__).resolve().parent.parent
 OUT = CRATE / "src" / "cldr_numbers.rs"
+ROOT_FIELDS = ("decimal", "group", "minus_sign", "plus_sign")
 FIELDS = ("exponential", "nan", "infinity", "approximately_sign", "approximately", "range", "percent_sign")
 
 
@@ -180,13 +181,23 @@ def generate():
         "",
         f'pub(crate) const CLDR_VERSION: &str = "{CLDR_VERSION}";',
         "",
-        "/// " + ", ".join(FIELDS) + ".",
-        "pub(crate) type Values = [&'static str; 7];",
+        "/// One locale's values, by name so a change of order cannot swap them.",
+        "#[allow(dead_code, reason = \"scientific notation and formatRange read the rest\")]",
+        "pub(crate) struct Values {",
+        *[f"    pub {f}: &'static str," for f in FIELDS],
+        "}",
+        "",
+        "/// Root's own symbols for a numbering system.",
+        "pub(crate) struct RootSymbols {",
+        *[f"    pub {f}: &'static str," for f in ROOT_FIELDS],
+        "}",
         "",
         "pub(crate) static VALUES: &[Values] = &[",
     ]
     for v in table:
-        lines.append("    [" + ", ".join(rust(s) for s in v) + "],")
+        lines.append(
+            "    Values { " + ", ".join(f"{f}: {rust(x)}" for f, x in zip(FIELDS, v, strict=True)) + " },"
+        )
     lines += ["];", "", "/// `locale/numberingSystem`, sorted; the index into [`VALUES`].",
               "pub(crate) static ENTRIES: &[(&str, u16)] = &["]
     for key in sorted(entries):
@@ -196,10 +207,14 @@ def generate():
         "",
         "/// Root's decimal, group, minus and plus signs for the numbering systems",
         "/// root defines on its own; a locale without symbols for one uses these.",
-        "pub(crate) static ROOT_SYMBOLS: &[(&str, [&str; 4])] = &[",
+        "pub(crate) static ROOT_SYMBOLS: &[(&str, RootSymbols)] = &[",
     ]
     for system, sym in sorted(extra.items()):
-        lines.append(f"    ({rust(system)}, [" + ", ".join(rust(x) for x in sym) + "]),")
+        lines.append(
+            f"    ({rust(system)}, RootSymbols {{ "
+            + ", ".join(f"{f}: {rust(x)}" for f, x in zip(ROOT_FIELDS, sym, strict=True))
+            + " }),"
+        )
     lines += ["];", ""]
     return "\n".join(lines)
 
