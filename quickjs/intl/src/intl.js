@@ -6,7 +6,7 @@
   const {
     canonicalizeTag, defaultLocale, settingsGeneration, resolveLocale, supportedLocales,
     pluralResolve, pluralResolveRange, pluralCategories,
-    resolveNumberFormat, numberFormatParts, currencyDigits,
+    resolveNumberFormat, numberFormatParts, numberFormatRangeParts, currencyDigits,
     resolveDateTimeFormat, primaryTimeZone, systemTimeZone, dateTimeFormatFields,
     dateTimeFormatParts, dateTimeFormatRangeParts, transformCase,
   } = natives;
@@ -604,6 +604,12 @@
     formatToParts(value) {
       return FormatParts(numberFormatSlotsOf(this, 'formatToParts'), value, true);
     },
+    formatRange(start, end) {
+      return FormatRangeParts(numberFormatSlotsOf(this, 'formatRange'), start, end, false);
+    },
+    formatRangeToParts(start, end) {
+      return FormatRangeParts(numberFormatSlotsOf(this, 'formatRangeToParts'), start, end, true);
+    },
     resolvedOptions() {
       const s = numberFormatOf(this, 'resolvedOptions');
       const options = {};
@@ -634,6 +640,33 @@
   };
 
   // FormatNumeric (a string) or FormatNumericToParts (an array of parts).
+  // FormatNumericRange / FormatNumericRangeToParts.
+  function FormatRangeParts(slots, start, end, asParts) {
+    if (start === undefined || end === undefined) {
+      throw new $TypeError('formatRange needs a start and an end');
+    }
+    const x = ToIntlMathematicalValue(start);
+    const y = ToIntlMathematicalValue(end);
+    const parts = numberFormatRangeParts(slots, x, y);
+    if (parts === null || parts === undefined) {
+      throw new $RangeError('formatRange cannot take NaN');
+    }
+    if (!asParts) {
+      let out = '';
+      for (let i = 0; i < parts.length; i++) out += parts[i][1];
+      return out;
+    }
+    const result = [];
+    for (let i = 0; i < parts.length; i++) {
+      const part = {};
+      define(part, 'type', parts[i][0], true, true);
+      define(part, 'value', parts[i][1], true, true);
+      define(part, 'source', parts[i][2], true, true);
+      define(result, $String(i), part, true, true);
+    }
+    return result;
+  }
+
   function FormatParts(slots, value, asParts) {
     const parts = partitionNumber(slots, value);
     if (!asParts) {
@@ -658,6 +691,8 @@
     set: undefined, enumerable: false, configurable: true,
   });
   define(NumberFormatPrototype, 'formatToParts', numberFormatMethods.formatToParts, false, true);
+  define(NumberFormatPrototype, 'formatRange', numberFormatMethods.formatRange, false, true);
+  define(NumberFormatPrototype, 'formatRangeToParts', numberFormatMethods.formatRangeToParts, false, true);
   define(NumberFormatPrototype, 'resolvedOptions', numberFormatMethods.resolvedOptions, false, true);
   $defineProperty(NumberFormatPrototype, $toStringTag, {
     __proto__: null, value: 'Intl.NumberFormat', writable: false, enumerable: false, configurable: true,

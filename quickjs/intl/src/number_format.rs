@@ -897,6 +897,117 @@ pub(crate) fn format_to_parts(
     measure: Option<&Affixes>,
     x: &IntlMV,
 ) -> Vec<Part> {
+    partition(format, options, compact, measure, x).0
+}
+
+/// A range part: ECMA-402's [[Type]], [[Value]] and [[Source]].
+pub(crate) type RangePart = (&'static str, String, &'static str);
+
+/// PartitionNumberRangePattern; NaN ends are the caller's RangeError.
+pub(crate) fn format_range_to_parts(
+    format: &LocaleFormat,
+    options: &Options,
+    compact: Option<&Compact>,
+    measure: Option<&Affixes>,
+    x: &IntlMV,
+    y: &IntlMV,
+) -> Vec<RangePart> {
+    let (start, start_core) = partition(format, options, compact, measure, x);
+    let (end, end_core) = partition(format, options, compact, measure, y);
+    let text = |parts: &[Part]| parts.iter().map(|(_, t)| t.as_str()).collect::<String>();
+    let tagged = |parts: &[Part], source| {
+        parts
+            .iter()
+            .map(|(kind, value)| (*kind, value.clone(), source))
+            .collect::<Vec<RangePart>>()
+    };
+    if text(&start) == text(&end) {
+        // FormatApproximately: CLDR's approximately pattern around the
+        // whole, its sign symbol a part of its own.
+        let (before, after) = format
+            .cldr
+            .approximately
+            .split_once("{0}")
+            .unwrap_or(("~", ""));
+        let mut out = approximately(before, format.cldr.approximately_sign);
+        out.extend(tagged(&start, "shared"));
+        out.extend(approximately(after, format.cldr.approximately_sign));
+        return out;
+    }
+    // CollapseNumberRange, as ICU's default: the text around the numbers
+    // (sign, currency, unit, percent) is written once when both ends share
+    // it and it is longer than one code point.
+    let (start_before, start_number, start_after) = (
+        &start[..start_core.0],
+        &start[start_core.0..start_core.1],
+        &start[start_core.1..],
+    );
+    let (end_before, end_number, end_after) = (
+        &end[..end_core.0],
+        &end[end_core.0..end_core.1],
+        &end[end_core.1..],
+    );
+    let affix_length = text(start_before).chars().count() + text(start_after).chars().count();
+    let collapse = start_before == end_before && start_after == end_after && affix_length > 1;
+    // A repeated affix, or a compact symbol inside the number, puts spaces
+    // around the separator.
+    let spaced =
+        (!collapse && affix_length > 0) || start_number.iter().any(|(kind, _)| *kind == "compact");
+    let (before, rest) = format
+        .cldr
+        .range
+        .split_once("{0}")
+        .unwrap_or(("", "{0}–{1}"));
+    let (between, after) = rest.split_once("{1}").unwrap_or(("–", ""));
+    let mut separator = between.to_string();
+    if spaced {
+        if !separator.starts_with(char::is_whitespace) {
+            separator.insert(0, ' ');
+        }
+        if !separator.ends_with(char::is_whitespace) {
+            separator.push(' ');
+        }
+    }
+    let shared_literal =
+        |text: &str| (!text.is_empty()).then(|| ("literal", text.to_string(), "shared"));
+    let mut out: Vec<RangePart> = shared_literal(before).into_iter().collect();
+    if collapse {
+        out.extend(tagged(start_before, "shared"));
+        out.extend(tagged(start_number, "startRange"));
+        out.extend(shared_literal(&separator));
+        out.extend(tagged(end_number, "endRange"));
+        out.extend(tagged(start_after, "shared"));
+    } else {
+        out.extend(tagged(&start, "startRange"));
+        out.extend(shared_literal(&separator));
+        out.extend(tagged(&end, "endRange"));
+    }
+    out.extend(shared_literal(after));
+    out
+}
+
+/// An approximately pattern's text: its `~` is the locale's sign.
+fn approximately(text: &str, sign: &str) -> Vec<RangePart> {
+    let mut out = Vec::new();
+    for (i, piece) in text.split('~').enumerate() {
+        if i > 0 {
+            out.push(("approximatelySign", sign.to_string(), "shared"));
+        }
+        if !piece.is_empty() {
+            out.push(("literal", piece.to_string(), "shared"));
+        }
+    }
+    out
+}
+
+/// PartitionNumberPattern, with where the number's own parts lie.
+fn partition(
+    format: &LocaleFormat,
+    options: &Options,
+    compact: Option<&Compact>,
+    measure: Option<&Affixes>,
+    x: &IntlMV,
+) -> (Vec<Part>, (usize, usize)) {
     // The plural operands of the value shown, for a measure's pattern.
     let mut operands = None;
     // The number's own parts (PartitionNotationSubPattern), and the
@@ -994,23 +1105,33 @@ pub(crate) fn format_to_parts(
     // A plural measure's pattern holds the signed number.
     let outer = measure.and_then(|m| m.plural_pieces(operands));
     let mut parts = Vec::new();
+    let mut core = (0, 0);
+    let mut push = |piece: &Piece, parts: &mut Vec<Part>| {
+        if let Piece::Number = piece {
+            core.0 = parts.len();
+            parts.extend(number.iter().cloned());
+            core.1 = parts.len();
+        } else {
+            push_piece(piece, parts);
+        }
+    };
     for piece in outer.as_deref().unwrap_or(signed) {
         match piece {
             Piece::Number if outer.is_some() => {
                 for inner in signed {
-                    push_piece(inner, &number, &mut parts);
+                    push(inner, &mut parts);
                 }
             }
-            _ => push_piece(piece, &number, &mut parts),
+            _ => push(piece, &mut parts),
         }
     }
-    parts
+    (parts, core)
 }
 
-fn push_piece(piece: &Piece, number: &[Part], parts: &mut Vec<Part>) {
+fn push_piece(piece: &Piece, parts: &mut Vec<Part>) {
     match piece {
         Piece::Literal(text) => parts.push(("literal", text.clone())),
-        Piece::Number => parts.extend(number.iter().cloned()),
+        Piece::Number => {}
         Piece::Plus(sign) => parts.push(("plusSign", sign.clone())),
         Piece::Minus(sign) => parts.push(("minusSign", sign.clone())),
         Piece::PercentSign(sign) => parts.push(("percentSign", sign.clone())),

@@ -28,6 +28,7 @@ use rong_core::{
     HostError, JSContext, JSContextImpl, JSContextService, JSEngine, JSFunc, JSObject, JSResult,
     Source,
 };
+use std::rc::Rc;
 
 pub use data::IntlData;
 
@@ -312,46 +313,7 @@ where
             move |slots: JSObject<E::Value>, value: String| -> JSResult<Vec<Vec<String>>> {
                 let state = state(&own)?;
                 let options = number_format_options::<E>(&slots)?;
-                let format = state
-                    .numbers
-                    .get(
-                        &state.data,
-                        &options.locale,
-                        &options.numbering_system,
-                        options.style,
-                    )
-                    .map_err(|e| {
-                        report(&format!("rong_quickjs_intl: {e}"));
-                        bad(&e)
-                    })?;
-                let compact = match options.notation {
-                    plural::Notation::CompactShort | plural::Notation::CompactLong => Some(
-                        state
-                            .numbers
-                            .compact(
-                                &state.data,
-                                &options.locale,
-                                options.notation == plural::Notation::CompactLong,
-                            )
-                            .map_err(|e| {
-                                report(&format!("rong_quickjs_intl: {e}"));
-                                bad(&e)
-                            })?,
-                    ),
-                    _ => None,
-                };
-                let measure = match &options.measure {
-                    Some(measure) => Some(
-                        state
-                            .numbers
-                            .measure(&state.data, &format, &options, measure)
-                            .map_err(|e| {
-                                report(&format!("rong_quickjs_intl: {e}"));
-                                bad(&e)
-                            })?,
-                    ),
-                    None => None,
-                };
+                let (format, compact, measure) = number_format_data(state, &options)?;
                 let parts = number_format::format_to_parts(
                     &format,
                     &options,
@@ -363,6 +325,42 @@ where
                     .into_iter()
                     .map(|(kind, value)| vec![kind.to_string(), value])
                     .collect())
+            },
+        )?,
+    )?;
+    let own = ctx.clone();
+    natives.set(
+        "numberFormatRangeParts",
+        JSFunc::<E::Value>::new(
+            ctx,
+            move |slots: JSObject<E::Value>,
+                  start: String,
+                  end: String|
+                  -> JSResult<Option<Vec<Vec<String>>>> {
+                let state = state(&own)?;
+                let (x, y) = (number::to_intl_mv(&start), number::to_intl_mv(&end));
+                // A NaN end is a RangeError, thrown by the caller.
+                if x == number::IntlMV::NotANumber || y == number::IntlMV::NotANumber {
+                    return Ok(None);
+                }
+                let options = number_format_options::<E>(&slots)?;
+                let (format, compact, measure) = number_format_data(state, &options)?;
+                let parts = number_format::format_range_to_parts(
+                    &format,
+                    &options,
+                    compact.as_deref(),
+                    measure.as_deref(),
+                    &x,
+                    &y,
+                );
+                Ok(Some(
+                    parts
+                        .into_iter()
+                        .map(|(kind, value, source)| {
+                            vec![kind.to_string(), value, source.to_string()]
+                        })
+                        .collect(),
+                ))
             },
         )?,
     )?;
@@ -758,6 +756,54 @@ fn service_locales(data: &IntlData, service: &str) -> Vec<String> {
         "DateTimeFormat" => date_time_locales(data),
         _ => Vec::new(),
     }
+}
+
+/// The data a NumberFormat's options need: the locale format, compact
+/// patterns and the currency's or unit's affixes.
+fn number_format_data(
+    state: &IntlState,
+    options: &number_format::Options,
+) -> JSResult<(
+    Rc<number_format::LocaleFormat>,
+    Option<Rc<number_format::Compact>>,
+    Option<Rc<number_format::Affixes>>,
+)> {
+    let failed = |e: String| {
+        report(&format!("rong_quickjs_intl: {e}"));
+        bad(&e)
+    };
+    let format = state
+        .numbers
+        .get(
+            &state.data,
+            &options.locale,
+            &options.numbering_system,
+            options.style,
+        )
+        .map_err(failed)?;
+    let compact = match options.notation {
+        plural::Notation::CompactShort | plural::Notation::CompactLong => Some(
+            state
+                .numbers
+                .compact(
+                    &state.data,
+                    &options.locale,
+                    options.notation == plural::Notation::CompactLong,
+                )
+                .map_err(failed)?,
+        ),
+        _ => None,
+    };
+    let measure = match &options.measure {
+        Some(measure) => Some(
+            state
+                .numbers
+                .measure(&state.data, &format, options, measure)
+                .map_err(failed)?,
+        ),
+        None => None,
+    };
+    Ok((format, compact, measure))
 }
 
 /// The slots SetNumberFormatDigitOptions fills, as the bootstrap keeps them.

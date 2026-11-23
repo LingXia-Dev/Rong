@@ -97,5 +97,18 @@
   ["new Intl.NumberFormat('en', {style: 'unit', unit: 'gallon-per-mile', unitDisplay: 'long'}).format(2)", "\"2 gallons per mile\""],
   ["new Intl.NumberFormat('de', {style: 'unit', unit: 'celsius'}).format(20)", "\"20 °C\""],
   ["new Intl.NumberFormat('en', {style: 'unit', unit: 'percent'}).format(50)", "\"50%\""],
-  ["new Intl.NumberFormat('en', {style: 'unit', unit: 'meter'}).formatToParts(-3)", "[{\"type\":\"minusSign\",\"value\":\"-\"},{\"type\":\"integer\",\"value\":\"3\"},{\"type\":\"literal\",\"value\":\" \"},{\"type\":\"unit\",\"value\":\"m\"}]"]
+  ["new Intl.NumberFormat('en', {style: 'unit', unit: 'meter'}).formatToParts(-3)", "[{\"type\":\"minusSign\",\"value\":\"-\"},{\"type\":\"integer\",\"value\":\"3\"},{\"type\":\"literal\",\"value\":\" \"},{\"type\":\"unit\",\"value\":\"m\"}]"],
+  ["new Intl.NumberFormat('en').formatRange(3, 5)", "\"3–5\""],
+  ["new Intl.NumberFormat('en').formatRange(5, 3)", "\"5–3\""],
+  ["new Intl.NumberFormat('en').formatRange(-3, 5)", "\"-3 – 5\""],
+  ["new Intl.NumberFormat('en').formatRange(3, 3)", "\"~3\""],
+  ["new Intl.NumberFormat('en', {maximumFractionDigits: 0}).formatRange(2.9, 3.1)", "\"~3\""],
+  ["new Intl.NumberFormat('en', {style: 'currency', currency: 'USD'}).formatRange(3, 5)", "\"$3.00 – $5.00\""],
+  ["new Intl.NumberFormat('en', {style: 'unit', unit: 'kilometer'}).formatRange(3, 5)", "\"3–5 km\""],
+  ["new Intl.NumberFormat('en', {style: 'percent'}).formatRange(0.03, 0.05)", "\"3% – 5%\""],
+  ["new Intl.NumberFormat('en', {notation: 'compact'}).formatRange(3000, 5000)", "\"3K – 5K\""],
+  ["new Intl.NumberFormat('en').formatRange(NaN, 3)", "throws RangeError"],
+  ["new Intl.NumberFormat('en').formatRange(3)", "throws TypeError"],
+  ["new Intl.NumberFormat('en').formatRangeToParts(3, 5)", "[{\"type\":\"integer\",\"value\":\"3\",\"source\":\"startRange\"},{\"type\":\"literal\",\"value\":\"–\",\"source\":\"shared\"},{\"type\":\"integer\",\"value\":\"5\",\"source\":\"endRange\"}]"],
+  ["new Intl.NumberFormat('en').formatRangeToParts(3, 3)", "[{\"type\":\"approximatelySign\",\"value\":\"~\",\"source\":\"shared\"},{\"type\":\"integer\",\"value\":\"3\",\"source\":\"shared\"}]"]
 ]
