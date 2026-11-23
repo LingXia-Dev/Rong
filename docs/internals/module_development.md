@@ -128,6 +128,33 @@ pub fn init(ctx: &JSContext) -> JSResult<()> {
 2. `.name("functionName")` — Set the function name (for stack traces)
 3. `rong.set("key", func)` — Attach to the global `Rong` object
 
+### Closures with State
+
+A host function is shared: script may call it again while a call of it is still
+running, from the function itself or from a callback it invoked. `JSFunc::new`
+(and `ClassSetup::method`, `static_method`, `new_func`) therefore takes an `Fn`.
+A closure that changes what it captures does not compile (`error[E0525]`, naming
+the variable). Keep such state in a `Cell` or `RefCell`:
+
+```rust
+let calls = Cell::new(0u32);
+let seen = RefCell::new(Vec::<String>::new());
+let visit = JSFunc::new(ctx, move |name: String, callback: JSFunc| -> JSResult<u32> {
+    calls.set(calls.get() + 1);
+    seen.borrow_mut().push(name);       // released at the end of the statement
+    callback.call::<_, ()>(None, ())?;  // may call `visit` again
+    Ok(calls.get())
+})?;
+```
+
+End every `RefCell` borrow before calling into script: a guard held across the
+call makes a nested call panic in `borrow_mut`. In an async function the closure
+only builds the future; do not hold a guard across an `.await`
+(`clippy::await_holding_refcell_ref` reports it).
+
+`JSFunc::new_once` takes an `FnOnce`. A second call, nested or later, throws
+`OnceFn had been called`.
+
 ### Optional Parameters
 
 Use `Optional<T>` from `rong::function` for optional parameters.

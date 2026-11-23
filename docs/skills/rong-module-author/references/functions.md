@@ -72,6 +72,27 @@ pub fn init(ctx: &JSContext) -> JSResult<()> {
 - Direct `JSFunc::new(...).set(...)` remains available for intentionally dynamic
   registration, but it cannot participate in automatic namespace generation.
 
+## Closures with state
+
+A host function is shared: script may call it again while it runs (a callback
+that uses the same API). `JSFunc::new`, `ClassSetup::method` and `new_func`
+therefore take an `Fn`; a closure that changes a capture directly does not
+compile. Keep such state in a `Cell` or `RefCell`, and end a `RefCell` borrow
+before calling into script.
+
+```rust
+let calls = Cell::new(0u32);
+let seen = RefCell::new(Vec::<String>::new());
+JSFunc::new(ctx, move |name: String, callback: JSFunc| -> JSResult<u32> {
+    calls.set(calls.get() + 1);
+    seen.borrow_mut().push(name);       // released at the end of the statement
+    callback.call::<_, ()>(None, ())?;  // may call this function again
+    Ok(calls.get())
+})?;
+```
+
+`JSFunc::new_once` takes an `FnOnce`; a second call throws.
+
 ## Optional parameters
 
 Use `Optional<T>` from `rong::function`. The inner value is `Option<T>` at `.0`.

@@ -6,6 +6,34 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 
 ## [Unreleased]
 
+### Functions
+
+- **Breaking:** a host function can be called again while a call of it is
+  still running, by itself or by script it calls (a callback that uses the
+  same API, a visitor, an emitter emitting from a handler). Before, the nested
+  call threw `TypeError: Not JS Function`. To make that sound, `JSFunc::new`,
+  `ClassSetup::method`, `static_method`, `new_func` and `Constructor::new`
+  take an `Fn` instead of an `FnMut`: the function is stored shared, and each
+  call holds it without borrowing the function object.
+  - What stops compiling: a closure that changes one of its captures
+    (`error[E0525]: expected a closure that implements the Fn trait, but this
+    closure only implements FnMut`; the note names the variable). Functions,
+    methods of `#[js_class]`, and closures that only read or call what they
+    capture are unaffected.
+  - The rewrite: a captured number or flag becomes a `Cell`
+    (`let mut n = 0` → `let n = Cell::new(0)`, `n += 1` →
+    `n.set(n.get() + 1)`, reads → `n.get()`); a captured collection or struct
+    becomes a `RefCell` (`let mut v = Vec::new()` →
+    `let v = RefCell::new(Vec::new())`, each use → `v.borrow_mut()`), with
+    every borrow ended before the function calls into script.
+  - `Constructor::call` takes `&self`. The hidden marker types `KFnMut` and
+    `KAsyncFnMut` are now `KFn` and `KAsyncFn`.
+- A function made by `JSFunc::new_once` that is called from inside its own
+  call throws `OnceFn had been called`, as a later second call does, instead
+  of `TypeError: Not JS Function`.
+- The rule and its compile-time checks are documented, and tested, on
+  `rong::function`.
+
 ### ArkJS
 
 - A value Rust keeps past the native call that created it keeps naming the
