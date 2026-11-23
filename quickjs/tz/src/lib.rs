@@ -270,9 +270,13 @@ fn none_database() -> Database {
     }
 }
 
+/// Opens a zoneinfo directory or a packed file. Only a successful stat
+/// picks the directory reader: a file whose parent cannot be listed (as on
+/// HarmonyOS) still opens by its full path.
 fn open_path(path: &std::path::Path) -> Option<Database> {
     let label = path.display();
-    let (db, source) = if path.is_dir() {
+    let is_dir = std::fs::metadata(path).is_ok_and(|m| m.is_dir());
+    let (db, source) = if is_dir {
         (
             TimeZoneDatabase::from_dir(path).ok()?,
             format!("zoneinfo {label}"),
@@ -299,7 +303,8 @@ const SYSTEM_FIRST: &[&str] = if cfg!(target_os = "android") {
 fn system_database(first: &[&str], skipped: &mut Vec<String>) -> Option<Database> {
     for path in first {
         let path = std::path::Path::new(path);
-        if !path.exists() {
+        // Absent is not worth a report; any other stat failure is tried.
+        if std::fs::metadata(path).is_err_and(|e| e.kind() == std::io::ErrorKind::NotFound) {
             continue;
         }
         match open_path(path) {
