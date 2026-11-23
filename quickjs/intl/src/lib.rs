@@ -591,7 +591,10 @@ fn canonical_u_value(key: &str, value: String) -> String {
 fn date_time_request<E: JSEngine>(
     slots: &JSObject<E::Value>,
 ) -> JSResult<date_time_format::Request> {
-    let text = |key: &str| -> JSResult<Option<String>> { slots.get_opt::<_, String>(key) };
+    // A slot or option may be present and undefined.
+    let text = |key: &str| -> JSResult<Option<String>> {
+        Ok(slots.get_opt::<_, Option<String>>(key)?.flatten())
+    };
     let options: JSObject<E::Value> = slots.get("formatOptions")?;
     let mut components = Vec::new();
     for key in [
@@ -608,10 +611,10 @@ fn date_time_request<E: JSEngine>(
         "timeZoneName",
     ] {
         if key == "fractionalSecondDigits" {
-            if let Some(n) = options.get_opt::<_, f64>(key)? {
+            if let Some(n) = options.get_opt::<_, Option<f64>>(key)?.flatten() {
                 components.push((key.to_string(), (n as u8).to_string()));
             }
-        } else if let Some(v) = options.get_opt::<_, String>(key)? {
+        } else if let Some(v) = options.get_opt::<_, Option<String>>(key)?.flatten() {
             components.push((key.to_string(), v));
         }
     }
