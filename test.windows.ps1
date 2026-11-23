@@ -262,6 +262,9 @@ function Run-AllCoreTests([string]$EngineName, [string[]]$CoreTests) {
         }
         & cargo test @tzArgs -- --nocapture
         Record-SuiteResult -Name "rong_tz zone table" -ExitCode $LASTEXITCODE
+        # Release too: integer overflow wraps there instead of panicking.
+        & cargo test @tzArgs --release
+        Record-SuiteResult -Name "rong_tz zone table (release)" -ExitCode $LASTEXITCODE
     }
 }
 

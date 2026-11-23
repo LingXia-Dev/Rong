@@ -103,6 +103,103 @@ pub(crate) fn check() -> Result<usize, String> {
 
 #[cfg(test)]
 mod tests {
+    use crate::{TzError, WallClock, instant_from_wall_clock, offset_seconds};
+    use jiff::Timestamp;
+
+    const BASE: WallClock = WallClock {
+        year: 2024,
+        month: 1,
+        day: 31,
+        hour: 23,
+        minute: 59,
+        second: 59,
+        millisecond: 999,
+    };
+
+    /// Every field at and past its bounds, in a fixed zone so no database is
+    /// needed. Runs in debug (overflow panics) and release (overflow wraps).
+    #[test]
+    fn wall_clock_fields_at_their_bounds() {
+        let ok = |f: WallClock| instant_from_wall_clock("+05:30", f).is_ok();
+        let out = |f: WallClock| instant_from_wall_clock("+05:30", f) == Err(TzError::OutOfRange);
+        assert!(ok(BASE));
+        for millisecond in [1000, 2148, 4295, u16::MAX] {
+            assert!(
+                out(WallClock {
+                    millisecond,
+                    ..BASE
+                }),
+                "millisecond {millisecond}"
+            );
+        }
+        for year in [-9998, 9999] {
+            assert!(ok(WallClock { year, ..BASE }), "year {year}");
+        }
+        for year in [i32::MIN, -10000, 10000, i32::from(i16::MAX) + 1, i32::MAX] {
+            assert!(out(WallClock { year, ..BASE }), "year {year}");
+        }
+        // Inside the civil range, but before the first representable instant
+        // once the offset is applied.
+        assert!(out(WallClock {
+            year: -9999,
+            month: 1,
+            day: 1,
+            hour: 0,
+            ..BASE
+        }));
+        for month in [0, 13, 127, 128, u8::MAX] {
+            assert!(out(WallClock { month, ..BASE }), "month {month}");
+        }
+        for day in [0, 32, 128, u8::MAX] {
+            assert!(out(WallClock { day, ..BASE }), "day {day}");
+        }
+        assert!(out(WallClock {
+            month: 2,
+            day: 30,
+            ..BASE
+        }));
+        for hour in [24, 128, u8::MAX] {
+            assert!(out(WallClock { hour, ..BASE }), "hour {hour}");
+        }
+        for minute in [60, 128, u8::MAX] {
+            assert!(out(WallClock { minute, ..BASE }), "minute {minute}");
+        }
+        for second in [60, 128, u8::MAX] {
+            assert!(out(WallClock { second, ..BASE }), "second {second}");
+        }
+        assert_eq!(
+            instant_from_wall_clock(
+                "+00:00",
+                WallClock {
+                    year: 1970,
+                    month: 1,
+                    day: 1,
+                    hour: 0,
+                    minute: 0,
+                    second: 0,
+                    millisecond: 999
+                }
+            ),
+            Ok(999)
+        );
+    }
+
+    #[test]
+    fn epoch_milliseconds_at_their_bounds() {
+        let min = Timestamp::MIN.as_millisecond();
+        let max = Timestamp::MAX.as_millisecond();
+        for ms in [min, 0, max] {
+            assert!(offset_seconds("+05:30", ms).is_ok(), "{ms}");
+        }
+        for ms in [i64::MIN, min - 1, max + 1, i64::MAX] {
+            assert_eq!(
+                offset_seconds("+05:30", ms),
+                Err(TzError::OutOfRange),
+                "{ms}"
+            );
+        }
+    }
+
     #[test]
     fn a_second_configure_is_an_error() {
         // The first call may race the table test's first lookup.

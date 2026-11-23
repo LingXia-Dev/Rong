@@ -303,6 +303,11 @@ pub fn offset_seconds(name: &str, epoch_ms: i64) -> Result<i32, TzError> {
 /// (Temporal's `compatible`).
 pub fn instant_from_wall_clock(name: &str, fields: WallClock) -> Result<i64, TzError> {
     let tz = zone(name)?;
+    // Range-check before narrowing or scaling: 1000..=65535 would overflow
+    // the nanosecond product.
+    if fields.millisecond > 999 {
+        return Err(TzError::OutOfRange);
+    }
     let narrow = |v: u8| i8::try_from(v).map_err(|_| TzError::OutOfRange);
     let dt = DateTime::new(
         i16::try_from(fields.year).map_err(|_| TzError::OutOfRange)?,
