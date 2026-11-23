@@ -22,6 +22,11 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
   for each other.
 - A function made by `JSFunc::new` is freed once nothing holds it; it kept a
   strong reference to itself and leaked with its closure.
+- Work Rust drives outside a native call no longer piles up handles. Each
+  backend operation runs in its own handle scope; before, the handles it made
+  stayed in the context's base scope for the context's life and kept what
+  they named alive, so a loop of Rust-driven calls grew the heap without
+  bound.
 - `JSRuntime::run_gc` runs a full collection.
 - Fatal, out-of-memory and refused-reference reports go to HiLog under the
   tag `Rong` instead of stderr, which a device does not collect.

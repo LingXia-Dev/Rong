@@ -4,6 +4,7 @@ use rong_core::{JSArrayOps, JSValueImpl};
 
 impl JSArrayOps for ArkJSValue {
     fn new_array(ctx: &Self::Context) -> Self {
+        let _scope = crate::scope::OpScope::enter(ctx.to_raw());
         unsafe {
             let mut array: arkjs::JSVM_Value = std::ptr::null_mut();
             let status = arkjs::OH_JSVM_CreateArray(ctx.to_raw(), &mut array);
@@ -16,6 +17,7 @@ impl JSArrayOps for ArkJSValue {
     }
 
     fn array_len(&self) -> Self {
+        let _scope = crate::scope::OpScope::enter(self.env);
         unsafe {
             let mut length = 0u32;
             let status =
@@ -42,6 +44,7 @@ impl JSArrayOps for ArkJSValue {
     }
 
     fn get_index(&self, index: u32) -> Self {
+        let _scope = crate::scope::OpScope::enter(self.env);
         unsafe {
             let mut result: arkjs::JSVM_Value = std::ptr::null_mut();
             let status =
@@ -58,6 +61,7 @@ impl JSArrayOps for ArkJSValue {
     }
 
     fn set_index(&self, index: u32, value: Self) -> Self {
+        let _scope = crate::scope::OpScope::enter(self.env);
         unsafe {
             let mut key: arkjs::JSVM_Value = std::ptr::null_mut();
             let status = arkjs::OH_JSVM_CreateUint32(self.env, index, &mut key);

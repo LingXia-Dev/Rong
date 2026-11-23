@@ -85,6 +85,7 @@ impl JSTypedArrayOps for ArkJSValue {
         byte_offset: usize,
         length: Option<usize>,
     ) -> Self {
+        let _scope = crate::scope::OpScope::enter(ctx.to_raw());
         unsafe {
             let mut typed_array: arkjs::JSVM_Value = ptr::null_mut();
             let status = arkjs::OH_JSVM_CreateTypedarray(
@@ -105,25 +106,30 @@ impl JSTypedArrayOps for ArkJSValue {
     }
 
     fn get_kind(&self) -> Option<JSTypedArrayKind> {
+        let _scope = crate::scope::OpScope::enter(self.env);
         self.typed_array_info()
             .and_then(|info| ark_kind_to_kind(info.kind))
     }
 
     fn get_array_buffer(&self) -> Option<Self> {
+        let _scope = crate::scope::OpScope::enter(self.env);
         self.typed_array_info()
             .filter(|info| !info.array_buffer.is_null())
             .map(|info| ArkJSValue::from_owned_raw(self.env, info.array_buffer))
     }
 
     fn get_byte_offset(&self) -> usize {
+        let _scope = crate::scope::OpScope::enter(self.env);
         self.typed_array_info().map_or(0, |info| info.byte_offset)
     }
 
     fn get_length(&self) -> usize {
+        let _scope = crate::scope::OpScope::enter(self.env);
         self.typed_array_info().map_or(0, |info| info.length)
     }
 
     fn get_byte_length(&self) -> usize {
+        let _scope = crate::scope::OpScope::enter(self.env);
         let info = match self.typed_array_info() {
             Some(info) => info,
             None => return 0,

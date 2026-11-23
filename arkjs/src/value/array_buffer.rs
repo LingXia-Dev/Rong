@@ -6,6 +6,7 @@ use std::slice;
 impl JSArrayBufferOps for ArkJSValue {
     /// Create an ArrayBuffer by copying existing data
     fn from_bytes(ctx: &Self::Context, bytes: &[u8]) -> Self {
+        let _scope = crate::scope::OpScope::enter(ctx.to_raw());
         unsafe {
             let mut buffer_data: *mut std::ffi::c_void = ptr::null_mut();
             let mut array_buffer: arkjs::JSVM_Value = ptr::null_mut();
@@ -35,6 +36,7 @@ impl JSArrayBufferOps for ArkJSValue {
 
     /// Create an ArrayBuffer from an existing Vec without copying (zero-copy)
     fn from_vec(ctx: &Self::Context, vec: Vec<u8>) -> Self {
+        let _scope = crate::scope::OpScope::enter(ctx.to_raw());
         // ArkJS doesn't provide a direct zero-copy API like JavaScriptCore
         // For now, we'll copy the data using the standard API
         // In a real implementation, we might need to use external backing store
@@ -43,6 +45,7 @@ impl JSArrayBufferOps for ArkJSValue {
 
     /// Get the byte length of the ArrayBuffer
     fn length(&self) -> usize {
+        let _scope = crate::scope::OpScope::enter(self.env);
         if !self.is_array_buffer() {
             return 0;
         }
@@ -65,6 +68,7 @@ impl JSArrayBufferOps for ArkJSValue {
 
     /// Get a safe slice view of the ArrayBuffer's data
     fn as_slice(&self) -> &[u8] {
+        let _scope = crate::scope::OpScope::enter(self.env);
         if !self.is_array_buffer() {
             return &[];
         }
@@ -87,6 +91,7 @@ impl JSArrayBufferOps for ArkJSValue {
 
     /// Get a mutable slice view of the ArrayBuffer's data
     fn as_mut_slice(&mut self) -> &mut [u8] {
+        let _scope = crate::scope::OpScope::enter(self.env);
         if !self.is_array_buffer() {
             return &mut [];
         }
