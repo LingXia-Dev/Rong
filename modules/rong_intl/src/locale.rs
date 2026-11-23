@@ -49,7 +49,20 @@ pub(crate) fn is_structurally_valid(tag: &str) -> bool {
             variants.push(variant);
         }
     }
-    Locale::try_from_str(tag).is_ok()
+    parse(tag).is_some()
+}
+
+/// Parses `tag`, holding a 5-8 letter language subtag (valid in BCP 47,
+/// beyond what ICU4X represents) aside as `und`: alias rules for `und`
+/// apply to any language, so canonicalizing that way keeps their meaning.
+fn parse(tag: &str) -> Option<(Locale, Option<String>)> {
+    let language = tag.split('-').next()?;
+    if language.len() < 5 {
+        return Some((Locale::try_from_str(tag).ok()?, None));
+    }
+    let rest = &tag[language.len()..];
+    let locale = Locale::try_from_str(&format!("und{rest}")).ok()?;
+    Some((locale, Some(language.to_ascii_lowercase())))
 }
 
 /// ECMA-402 CanonicalizeUnicodeLocaleId, or `None` when `tag` is not
@@ -58,9 +71,77 @@ pub(crate) fn canonicalize(canonicalizer: &LocaleCanonicalizer, tag: &str) -> Op
     if !is_structurally_valid(tag) {
         return None;
     }
-    let mut locale = Locale::try_from_str(tag).ok()?;
+    let (mut locale, long_language) = parse(tag)?;
     canonicalizer.canonicalize(&mut locale);
-    Some(locale.to_string())
+    let mut canonical = locale.to_string();
+    if let Some(language) = long_language
+        && let Some(rest) = canonical.strip_prefix("und")
+    {
+        canonical = format!("{language}{rest}");
+    }
+    Some(replace_value_aliases(&canonical))
+}
+
+/// UTS 35's last canonicalization step, which ICU4X leaves out: replace
+/// deprecated or aliased `-u-` keyword and `-t-` field values with their
+/// preferred form, and drop a `-u-` value of `true`.
+fn replace_value_aliases(tag: &str) -> String {
+    let exts = extensions(tag);
+    if !exts.iter().any(|(s, _, _)| *s == b'u' || *s == b't') {
+        return tag.to_string();
+    }
+    let mut out = String::with_capacity(tag.len());
+    let mut copied = 0;
+    for (singleton, start, end) in exts {
+        if singleton != b'u' && singleton != b't' {
+            continue;
+        }
+        out.push_str(&tag[copied..start]);
+        out.push('-');
+        out.push(singleton as char);
+        let is_key = |sub: &str| {
+            let b = sub.as_bytes();
+            b.len() == 2
+                && if singleton == b'u' {
+                    b[1].is_ascii_alphabetic()
+                } else {
+                    b[0].is_ascii_alphabetic() && b[1].is_ascii_digit()
+                }
+        };
+        let mut key: Option<&str> = None;
+        let mut value: Vec<&str> = Vec::new();
+        let mut flush = |out: &mut String, key: Option<&str>, value: &mut Vec<&str>| {
+            if let Some(key) = key {
+                out.push('-');
+                out.push_str(key);
+                let joined = value.join("-");
+                let mapped = crate::value_aliases::VALUE_ALIASES
+                    .iter()
+                    .find(|(k, from, _)| *k == key && *from == joined)
+                    .map_or(joined.as_str(), |(_, _, to)| to);
+                if !mapped.is_empty() && !(singleton == b'u' && mapped == "true") {
+                    out.push('-');
+                    out.push_str(mapped);
+                }
+            }
+            value.clear();
+        };
+        for sub in tag[start..end].split('-').skip(2) {
+            if is_key(sub) {
+                flush(&mut out, key, &mut value);
+                key = Some(sub);
+            } else if key.is_some() {
+                value.push(sub);
+            } else {
+                out.push('-');
+                out.push_str(sub);
+            }
+        }
+        flush(&mut out, key, &mut value);
+        copied = end;
+    }
+    out.push_str(&tag[copied..]);
+    out
 }
 
 /// The singleton subtags of a canonical tag, with the byte range each
@@ -349,6 +430,27 @@ mod tests {
         }
         // A repeated singleton inside private use is private use.
         assert!(is_structurally_valid("en-x-u-u"));
+    }
+
+    #[test]
+    fn value_aliases_are_replaced() {
+        assert_eq!(
+            replace_value_aliases("und-u-ca-ethiopic-amete-alem"),
+            "und-u-ca-ethioaa"
+        );
+        assert_eq!(replace_value_aliases("und-u-kb-yes"), "und-u-kb");
+        assert_eq!(
+            replace_value_aliases("und-u-ks-primary-ms-imperial"),
+            "und-u-ks-level1-ms-uksystem"
+        );
+        assert_eq!(
+            replace_value_aliases("und-Latn-t-und-hani-m0-names"),
+            "und-Latn-t-und-hani-m0-prprname"
+        );
+        assert_eq!(
+            replace_value_aliases("en-u-attr-ca-gregory-x-u-ks-primary"),
+            "en-u-attr-ca-gregory-x-u-ks-primary"
+        );
     }
 
     #[test]

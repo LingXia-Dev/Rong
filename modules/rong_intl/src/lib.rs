@@ -26,6 +26,7 @@
 mod data;
 mod locale;
 mod settings;
+mod value_aliases;
 
 use rong::*;
 
