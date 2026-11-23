@@ -85,11 +85,15 @@ fn relative(
     numeric: &str,
     style: &str,
 ) -> Result<String, String> {
-    let opts = RelativeTimeFormatterOptions::default().with_numeric(if numeric == "auto" {
+    // Assigned, not built: the field is `Numeric` in ICU4X 2.2 and
+    // `Option<Numeric>` in 2.4.
+    let mut opts = RelativeTimeFormatterOptions::default();
+    opts.numeric = if numeric == "auto" {
         Numeric::Auto
     } else {
         Numeric::Always
-    });
+    }
+    .into();
     let prefs = loc.into();
     let f = match (style, unit) {
         ("long", "minute") => RelativeTimeFormatter::try_new_long_minute(prefs, opts),
