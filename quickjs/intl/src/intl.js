@@ -90,7 +90,11 @@
       return fallback;
     }
     if (type === 'boolean') value = !!value;
-    else value = $String(value);
+    else {
+      // ToString, which String() is not: a Symbol is a TypeError.
+      if (typeof value === 'symbol') throw new $TypeError('Cannot convert a Symbol to a string');
+      value = $String(value);
+    }
     if (values !== undefined && !call($includes, values, value)) {
       throw new $RangeError('Value ' + value + ' out of range for ' + property +
         ' (allowed: ' + values.join(', ') + ')');
