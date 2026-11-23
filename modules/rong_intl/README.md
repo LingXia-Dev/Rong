@@ -25,8 +25,8 @@ How the tag list maps to what is exported:
   exports about 100 English locales (`en-001`, `en-150`, `en-GB`, ...),
   263 KB against 103 KB for `en-US`. Name the regions the app needs instead.
 - `none` exports only root data; `modern` exports every modern locale.
-- Collation is large (about 585 KB at root). An app that does not sort by
-  locale can leave `Collator` out of the binary's markers and ship without it;
-  `Collator` then compares in code-point order after NFC normalization and
-  says so once in the log. It cannot honour `sensitivity: "base"` or
-  `"accent"` without the collation data.
+- Collation is large (about 585 KB at root) and will be its own optional
+  blob. `Collator` is not implemented yet; the plan is that without the
+  collation data it compares in code-point order after NFC normalization and
+  says so once in the log, and cannot honour `sensitivity: "base"` or
+  `"accent"`.
