@@ -11,7 +11,7 @@
   ["new Date(Date.UTC(2026, 0, 5, 13, 4, 5)).toLocaleTimeString('en', {timeZone: 'UTC'})", "\"1:04:05 PM\""],
   ["new Date(Date.UTC(2026, 0, 5, 13, 4, 5)).toLocaleDateString('de', {timeZone: 'UTC', month: 'long'})", "\"Januar\""],
   ["new Date(Date.UTC(2026, 0, 5, 13, 4, 5)).toLocaleTimeString('en', {timeZone: 'UTC', hour: 'numeric'})", "\"1 PM\""],
-  ["new Date(Date.UTC(2026, 0, 5, 13, 4, 5)).toLocaleTimeString('en', {timeZone: 'UTC', weekday: 'long'})", "\"Monday 1:04:05 PM\""],
+  ["new Date(Date.UTC(2026, 0, 5, 13, 4, 5)).toLocaleTimeString('en', {timeZone: 'UTC', weekday: 'long'})", "\"Monday 1:04:05 PM\"", "data: ICU4X 2.4 joins a weekday and a time with CLDR's atTime glue (\"at\")"],
   ["new Date(Date.UTC(2026, 0, 5, 13, 4, 5)).toLocaleString('en', {timeZone: 'UTC', hourCycle: 'h23'})", "\"1/5/2026, 13:04:05\""],
   ["new Date(NaN).toLocaleString('en', {timeZone: 'Nowhere/Nowhere'})", "\"Invalid Date\""],
   ["Date.prototype.toLocaleString.call({})", "throws TypeError"],
