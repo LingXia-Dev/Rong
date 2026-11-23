@@ -1,0 +1,651 @@
+//! Intl.DateTimeFormat's patterns and FormatDateTimePattern, over ICU4X's
+//! `DateTimeFormatter`. The option processing is the bootstrap's; this
+//! module turns the resolved options into a formatter, reports the fields
+//! of the pattern it chose, and formats a time value into ECMA-402 parts.
+
+use crate::data::IntlData;
+use icu::calendar::types::RataDie;
+use icu::calendar::{Date, Iso};
+use icu::datetime::fieldbag::DateTimeFieldBag;
+use icu::datetime::fieldbag::field;
+use icu::datetime::fieldsets::builder::{DateFields, FieldSetBuilder, ZoneStyle};
+use icu::datetime::fieldsets::enums::CompositeFieldSet;
+use icu::datetime::options::{Length, SubsecondDigits, TimePrecision};
+use icu::datetime::{DateTimeFormatter, DateTimeFormatterPreferences};
+use icu::time::zone::iana::IanaParserExtended;
+use icu::time::zone::{IanaParser, UtcOffset};
+use icu::time::{DateTime, Time, TimeZone, ZonedDateTime};
+use std::cell::RefCell;
+use std::collections::HashMap;
+use std::fmt;
+use std::rc::Rc;
+use writeable::{Part, PartsWrite, Writeable};
+
+/// The calendars ECMA-402 names (AvailableCalendars), sorted.
+pub(crate) const CALENDARS: &[&str] = &[
+    "buddhist",
+    "chinese",
+    "coptic",
+    "dangi",
+    "ethioaa",
+    "ethiopic",
+    "gregory",
+    "hebrew",
+    "indian",
+    "islamic-civil",
+    "islamic-tbla",
+    "islamic-umalqura",
+    "iso8601",
+    "japanese",
+    "persian",
+    "roc",
+];
+
+/// The options a formatter depends on, as the bootstrap resolved them.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
+pub(crate) struct Request {
+    pub data_locale: String,
+    pub calendar: String,
+    pub numbering_system: String,
+    /// h11, h12, h23 or h24; only consulted when the pattern has an hour.
+    pub hour_cycle: Option<String>,
+    pub date_style: Option<String>,
+    pub time_style: Option<String>,
+    /// The component options (formatOptions after defaults), by property.
+    pub components: Vec<(String, String)>,
+}
+
+/// A formatter and what its pattern holds.
+pub(crate) struct Format {
+    formatter: DateTimeFormatter<CompositeFieldSet>,
+    /// The pattern's fields as resolvedOptions reports them.
+    pub fields: Vec<(&'static str, String)>,
+    pub has_hour: bool,
+    /// ICU4X has no h24: the pattern is h23's and hour 0 reads 24.
+    hour_24: bool,
+}
+
+#[derive(Default)]
+pub(crate) struct Cache {
+    formats: RefCell<HashMap<Request, Rc<Format>>>,
+    hour_cycles: RefCell<HashMap<String, [String; 3]>>,
+}
+
+impl Cache {
+    pub(crate) fn get(&self, data: &IntlData, request: &Request) -> Result<Rc<Format>, String> {
+        if let Some(found) = self.formats.borrow().get(request) {
+            return Ok(found.clone());
+        }
+        let built = Rc::new(build(data, request)?);
+        self.formats
+            .borrow_mut()
+            .insert(request.clone(), built.clone());
+        Ok(built)
+    }
+
+    /// [[hourCycle]], [[hourCycle12]] and [[hourCycle24]] of a locale.
+    pub(crate) fn hour_cycles(&self, data: &IntlData, locale: &str) -> [String; 3] {
+        if let Some(found) = self.hour_cycles.borrow().get(locale) {
+            return found.clone();
+        }
+        let found = hour_cycles(data, locale);
+        self.hour_cycles
+            .borrow_mut()
+            .insert(locale.to_string(), found.clone());
+        found
+    }
+}
+
+fn preferences(
+    locale: &str,
+    extensions: &[(&str, &str)],
+) -> Result<DateTimeFormatterPreferences, String> {
+    let mut tag = locale.to_string();
+    if !extensions.is_empty() {
+        tag.push_str("-u");
+        for (key, value) in extensions {
+            tag.push('-');
+            tag.push_str(key);
+            tag.push('-');
+            tag.push_str(value);
+        }
+    }
+    let parsed = tag
+        .parse::<icu::locale::Locale>()
+        .map_err(|_| format!("{tag} is not a locale"))?;
+    Ok(DateTimeFormatterPreferences::from(&parsed))
+}
+
+/// The hour a formatter writes for 00:30 and 13:30, read with latn digits.
+fn hours_written(data: &IntlData, locale: &str, hc: Option<&str>) -> Option<(u32, u32)> {
+    let mut extensions = vec![("nu", "latn")];
+    if let Some(hc) = hc {
+        extensions.push(("hc", hc));
+    }
+    let prefs = preferences(locale, &extensions).ok()?;
+    let mut builder = FieldSetBuilder::new();
+    builder.time_precision = Some(TimePrecision::Minute);
+    let field_set = builder.build_composite().ok()?;
+    let formatter = DateTimeFormatter::try_new_unstable(&data.provider(), prefs, field_set).ok()?;
+    let hour = |h: u8| -> Option<u32> {
+        let input = zoned_utc(Time::try_new(h, 30, 0, 0).ok()?);
+        let mut sink = Collector::default();
+        formatter.format(&input).write_to_parts(&mut sink).ok()?;
+        sink.text_of(icu::datetime::parts::HOUR)?.parse().ok()
+    };
+    Some((hour(0)?, hour(13)?))
+}
+
+/// The locale's default hour cycle and its 12- and 24-hour ones, from the
+/// hours its patterns write.
+fn hour_cycles(data: &IntlData, locale: &str) -> [String; 3] {
+    let twelve = |written: Option<(u32, u32)>| match written {
+        Some((0, _)) => "h11",
+        _ => "h12",
+    };
+    let h12 = twelve(hours_written(data, locale, Some("c12")));
+    let default = match hours_written(data, locale, None) {
+        Some((_, 13)) => "h23",
+        written @ Some(_) => twelve(written),
+        None => "h23",
+    };
+    [default.to_string(), h12.to_string(), String::from("h23")]
+}
+
+/// 1970-01-01.
+const EPOCH_RATA_DIE: i64 = 719_163;
+
+/// 1970-01-01 at `time`, in an unnamed zone at UTC.
+fn zoned_utc(
+    time: Time,
+) -> ZonedDateTime<Iso, icu::time::TimeZoneInfo<icu::time::zone::models::AtTime>> {
+    let date = Date::from_rata_die(RataDie::new(EPOCH_RATA_DIE), Iso);
+    ZonedDateTime {
+        date,
+        time,
+        zone: TimeZone::UNKNOWN
+            .with_offset(Some(UtcOffset::zero()))
+            .at_date_time(DateTime { date, time }),
+    }
+}
+
+fn component<'a>(request: &'a Request, key: &str) -> Option<&'a str> {
+    request
+        .components
+        .iter()
+        .find(|(k, _)| k == key)
+        .map(|(_, v)| v.as_str())
+}
+
+fn field_set(request: &Request) -> Result<CompositeFieldSet, String> {
+    if request.date_style.is_some() || request.time_style.is_some() {
+        let mut builder = FieldSetBuilder::new();
+        let length = |style: &str| match style {
+            "full" | "long" => Length::Long,
+            "medium" => Length::Medium,
+            _ => Length::Short,
+        };
+        if let Some(style) = request.date_style.as_deref() {
+            builder.length = Some(length(style));
+            builder.date_fields = Some(if style == "full" {
+                DateFields::YMDE
+            } else {
+                DateFields::YMD
+            });
+        }
+        if let Some(style) = request.time_style.as_deref() {
+            builder.length.get_or_insert(length(style));
+            builder.time_precision = Some(if style == "short" {
+                TimePrecision::Minute
+            } else {
+                TimePrecision::Second
+            });
+            builder.zone_style = match style {
+                "full" => Some(ZoneStyle::SpecificLong),
+                "long" => Some(ZoneStyle::SpecificShort),
+                _ => None,
+            };
+        }
+        return builder
+            .build_composite()
+            .map_err(|e| format!("no pattern for these styles: {e:?}"));
+    }
+    let c = |key| component(request, key);
+    let text = |v: Option<&str>| -> Option<u8> {
+        match v? {
+            "narrow" => Some(0),
+            "short" => Some(1),
+            "long" => Some(2),
+            _ => None,
+        }
+    };
+    let mut bag = DateTimeFieldBag::default();
+    bag.era = text(c("era"))
+        .map(|w| [field::Era::Narrow, field::Era::Short, field::Era::Long][w as usize]);
+    bag.weekday = text(c("weekday")).map(|w| {
+        [
+            field::Weekday::Narrow,
+            field::Weekday::Short,
+            field::Weekday::Long,
+        ][w as usize]
+    });
+    bag.year = c("year").map(|v| match v {
+        "2-digit" => field::Year::TwoDigit,
+        _ => field::Year::Numeric,
+    });
+    bag.month = c("month").map(|v| match v {
+        "2-digit" => field::Month::TwoDigit,
+        "narrow" => field::Month::Narrow,
+        "short" => field::Month::Short,
+        "long" => field::Month::Long,
+        _ => field::Month::Numeric,
+    });
+    bag.day = c("day").map(|v| match v {
+        "2-digit" => field::Day::TwoDigit,
+        _ => field::Day::Numeric,
+    });
+    bag.day_period = text(c("dayPeriod")).map(|w| {
+        [
+            field::DayPeriod::FlexibleNarrow,
+            field::DayPeriod::FlexibleShort,
+            field::DayPeriod::FlexibleLong,
+        ][w as usize]
+    });
+    bag.hour = c("hour").map(|v| match v {
+        "2-digit" => field::Hour::TwoDigit,
+        _ => field::Hour::Numeric,
+    });
+    if bag.hour.is_some() {
+        bag.hour_kind = match request.hour_cycle.as_deref() {
+            Some("h11" | "h12") => Some(field::HourKind::Clock12),
+            Some(_) => Some(field::HourKind::Clock24),
+            None => None,
+        };
+    }
+    bag.minute = c("minute").map(|v| match v {
+        "2-digit" => field::Minute::TwoDigit,
+        _ => field::Minute::Numeric,
+    });
+    bag.second = c("second").map(|v| match v {
+        "2-digit" => field::Second::TwoDigit,
+        _ => field::Second::Numeric,
+    });
+    bag.fractional_second_digits = c("fractionalSecondDigits").map(|v| match v {
+        "1" => field::FractionalSecondDigits::F1,
+        "2" => field::FractionalSecondDigits::F2,
+        _ => field::FractionalSecondDigits::F3,
+    });
+    bag.time_zone_name = c("timeZoneName").map(|v| match v {
+        "long" => field::TimeZoneName::LongSpecific,
+        "shortOffset" => field::TimeZoneName::ShortOffset,
+        "longOffset" => field::TimeZoneName::LongOffset,
+        "shortGeneric" => field::TimeZoneName::ShortGeneric,
+        "longGeneric" => field::TimeZoneName::LongGeneric,
+        _ => field::TimeZoneName::ShortSpecific,
+    });
+    Ok(bag.to_composite_field_set())
+}
+
+fn build(data: &IntlData, request: &Request) -> Result<Format, String> {
+    let mut extensions = vec![
+        ("ca", request.calendar.as_str()),
+        ("nu", request.numbering_system.as_str()),
+    ];
+    let hour_24 = request.hour_cycle.as_deref() == Some("h24");
+    if let Some(hc) = request.hour_cycle.as_deref() {
+        extensions.push(("hc", if hour_24 { "h23" } else { hc }));
+    }
+    let prefs = preferences(&request.data_locale, &extensions)?;
+    let formatter =
+        DateTimeFormatter::try_new_unstable(&data.provider(), prefs, field_set(request)?).map_err(
+            |e| {
+                format!(
+                    "the data blob has no date and time data for {} in the {} calendar: {e}",
+                    request.data_locale, request.calendar
+                )
+            },
+        )?;
+    // The pattern does not depend on the instant for these field sets.
+    let sample = zoned_utc(Time::try_new(0, 0, 0, 0).map_err(|e| e.to_string())?);
+    let pattern = formatter.format(&sample).pattern().to_string();
+    let (fields, has_hour) = pattern_fields(&pattern);
+    Ok(Format {
+        formatter,
+        fields,
+        has_hour,
+        hour_24,
+    })
+}
+
+/// The ECMA-402 component values of a UTS 35 pattern's fields.
+fn pattern_fields(pattern: &str) -> (Vec<(&'static str, String)>, bool) {
+    let mut fields = Vec::new();
+    let mut has_hour = false;
+    let mut chars = pattern.chars().peekable();
+    let mut quoted = false;
+    while let Some(c) = chars.next() {
+        if c == '\'' {
+            quoted = !quoted;
+            continue;
+        }
+        if quoted || !c.is_ascii_alphabetic() {
+            continue;
+        }
+        let mut n = 1;
+        while chars.peek() == Some(&c) {
+            chars.next();
+            n += 1;
+        }
+        let text = |n: usize| match n {
+            4 => "long",
+            5 | 6 => "narrow",
+            _ => "short",
+        };
+        let digits = |n: usize| if n == 2 { "2-digit" } else { "numeric" };
+        let (key, value): (&'static str, String) = match c {
+            'G' => ("era", text(n).into()),
+            'y' | 'Y' | 'u' | 'r' | 'U' => ("year", digits(n).into()),
+            'M' | 'L' => (
+                "month",
+                match n {
+                    1 => "numeric",
+                    2 => "2-digit",
+                    3 => "short",
+                    4 => "long",
+                    _ => "narrow",
+                }
+                .into(),
+            ),
+            'd' => ("day", digits(n).into()),
+            'E' => ("weekday", text(n).into()),
+            'c' | 'e' if n >= 3 => ("weekday", text(n).into()),
+            'B' => ("dayPeriod", text(n).into()),
+            'h' | 'H' | 'K' | 'k' => {
+                has_hour = true;
+                ("hour", digits(n).into())
+            }
+            'm' => ("minute", digits(n).into()),
+            's' => ("second", digits(n).into()),
+            'S' => ("fractionalSecondDigits", n.min(3).to_string()),
+            'z' => ("timeZoneName", if n >= 4 { "long" } else { "short" }.into()),
+            'O' | 'Z' | 'x' | 'X' => (
+                "timeZoneName",
+                if n >= 4 { "longOffset" } else { "shortOffset" }.into(),
+            ),
+            'v' | 'V' => (
+                "timeZoneName",
+                if n >= 4 {
+                    "longGeneric"
+                } else {
+                    "shortGeneric"
+                }
+                .into(),
+            ),
+            _ => continue,
+        };
+        if !fields.iter().any(|(k, _)| *k == key) {
+            fields.push((key, value));
+        }
+    }
+    (fields, has_hour)
+}
+
+/// A time zone as the bootstrap resolved it: an IANA name, or an offset
+/// `±HH:MM`.
+pub(crate) fn zone_offset_seconds(zone: &str, epoch_ms: i64) -> Result<i32, String> {
+    if let Some(minutes) = offset_minutes(zone) {
+        return Ok(minutes * 60);
+    }
+    rong_quickjs_tz::offset_seconds(zone, epoch_ms).map_err(|e| e.to_string())
+}
+
+fn offset_minutes(zone: &str) -> Option<i32> {
+    let bytes = zone.as_bytes();
+    if bytes.len() != 6 || bytes[3] != b':' {
+        return None;
+    }
+    let sign = match bytes[0] {
+        b'+' => 1,
+        b'-' => -1,
+        _ => return None,
+    };
+    let hours: i32 = zone.get(1..3)?.parse().ok()?;
+    let minutes: i32 = zone.get(4..6)?.parse().ok()?;
+    Some(sign * (hours * 60 + minutes))
+}
+
+/// FormatDateTimePattern for a time value already through TimeClip.
+pub(crate) fn format_to_parts(
+    data: &IntlData,
+    format: &Format,
+    zone: &str,
+    epoch_ms: f64,
+) -> Result<Vec<(&'static str, String)>, String> {
+    let ms = epoch_ms as i64;
+    let offset = zone_offset_seconds(zone, ms)?;
+    let local = ms + i64::from(offset) * 1000;
+    let day = local.div_euclid(86_400_000);
+    let in_day = local.rem_euclid(86_400_000);
+    let date = Date::from_rata_die(RataDie::new(EPOCH_RATA_DIE + day), Iso);
+    let time = Time::try_new(
+        (in_day / 3_600_000) as u8,
+        (in_day / 60_000 % 60) as u8,
+        (in_day / 1000 % 60) as u8,
+        (in_day % 1000) as u32 * 1_000_000,
+    )
+    .map_err(|e| e.to_string())?;
+    let id = if offset_minutes(zone).is_some() {
+        TimeZone::UNKNOWN
+    } else {
+        zone_id(data, zone)
+    };
+    let zone_info = id
+        .with_offset(UtcOffset::try_from_seconds(offset).ok())
+        .at_date_time(DateTime { date, time });
+    let input = ZonedDateTime {
+        date,
+        time,
+        zone: zone_info,
+    };
+    let mut sink = Collector::default();
+    format
+        .formatter
+        .format(&input)
+        .write_to_parts(&mut sink)
+        .map_err(|_| String::from("formatting failed"))?;
+    let mut parts = sink.parts();
+    if format.hour_24 && time.hour.number() == 0 {
+        for (kind, text) in &mut parts {
+            if *kind == "hour" {
+                *text = twenty_four(text);
+            }
+        }
+    }
+    Ok(parts)
+}
+
+/// "0" or "00" as 24 in the same digits.
+fn twenty_four(zero: &str) -> String {
+    let Some(z) = zero.chars().last() else {
+        return String::from("24");
+    };
+    let shift = |d: u32| char::from_u32(u32::from(z) + d).unwrap_or('?');
+    [shift(2), shift(4)].iter().collect()
+}
+
+/// The BCP 47 zone ICU4X names an IANA zone by; unknown if the blob lacks
+/// the zone identifiers (names then fall back to offsets).
+fn zone_id(data: &IntlData, zone: &str) -> TimeZone {
+    IanaParser::try_new_unstable(&data.provider())
+        .map(|parser| parser.as_borrowed().parse(zone))
+        .unwrap_or(TimeZone::UNKNOWN)
+}
+
+/// GetAvailableNamedTimeZoneIdentifier's [[PrimaryIdentifier]] for a zone
+/// the system database holds: IANA's canonical name for a link, "UTC" for
+/// UTC's aliases.
+pub(crate) fn primary_zone(data: &IntlData, name: &str) -> Result<String, String> {
+    let spelled = rong_quickjs_tz::canonical_zone(name).map_err(|e| e.to_string())?;
+    let canonical = IanaParserExtended::try_new_unstable(&data.provider())
+        .ok()
+        .map(|parser| parser.as_borrowed().parse(&spelled).canonical.to_string())
+        .filter(|c| c != "Etc/Unknown")
+        .unwrap_or(spelled);
+    const UTC: &[&str] = &[
+        "Etc/UTC",
+        "Etc/GMT",
+        "GMT",
+        "Etc/UCT",
+        "UCT",
+        "Etc/Universal",
+        "Universal",
+        "Etc/Zulu",
+        "Zulu",
+        "Etc/GMT0",
+        "Etc/GMT+0",
+        "Etc/GMT-0",
+        "GMT0",
+        "GMT+0",
+        "GMT-0",
+        "Etc/Greenwich",
+        "Greenwich",
+        "UTC",
+    ];
+    if UTC.iter().any(|u| u.eq_ignore_ascii_case(&canonical)) {
+        return Ok(String::from("UTC"));
+    }
+    Ok(canonical)
+}
+
+/// Collects written text with the parts around each run.
+#[derive(Default)]
+struct Collector {
+    text: String,
+    /// (start, end, part, depth), innermost first.
+    spans: Vec<(usize, usize, Part, usize)>,
+    depth: usize,
+}
+
+impl fmt::Write for Collector {
+    fn write_str(&mut self, s: &str) -> fmt::Result {
+        self.text.push_str(s);
+        Ok(())
+    }
+}
+
+impl PartsWrite for Collector {
+    type SubPartsWrite = Self;
+    fn with_part(
+        &mut self,
+        part: Part,
+        mut f: impl FnMut(&mut Self::SubPartsWrite) -> fmt::Result,
+    ) -> fmt::Result {
+        let start = self.text.len();
+        self.depth += 1;
+        let result = f(self);
+        self.depth -= 1;
+        self.spans.push((start, self.text.len(), part, self.depth));
+        result
+    }
+}
+
+impl Collector {
+    fn text_of(&self, part: Part) -> Option<&str> {
+        self.spans
+            .iter()
+            .find(|(_, _, p, _)| *p == part)
+            .map(|(s, e, _, _)| &self.text[*s..*e])
+    }
+
+    /// ECMA-402 parts: each run takes its outermost date-time part; a second
+    /// with a fraction splits at the decimal separator.
+    fn parts(&self) -> Vec<(&'static str, String)> {
+        use icu::datetime::parts as dt;
+        let kind_at = |at: usize| -> &'static str {
+            let mut outer: Option<Part> = None;
+            let mut inner: Option<Part> = None;
+            let mut inner_depth = 0;
+            for (s, e, part, depth) in &self.spans {
+                if *s <= at && at < *e {
+                    if *depth == 0 {
+                        outer = Some(*part);
+                    }
+                    if inner.is_none() || *depth > inner_depth {
+                        inner = Some(*part);
+                        inner_depth = *depth;
+                    }
+                }
+            }
+            let Some(outer) = outer else {
+                return "literal";
+            };
+            match outer {
+                p if p == dt::ERA => "era",
+                p if p == dt::YEAR || p == dt::EXTENDED_YEAR => "year",
+                p if p == dt::RELATED_YEAR => "relatedYear",
+                p if p == dt::YEAR_NAME => "yearName",
+                p if p == dt::MONTH => "month",
+                p if p == dt::DAY => "day",
+                p if p == dt::WEEKDAY => "weekday",
+                p if p == dt::DAY_PERIOD => "dayPeriod",
+                p if p == dt::HOUR => "hour",
+                p if p == dt::MINUTE => "minute",
+                p if p == dt::SECOND => match inner {
+                    Some(p) if p == icu::decimal::parts::DECIMAL => "literal",
+                    Some(p) if p == icu::decimal::parts::FRACTION => "fractionalSecond",
+                    _ => "second",
+                },
+                p if p == dt::TIME_ZONE_NAME => "timeZoneName",
+                _ => "literal",
+            }
+        };
+        let mut parts: Vec<(&'static str, String)> = Vec::new();
+        for (at, c) in self.text.char_indices() {
+            let kind = kind_at(at);
+            match parts.last_mut() {
+                Some((k, text)) if *k == kind => text.push(c),
+                _ => parts.push((kind, c.to_string())),
+            }
+        }
+        parts
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pattern_fields_read_ecma_402_values() {
+        let (fields, hour) = pattern_fields("EEEE, MMMM d, y 'at' h:mm:ss a zzzz");
+        assert!(hour);
+        let get = |k| {
+            fields
+                .iter()
+                .find(|(f, _)| *f == k)
+                .map(|(_, v)| v.as_str())
+        };
+        assert_eq!(get("weekday"), Some("long"));
+        assert_eq!(get("month"), Some("long"));
+        assert_eq!(get("day"), Some("numeric"));
+        assert_eq!(get("year"), Some("numeric"));
+        assert_eq!(get("minute"), Some("2-digit"));
+        assert_eq!(get("timeZoneName"), Some("long"));
+        assert_eq!(get("dayPeriod"), None);
+    }
+
+    #[test]
+    fn offsets_parse_only_the_resolved_form() {
+        assert_eq!(offset_minutes("+05:30"), Some(330));
+        assert_eq!(offset_minutes("-00:45"), Some(-45));
+        assert_eq!(offset_minutes("+0530"), None);
+        assert_eq!(offset_minutes("Europe/Paris"), None);
+    }
+
+    #[test]
+    fn hour_24_keeps_the_digits() {
+        assert_eq!(twenty_four("0"), "24");
+        assert_eq!(twenty_four("00"), "24");
+        assert_eq!(twenty_four("٠"), "٢٤");
+    }
+}

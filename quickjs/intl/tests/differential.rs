@@ -50,6 +50,7 @@ fn locale_cases_match_on_every_engine() -> Result<(), String> {
         include_str!("cases/locales.json"),
         include_str!("cases/plurals.json"),
         include_str!("cases/numbers.json"),
+        include_str!("cases/dates.json"),
     ] {
         let cases: JSArray = JSArray::from_object(
             JSObject::from_json_string(&ctx, table).map_err(|e| e.to_string())?,

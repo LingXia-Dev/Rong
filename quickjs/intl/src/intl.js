@@ -7,6 +7,8 @@
     canonicalizeTag, defaultLocale, settingsGeneration, resolveLocale, supportedLocales,
     pluralResolve, pluralResolveRange, pluralCategories,
     resolveNumberFormat, numberFormatParts, currencyDigits,
+    resolveDateTimeFormat, primaryTimeZone, systemTimeZone, dateTimeFormatFields,
+    dateTimeFormatParts,
   } = natives;
   const $Object = Object;
   const $String = String;
@@ -35,6 +37,9 @@
   const $slice = String.prototype.slice;
   const $fromCharCode = String.fromCharCode;
   const $Symbol = Symbol;
+  const $dateNow = Date.now;
+  const $abs = Math.abs;
+  const $trunc = Math.trunc;
   // No spreading or iteration anywhere here: a script may have replaced
   // the array iterator.
   const call = (f, self, ...args) => $apply(f, self, args);
@@ -469,15 +474,18 @@
     }
   }
 
-  // OrdinaryHasInstance(%Intl.NumberFormat%, value)
-  function isNumberFormatInstance(value) {
+  // OrdinaryHasInstance(C, value), for C whose prototype is `prototype`.
+  function isInstanceOf(value, prototype) {
     if (!isObject(value)) return false;
     let proto = $getPrototypeOf(value);
     while (proto !== null) {
-      if (proto === NumberFormatPrototype) return true;
+      if (proto === prototype) return true;
       proto = $getPrototypeOf(proto);
     }
     return false;
+  }
+  function isNumberFormatInstance(value) {
+    return isInstanceOf(value, NumberFormatPrototype);
   }
 
   // UnwrapNumberFormat, then RequireInternalSlot.
@@ -646,6 +654,304 @@
     __proto__: null, value: 'Intl.NumberFormat', writable: false, enumerable: false, configurable: true,
   });
 
+  // Intl.DateTimeFormat
+  const dateTimeFormatSlots = new $WeakMap();
+  // The component options, in the order of the table of components.
+  const DATE_TIME_COMPONENTS = [
+    ['weekday', ['narrow', 'short', 'long']],
+    ['era', ['narrow', 'short', 'long']],
+    ['year', ['2-digit', 'numeric']],
+    ['month', ['2-digit', 'numeric', 'narrow', 'short', 'long']],
+    ['day', ['2-digit', 'numeric']],
+    ['dayPeriod', ['narrow', 'short', 'long']],
+    ['hour', ['2-digit', 'numeric']],
+    ['minute', ['2-digit', 'numeric']],
+    ['second', ['2-digit', 'numeric']],
+    ['fractionalSecondDigits', undefined],
+    ['timeZoneName', ['short', 'long', 'shortOffset', 'longOffset', 'shortGeneric',
+      'longGeneric']],
+  ];
+  const STYLES = ['full', 'long', 'medium', 'short'];
+  // The internal value for a null [[hc]], which no locale tag can carry.
+  const NULL_HC = '<null>';
+
+  function isDigit(c) { return c >= 48 && c <= 57; }
+
+  // IsTimeZoneOffsetString with ParseTimeZoneOffsetString: the offset in
+  // minutes, undefined if `s` is not a UTCOffset, and a RangeError for one
+  // with seconds (more than one MinuteSecond).
+  function parseOffsetMinutes(s) {
+    const n = s.length;
+    if (n < 3) return undefined;
+    const sign = call($charCodeAt, s, 0);
+    if (sign !== 43 && sign !== 45) return undefined;
+    const two = (at) => {
+      if (at + 2 > n) return -1;
+      const a = call($charCodeAt, s, at);
+      const b = call($charCodeAt, s, at + 1);
+      return isDigit(a) && isDigit(b) ? (a - 48) * 10 + (b - 48) : -1;
+    };
+    const hours = two(1);
+    if (hours < 0 || hours > 23) return undefined;
+    let at = 3;
+    let minutes = 0;
+    let groups = 0;
+    let extended;
+    while (at < n) {
+      const c = call($charCodeAt, s, at);
+      if (extended === undefined) extended = c === 58;
+      if (extended) {
+        if (c !== 58) break;
+        at++;
+      }
+      const v = two(at);
+      if (v < 0 || v > 59) return undefined;
+      if (groups === 0) minutes = v;
+      groups++;
+      at += 2;
+      if (groups === 2) break;
+    }
+    if (at < n) {
+      // A fraction may follow the seconds only.
+      const c = call($charCodeAt, s, at);
+      if (groups !== 2 || (c !== 46 && c !== 44) || at + 1 >= n) return undefined;
+      for (let i = at + 1; i < n; i++) {
+        if (!isDigit(call($charCodeAt, s, i)) || i - at > 9) return undefined;
+      }
+    }
+    if (groups > 1) throw new $RangeError('Time zone offset with seconds: ' + s);
+    const total = hours * 60 + minutes;
+    return sign === 45 ? -total : total;
+  }
+
+  // FormatOffsetTimeZoneIdentifier
+  function FormatOffsetTimeZoneIdentifier(offsetMinutes) {
+    const sign = offsetMinutes >= 0 ? '+' : '-';
+    const absolute = $abs(offsetMinutes);
+    const pad = (v) => (v < 10 ? '0' : '') + v;
+    return sign + pad($floor(absolute / 60)) + ':' + pad(absolute % 60);
+  }
+
+  // CreateDateTimeFormat
+  function CreateDateTimeFormat(newTarget, locales, options, required, defaults) {
+    let proto = newTarget.prototype;
+    if (!isObject(proto)) proto = DateTimeFormatPrototype;
+    const dtf = $create(proto);
+    // ResolveOptions, with ca, nu, hour12 and hc.
+    const requested = CanonicalizeLocaleList(locales);
+    options = CoerceOptionsToObject(options);
+    GetOption(options, 'localeMatcher', 'string', ['lookup', 'best fit'], 'best fit');
+    const resolution = (property, type, values) => {
+      let value = GetOption(options, property, type, values, undefined);
+      if (value === undefined) return undefined;
+      value = $String(value);
+      if (!isUnicodeType(value)) throw new $RangeError('Invalid ' + property + ': ' + value);
+      return value;
+    };
+    const ca = resolution('calendar', 'string', undefined);
+    const nu = resolution('numberingSystem', 'string', undefined);
+    const hour12 = resolution('hour12', 'boolean', undefined);
+    let hcOption = resolution('hourCycle', 'string', ['h11', 'h12', 'h23', 'h24']);
+    if (hour12 !== undefined) hcOption = NULL_HC;
+    const resolved = resolveDateTimeFormat(requested,
+      ca === undefined ? undefined : asciiCase(ca, false),
+      nu === undefined ? undefined : asciiCase(nu, false), hcOption);
+    const slots = $create(null);
+    slots.locale = resolved[0];
+    slots.dataLocale = resolved[1];
+    slots.calendar = resolved[2];
+    slots.numberingSystem = resolved[3];
+    let hc = resolved[4] === NULL_HC ? null : resolved[4];
+    if (hour12 === 'true') hc = resolved[6];
+    else if (hour12 === 'false') hc = resolved[7];
+    else if (hc === null) hc = resolved[5];
+    let timeZone = GetOption(options, 'timeZone', 'string', undefined, undefined);
+    if (timeZone === undefined) timeZone = systemTimeZone();
+    const offset = parseOffsetMinutes(timeZone);
+    if (offset !== undefined) {
+      timeZone = FormatOffsetTimeZoneIdentifier(offset);
+    } else {
+      const primary = primaryTimeZone(timeZone);
+      if (primary == null) throw new $RangeError('Invalid time zone: ' + timeZone);
+      timeZone = primary;
+    }
+    slots.timeZone = timeZone;
+    const formatOptions = $create(null);
+    let hasExplicitFormatComponents = false;
+    for (let i = 0; i < DATE_TIME_COMPONENTS.length; i++) {
+      const key = DATE_TIME_COMPONENTS[i][0];
+      const value = key === 'fractionalSecondDigits'
+        ? GetNumberOption(options, key, 1, 3, undefined)
+        : GetOption(options, key, 'string', DATE_TIME_COMPONENTS[i][1], undefined);
+      formatOptions[key] = value;
+      if (value !== undefined) hasExplicitFormatComponents = true;
+    }
+    GetOption(options, 'formatMatcher', 'string', ['basic', 'best fit'], 'best fit');
+    const dateStyle = GetOption(options, 'dateStyle', 'string', STYLES, undefined);
+    const timeStyle = GetOption(options, 'timeStyle', 'string', STYLES, undefined);
+    slots.dateStyle = dateStyle;
+    slots.timeStyle = timeStyle;
+    if (dateStyle !== undefined || timeStyle !== undefined) {
+      if (hasExplicitFormatComponents) {
+        throw new $TypeError('dateStyle and timeStyle cannot be used with date or time components');
+      }
+      if (required === 'date' && timeStyle !== undefined) {
+        throw new $TypeError('timeStyle cannot be used to format a date only');
+      }
+      if (required === 'time' && dateStyle !== undefined) {
+        throw new $TypeError('dateStyle cannot be used to format a time only');
+      }
+    } else {
+      let needDefaults = true;
+      const keys = [];
+      if (required === 'date' || required === 'any') {
+        call($push, keys, 'weekday', 'year', 'month', 'day');
+      }
+      if (required === 'time' || required === 'any') {
+        call($push, keys, 'dayPeriod', 'hour', 'minute', 'second', 'fractionalSecondDigits');
+      }
+      for (let i = 0; i < keys.length; i++) {
+        if (formatOptions[keys[i]] !== undefined) needDefaults = false;
+      }
+      if (needDefaults) {
+        if (defaults === 'date' || defaults === 'all') {
+          formatOptions.year = formatOptions.month = formatOptions.day = 'numeric';
+        }
+        if (defaults === 'time' || defaults === 'all') {
+          formatOptions.hour = formatOptions.minute = formatOptions.second = 'numeric';
+        }
+      }
+    }
+    slots.formatOptions = formatOptions;
+    slots.hourCycle = hc;
+    // [[DateTimeFormat]]: the pattern's fields; [[HourCycle]] only with an hour.
+    const fields = dateTimeFormatFields(slots);
+    const format = $create(null);
+    let hasHour = false;
+    for (let i = 0; i < fields.length; i++) {
+      if (fields[i][0] === 'hour') hasHour = true;
+      format[fields[i][0]] = fields[i][0] === 'fractionalSecondDigits'
+        ? $Number(fields[i][1]) : fields[i][1];
+    }
+    slots.format = format;
+    if (!hasHour) slots.hourCycle = undefined;
+    call($weakSet, dateTimeFormatSlots, dtf, slots);
+    return dtf;
+  }
+
+  function DateTimeFormat() {
+    const newTarget = new.target === undefined ? DateTimeFormat : new.target;
+    const dtf = CreateDateTimeFormat(newTarget, arguments[0], arguments[1], 'any', 'date');
+    // ChainDateTimeFormat
+    if (new.target === undefined && isInstanceOf(this, DateTimeFormatPrototype)) {
+      $defineProperty(this, FallbackSymbol, {
+        __proto__: null, value: dtf, writable: false, enumerable: false, configurable: false,
+      });
+      return this;
+    }
+    return dtf;
+  }
+  const DateTimeFormatPrototype = DateTimeFormat.prototype;
+  $defineProperty(DateTimeFormat, 'prototype', { writable: false });
+
+  // UnwrapDateTimeFormat, then RequireInternalSlot.
+  function dateTimeFormatOf(dtf, method) {
+    if (!isObject(dtf)) {
+      throw new $TypeError('Intl.DateTimeFormat.prototype.' + method + ' called on a non-object');
+    }
+    let slots = call($weakGet, dateTimeFormatSlots, dtf);
+    if (slots === undefined && isInstanceOf(dtf, DateTimeFormatPrototype)) {
+      const inner = dtf[FallbackSymbol];
+      slots = isObject(inner) ? call($weakGet, dateTimeFormatSlots, inner) : undefined;
+    }
+    if (slots === undefined) {
+      throw new $TypeError('Intl.DateTimeFormat.prototype.' + method +
+        ' called on an incompatible receiver');
+    }
+    return slots;
+  }
+
+  // FormatDateTime (a string) or FormatDateTimeToParts (an array of parts),
+  // after ToNumber of the date as the callers do it.
+  function FormatDateTimeParts(slots, x, asParts) {
+    // TimeClip
+    if (!$isFinite(x) || $abs(x) > 8.64e15) throw new $RangeError('Invalid time value');
+    x = $trunc(x) + 0;
+    const parts = dateTimeFormatParts(slots, x);
+    if (!asParts) {
+      let out = '';
+      for (let i = 0; i < parts.length; i++) out += parts[i][1];
+      return out;
+    }
+    const result = [];
+    for (let i = 0; i < parts.length; i++) {
+      const part = {};
+      define(part, 'type', parts[i][0], true, true);
+      define(part, 'value', parts[i][1], true, true);
+      define(result, $String(i), part, true, true);
+    }
+    return result;
+  }
+
+  function dateValue(date) {
+    return date === undefined ? $dateNow() : +date;
+  }
+
+  const dateTimeFormatMethods = {
+    supportedLocalesOf(locales) {
+      return SupportedLocales('DateTimeFormat', locales, arguments[1]);
+    },
+    get format() {
+      const slots = dateTimeFormatOf(this, 'format');
+      if (slots.boundFormat === undefined) {
+        const bound = { __proto__: null, f: (date) => FormatDateTimeParts(slots, dateValue(date), false) };
+        const format = bound.f;
+        $defineProperty(format, 'name', { value: '' });
+        slots.boundFormat = format;
+      }
+      return slots.boundFormat;
+    },
+    formatToParts(date) {
+      const slots = isObject(this) ? call($weakGet, dateTimeFormatSlots, this) : undefined;
+      if (slots === undefined) {
+        throw new $TypeError('Intl.DateTimeFormat.prototype.formatToParts called on an incompatible receiver');
+      }
+      return FormatDateTimeParts(slots, dateValue(date), true);
+    },
+    resolvedOptions() {
+      const s = dateTimeFormatOf(this, 'resolvedOptions');
+      const options = {};
+      const put = (key, value) => { if (value !== undefined) define(options, key, value, true, true); };
+      put('locale', s.locale);
+      put('calendar', s.calendar);
+      put('numberingSystem', s.numberingSystem);
+      put('timeZone', s.timeZone);
+      if (s.hourCycle !== undefined) {
+        put('hourCycle', s.hourCycle);
+        put('hour12', s.hourCycle === 'h11' || s.hourCycle === 'h12');
+      }
+      const styled = s.dateStyle !== undefined || s.timeStyle !== undefined;
+      for (let i = 0; i < DATE_TIME_COMPONENTS.length; i++) {
+        const key = DATE_TIME_COMPONENTS[i][0];
+        if (!styled) put(key, s.format[key]);
+      }
+      put('dateStyle', s.dateStyle);
+      put('timeStyle', s.timeStyle);
+      return options;
+    },
+  };
+  define(DateTimeFormat, 'supportedLocalesOf', dateTimeFormatMethods.supportedLocalesOf, false, true);
+  $defineProperty(DateTimeFormatPrototype, 'format', {
+    __proto__: null,
+    get: $Object.getOwnPropertyDescriptor(dateTimeFormatMethods, 'format').get,
+    set: undefined, enumerable: false, configurable: true,
+  });
+  define(DateTimeFormatPrototype, 'formatToParts', dateTimeFormatMethods.formatToParts, false, true);
+  define(DateTimeFormatPrototype, 'resolvedOptions', dateTimeFormatMethods.resolvedOptions, false, true);
+  $defineProperty(DateTimeFormatPrototype, $toStringTag, {
+    __proto__: null, value: 'Intl.DateTimeFormat', writable: false, enumerable: false, configurable: true,
+  });
+
   const Intl = {};
   $defineProperty(Intl, Symbol.toStringTag, {
     value: 'Intl', writable: false, enumerable: false, configurable: true,
@@ -656,6 +962,7 @@
     },
   };
   define(Intl, 'getCanonicalLocales', methods.getCanonicalLocales, false, true);
+  define(Intl, 'DateTimeFormat', DateTimeFormat, false, true);
   define(Intl, 'NumberFormat', NumberFormat, false, true);
   define(Intl, 'PluralRules', PluralRules, false, true);
   $defineProperty(globalThis, 'Intl', {

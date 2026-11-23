@@ -8,7 +8,7 @@ use std::sync::{Mutex, OnceLock};
 
 /// Locale services only: no plural data at all.
 const NO_PLURALS: &[u8] = include_bytes!("data/locale-services.postcard");
-/// 30 locales; no `sw`.
+/// 45 locales; no `sw`.
 const TEST_BLOB: &[u8] = include_bytes!("data/intl-test.postcard");
 
 fn reported() -> &'static Mutex<Vec<String>> {
