@@ -7,6 +7,8 @@ mod hilog;
 #[cfg(target_env = "ohos")]
 mod runtime;
 #[cfg(target_env = "ohos")]
+mod scope;
+#[cfg(target_env = "ohos")]
 mod value;
 
 #[cfg(target_env = "ohos")]

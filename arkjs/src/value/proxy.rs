@@ -4,6 +4,7 @@ use rong_core::engine::JSProxyOps;
 
 impl JSProxyOps for ArkJSValue {
     fn new_proxy(ctx: &Self::Context, target: Self, handler: Self) -> Result<Self, Self> {
+        let _scope = crate::scope::OpScope::enter(ctx.to_raw());
         unsafe {
             let env = ctx.to_raw();
             let mut proxy: arkjs::JSVM_Value = std::ptr::null_mut();
@@ -24,6 +25,7 @@ impl JSProxyOps for ArkJSValue {
     }
 
     fn proxy_target(&self) -> Result<Self, Self> {
+        let _scope = crate::scope::OpScope::enter(self.env);
         unsafe {
             let mut target: arkjs::JSVM_Value = std::ptr::null_mut();
             let status =

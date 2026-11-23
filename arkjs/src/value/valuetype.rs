@@ -3,11 +3,13 @@ use rong_core::JSTypeOf;
 
 impl JSTypeOf for ArkJSValue {
     fn is_exception(&self) -> bool {
+        let _scope = crate::scope::OpScope::enter(self.env);
         // Limitation: can not verify exception as ArkJSValue is from JS
         self._is_exception()
     }
 
     fn is_error(&self) -> bool {
+        let _scope = crate::scope::OpScope::enter(self.env);
         if self._is_err() {
             return true;
         }
@@ -21,6 +23,7 @@ impl JSTypeOf for ArkJSValue {
     }
 
     fn is_array(&self) -> bool {
+        let _scope = crate::scope::OpScope::enter(self.env);
         if !self.is_object() {
             return false;
         }
@@ -33,6 +36,7 @@ impl JSTypeOf for ArkJSValue {
     }
 
     fn is_array_buffer(&self) -> bool {
+        let _scope = crate::scope::OpScope::enter(self.env);
         if !self.is_object() {
             return false;
         }
@@ -45,6 +49,7 @@ impl JSTypeOf for ArkJSValue {
     }
 
     fn is_promise(&self) -> bool {
+        let _scope = crate::scope::OpScope::enter(self.env);
         if !self.is_object() {
             return false;
         }
@@ -58,6 +63,7 @@ impl JSTypeOf for ArkJSValue {
     }
 
     fn is_date(&self) -> bool {
+        let _scope = crate::scope::OpScope::enter(self.env);
         if !self.is_object() {
             return false;
         }
@@ -71,6 +77,7 @@ impl JSTypeOf for ArkJSValue {
     }
 
     fn is_undefined(&self) -> bool {
+        let _scope = crate::scope::OpScope::enter(self.env);
         let value = self.resolve_handle();
         unsafe {
             let mut value_type: arkjs::JSVM_ValueType = arkjs::JSVM_ValueType_JSVM_UNDEFINED;
@@ -81,6 +88,7 @@ impl JSTypeOf for ArkJSValue {
     }
 
     fn is_null(&self) -> bool {
+        let _scope = crate::scope::OpScope::enter(self.env);
         let value = self.resolve_handle();
         unsafe {
             let mut value_type: arkjs::JSVM_ValueType = arkjs::JSVM_ValueType_JSVM_NULL;
@@ -90,6 +98,7 @@ impl JSTypeOf for ArkJSValue {
     }
 
     fn is_boolean(&self) -> bool {
+        let _scope = crate::scope::OpScope::enter(self.env);
         let value = self.resolve_handle();
         unsafe {
             let mut value_type: arkjs::JSVM_ValueType = arkjs::JSVM_ValueType_JSVM_BOOLEAN;
@@ -99,6 +108,7 @@ impl JSTypeOf for ArkJSValue {
     }
 
     fn is_number(&self) -> bool {
+        let _scope = crate::scope::OpScope::enter(self.env);
         let value = self.resolve_handle();
         unsafe {
             let mut value_type: arkjs::JSVM_ValueType = arkjs::JSVM_ValueType_JSVM_NUMBER;
@@ -108,6 +118,7 @@ impl JSTypeOf for ArkJSValue {
     }
 
     fn is_bigint(&self) -> bool {
+        let _scope = crate::scope::OpScope::enter(self.env);
         let value = self.resolve_handle();
         unsafe {
             let mut value_type: arkjs::JSVM_ValueType = arkjs::JSVM_ValueType_JSVM_BIGINT;
@@ -117,6 +128,7 @@ impl JSTypeOf for ArkJSValue {
     }
 
     fn is_string(&self) -> bool {
+        let _scope = crate::scope::OpScope::enter(self.env);
         let value = self.resolve_handle();
         unsafe {
             let mut value_type: arkjs::JSVM_ValueType = arkjs::JSVM_ValueType_JSVM_STRING;
@@ -126,6 +138,7 @@ impl JSTypeOf for ArkJSValue {
     }
 
     fn is_symbol(&self) -> bool {
+        let _scope = crate::scope::OpScope::enter(self.env);
         let value = self.resolve_handle();
         unsafe {
             let mut value_type: arkjs::JSVM_ValueType = arkjs::JSVM_ValueType_JSVM_SYMBOL;
@@ -135,6 +148,7 @@ impl JSTypeOf for ArkJSValue {
     }
 
     fn is_function(&self) -> bool {
+        let _scope = crate::scope::OpScope::enter(self.env);
         let value = self.resolve_handle();
         unsafe {
             let mut value_type: arkjs::JSVM_ValueType = arkjs::JSVM_ValueType_JSVM_UNDEFINED;
@@ -145,6 +159,7 @@ impl JSTypeOf for ArkJSValue {
     }
 
     fn is_object(&self) -> bool {
+        let _scope = crate::scope::OpScope::enter(self.env);
         self._is_object()
             || unsafe {
                 let value = self.resolve_handle();
@@ -157,6 +172,7 @@ impl JSTypeOf for ArkJSValue {
     }
 
     fn is_constructor(&self) -> bool {
+        let _scope = crate::scope::OpScope::enter(self.env);
         if !self.is_object() {
             return false;
         }
@@ -170,6 +186,7 @@ impl JSTypeOf for ArkJSValue {
     }
 
     fn is_proxy(&self) -> bool {
+        let _scope = crate::scope::OpScope::enter(self.env);
         let value = self.resolve_handle();
         unsafe {
             let mut result = false;

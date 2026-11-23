@@ -4,6 +4,7 @@ use rong_core::{JSValueImpl, PropertyAttributes};
 
 impl JSObjectOps for ArkJSValue {
     fn new_object(ctx: &Self::Context) -> Self {
+        let _scope = crate::scope::OpScope::enter(ctx.to_raw());
         unsafe {
             let mut obj: arkjs::JSVM_Value = std::ptr::null_mut();
             let status = arkjs::OH_JSVM_CreateObject(ctx.to_raw(), &mut obj);
@@ -17,6 +18,7 @@ impl JSObjectOps for ArkJSValue {
 
     #[allow(clippy::not_unsafe_ptr_arg_deref)]
     fn make_instance(ctx: &Self::Context, constructor: Self, data: *mut ()) -> Self {
+        let _scope = crate::scope::OpScope::enter(ctx.to_raw());
         // For callable classes (RustFunc), create a native JS function instead of
         // a class instance. This ensures `this_arg` in the callback is the correct
         // JS receiver (not the callee).
@@ -88,6 +90,7 @@ impl JSObjectOps for ArkJSValue {
     }
 
     fn get_opaque(&self) -> *mut () {
+        let _scope = crate::scope::OpScope::enter(self.env);
         // For callable function instances, OH_JSVM_Unwrap doesn't work
         // (JSVM doesn't support wrapping function objects). Check the
         // side table first.
@@ -109,6 +112,7 @@ impl JSObjectOps for ArkJSValue {
     }
 
     fn del_property(&self, key: Self) -> Result<bool, Self> {
+        let _scope = crate::scope::OpScope::enter(self.env);
         unsafe {
             let obj = self.resolve_handle();
             let mut result = false;
@@ -125,6 +129,7 @@ impl JSObjectOps for ArkJSValue {
     }
 
     fn has_property(&self, key: Self) -> Result<bool, Self> {
+        let _scope = crate::scope::OpScope::enter(self.env);
         unsafe {
             let obj = self.resolve_handle();
             let mut has_property = false;
@@ -145,6 +150,7 @@ impl JSObjectOps for ArkJSValue {
     }
 
     fn set_property(&self, key: Self, value: Self) -> Result<(), Self> {
+        let _scope = crate::scope::OpScope::enter(self.env);
         let result = self.reflect_set(key.raw_value_for_api(), value.raw_value_for_api());
         if result._is_exception() {
             Err(result)
@@ -154,6 +160,7 @@ impl JSObjectOps for ArkJSValue {
     }
 
     fn set_prototype(&self, prototype: Self) -> bool {
+        let _scope = crate::scope::OpScope::enter(self.env);
         unsafe {
             let obj = self.resolve_handle();
             let status =
@@ -170,6 +177,7 @@ impl JSObjectOps for ArkJSValue {
         setter: Self,
         attributes: PropertyAttributes,
     ) -> Result<(), Self> {
+        let _scope = crate::scope::OpScope::enter(self.env);
         unsafe {
             let has_getter = attributes.has_get();
             let has_setter = attributes.has_set();
@@ -282,6 +290,7 @@ impl JSObjectOps for ArkJSValue {
     }
 
     fn get_property(&self, key: Self) -> Result<Option<Self>, Self> {
+        let _scope = crate::scope::OpScope::enter(self.env);
         unsafe {
             let obj = self.resolve_handle();
             let mut result: arkjs::JSVM_Value = std::ptr::null_mut();
@@ -301,6 +310,7 @@ impl JSObjectOps for ArkJSValue {
     }
 
     fn instance_of(&self, constructor: Self) -> bool {
+        let _scope = crate::scope::OpScope::enter(self.env);
         unsafe {
             let self_handle = self.resolve_handle();
             let ctor_handle = constructor.resolve_handle();
@@ -330,6 +340,7 @@ impl JSObjectOps for ArkJSValue {
     }
 
     fn get_own_property_names(&self) -> Result<Vec<Self>, Self> {
+        let _scope = crate::scope::OpScope::enter(self.env);
         unsafe {
             let obj = self.resolve_handle();
             let mut property_names: arkjs::JSVM_Value = std::ptr::null_mut();

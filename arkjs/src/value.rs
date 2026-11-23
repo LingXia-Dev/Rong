@@ -41,6 +41,7 @@ pub struct ArkJSValue {
 
 impl PartialEq for ArkJSValue {
     fn eq(&self, other: &Self) -> bool {
+        let _scope = crate::scope::OpScope::enter(self.env);
         unsafe {
             let lhs = self.resolve_handle();
             let rhs = other.resolve_handle();
@@ -289,6 +290,14 @@ impl JSValueImpl for ArkJSValue {
     type RawValue = arkjs::JSVM_Value;
     type Context = ArkJSContext;
 
+    fn in_handle_scope<R>(
+        ctx: <Self::Context as JSContextImpl>::RawContext,
+        f: impl FnOnce() -> R,
+    ) -> R {
+        let _scope = crate::scope::OpScope::enter(ctx);
+        f()
+    }
+
     fn from_borrowed_raw(
         ctx: <Self::Context as JSContextImpl>::RawContext,
         value: Self::RawValue,
@@ -328,6 +337,7 @@ impl JSValueImpl for ArkJSValue {
     }
 
     fn create_null(ctx: &Self::Context) -> Self {
+        let _scope = crate::scope::OpScope::enter(ctx.to_raw());
         let env = ctx.to_raw();
         unsafe {
             let mut null_value: arkjs::JSVM_Value = ptr::null_mut();
@@ -337,6 +347,7 @@ impl JSValueImpl for ArkJSValue {
     }
 
     fn create_undefined(ctx: &Self::Context) -> Self {
+        let _scope = crate::scope::OpScope::enter(ctx.to_raw());
         let env = ctx.to_raw();
         unsafe {
             let mut undefined_value: arkjs::JSVM_Value = ptr::null_mut();
@@ -346,6 +357,7 @@ impl JSValueImpl for ArkJSValue {
     }
 
     fn from_json_str(ctx: &Self::Context, str: &str) -> Self {
+        let _scope = crate::scope::OpScope::enter(ctx.to_raw());
         let env = ctx.to_raw();
         unsafe {
             let mut json_string: arkjs::JSVM_Value = ptr::null_mut();
@@ -380,6 +392,7 @@ impl JSValueImpl for ArkJSValue {
     }
 
     fn create_symbol(ctx: &Self::Context, description: &str) -> Self {
+        let _scope = crate::scope::OpScope::enter(ctx.to_raw());
         let env = ctx.to_raw();
         unsafe {
             // First create a string for the description
@@ -407,6 +420,7 @@ impl JSValueImpl for ArkJSValue {
     }
 
     fn create_date(ctx: &Self::Context, epoch_ms: f64) -> Self {
+        let _scope = crate::scope::OpScope::enter(ctx.to_raw());
         let env = ctx.to_raw();
         unsafe {
             let mut date_value: arkjs::JSVM_Value = ptr::null_mut();
@@ -422,6 +436,7 @@ impl JSValueImpl for ArkJSValue {
 
 impl Clone for ArkJSValue {
     fn clone(&self) -> Self {
+        let _scope = crate::scope::OpScope::enter(self.env);
         if self.primitive.is_some() {
             return ArkJSValue {
                 value: self.value,

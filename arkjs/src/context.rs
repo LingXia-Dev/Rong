@@ -166,6 +166,7 @@ impl JSContextImpl for ArkJSContext {
     }
 
     fn eval(&self, source: rong_core::Source) -> Self::Value {
+        let _scope = crate::scope::OpScope::enter(self.raw);
         let code = source.code();
         let resource_name = source.name().unwrap_or("eval");
         let resource_name = CString::new(resource_name).unwrap_or_else(|_| {
@@ -247,6 +248,7 @@ impl JSContextImpl for ArkJSContext {
     }
 
     fn global(&self) -> Self::Value {
+        let _scope = crate::scope::OpScope::enter(self.raw);
         unsafe {
             let mut global: arkjs::JSVM_Value = ptr::null_mut();
             let status = arkjs::OH_JSVM_GetGlobal(self.raw, &mut global);
@@ -263,10 +265,12 @@ impl JSContextImpl for ArkJSContext {
     where
         JC: JSClass<Self::Value>,
     {
+        let _scope = crate::scope::OpScope::enter(self.raw);
         crate::class::register_class_internal::<JC>(self, JC::NAME)
     }
 
     fn call(&self, function: &Self::Value, this: Self::Value, argv: &[Self::Value]) -> Self::Value {
+        let _scope = crate::scope::OpScope::enter(self.raw);
         unsafe {
             let mut result: arkjs::JSVM_Value = ptr::null_mut();
 
@@ -308,6 +312,7 @@ impl JSContextImpl for ArkJSContext {
     }
 
     fn promise(&self) -> (Self::Value, Self::Value, Self::Value) {
+        let _scope = crate::scope::OpScope::enter(self.raw);
         unsafe {
             let mut deferred: arkjs::JSVM_Deferred = ptr::null_mut();
             let mut promise: arkjs::JSVM_Value = ptr::null_mut();
@@ -336,6 +341,7 @@ impl JSContextImpl for ArkJSContext {
         on_fulfilled: &Self::Value,
         on_rejected: &Self::Value,
     ) -> PromiseHandlerRegistration {
+        let _scope = crate::scope::OpScope::enter(self.raw);
         unsafe {
             let promise_handle = promise.resolve_handle();
 
@@ -393,6 +399,7 @@ impl JSContextImpl for ArkJSContext {
     }
 
     fn compile_to_bytecode(&self, source: rong_core::Source) -> Result<Vec<u8>, RongJSError> {
+        let _scope = crate::scope::OpScope::enter(self.raw);
         let code = source.code();
 
         unsafe {
@@ -445,6 +452,7 @@ impl JSContextImpl for ArkJSContext {
     }
 
     fn run_bytecode(&self, bytes: &[u8]) -> Self::Value {
+        let _scope = crate::scope::OpScope::enter(self.raw);
         if bytes.len() < 4 {
             return ArkJSValue::create_undefined(self);
         }
@@ -525,6 +533,7 @@ impl Clone for ArkJSContext {
 
 impl JSErrorFactory for ArkJSContext {
     fn new_error(&self, name: &str, message: impl AsRef<str>, code: Option<&str>) -> Self::Value {
+        let _scope = crate::scope::OpScope::enter(self.raw);
         unsafe {
             // Clear any pending exception so JSVM API calls succeed
             // (e.g. consecutive throw_*() calls in tests).
@@ -668,6 +677,7 @@ impl JSErrorFactory for ArkJSContext {
 
 impl JSExceptionThrower for ArkJSContext {
     fn throw(&self, value: Self::Value) -> Self::Value {
+        let _scope = crate::scope::OpScope::enter(self.raw);
         unsafe {
             arkjs::OH_JSVM_Throw(self.raw, value.raw_value_for_api());
         }

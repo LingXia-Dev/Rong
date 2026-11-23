@@ -298,6 +298,7 @@ pub(crate) fn make_callable_instance(
     constructor: ArkJSValue,
     data: *mut (),
 ) -> ArkJSValue {
+    let _scope = crate::scope::OpScope::enter(ctx.to_raw());
     let Some(meta) = class_meta(&constructor) else {
         return ArkJSValue::create_undefined(ctx);
     };
@@ -437,6 +438,7 @@ pub(crate) fn register_class_internal<JC>(ctx: &ArkJSContext, class_name: &str) 
 where
     JC: JSClass<ArkJSValue>,
 {
+    let _scope = crate::scope::OpScope::enter(ctx.to_raw());
     unsafe {
         let class_name_cstr = CString::new(class_name).unwrap();
         let mut constructor: arkjs::JSVM_Value = ptr::null_mut();
@@ -570,6 +572,7 @@ fn class_id(constructor: &ArkJSValue) -> Option<u32> {
 
 /// The registration of the class `constructor` was registered as, if any.
 pub(crate) fn class_meta(constructor: &ArkJSValue) -> Option<ClassMeta> {
+    let _scope = crate::scope::OpScope::enter(*constructor.as_raw_context());
     let id = class_id(constructor)?;
     let env = *constructor.as_raw_context();
     CLASS.with(|map| {
@@ -598,6 +601,7 @@ pub(crate) fn class_meta(constructor: &ArkJSValue) -> Option<ClassMeta> {
 /// Retrieves native data for a callable function instance.
 /// Reads the `__rong_data` wrapper object property and calls OH_JSVM_Unwrap on it.
 pub(crate) fn get_callable_func_data(value: &ArkJSValue) -> *mut () {
+    let _scope = crate::scope::OpScope::enter(*value.as_raw_context());
     unsafe {
         let env = *value.as_raw_context();
         let Some(wrapper) = get_callable_wrapper(value) else {
@@ -640,6 +644,7 @@ fn get_callable_wrapper(value: &ArkJSValue) -> Option<arkjs::JSVM_Value> {
 }
 
 pub(crate) fn callable_instance_of(value: &ArkJSValue, meta: &ClassMeta) -> bool {
+    let _scope = crate::scope::OpScope::enter(*value.as_raw_context());
     let tag = meta.type_tag;
     let Some(wrapper) = get_callable_wrapper(value) else {
         return false;
