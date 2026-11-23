@@ -2,7 +2,7 @@
   ["new Intl.PluralRules('en').select(1)", "\"one\""],
   ["new Intl.PluralRules('en').select(0)", "\"other\""],
   ["new Intl.PluralRules('en').select(1.5)", "\"other\""],
-  ["new Intl.PluralRules('en').select(1n)", "\"one\""],
+  ["new Intl.PluralRules('en').select(1n)", "\"one\"", "engine: BigInt through ToIntlMathematicalValue is newer than system JavaScriptCore"],
   ["new Intl.PluralRules('en').select('1.0')", "\"one\""],
   ["new Intl.PluralRules('en', {minimumFractionDigits: 1}).select(1)", "\"other\""],
   ["new Intl.PluralRules('en', {maximumSignificantDigits: 1}).select(1.4)", "\"one\""],
