@@ -296,12 +296,29 @@ const LF_TABLE = [
   ["he", {type: 'unit', style: 'narrow'}, ["", "A", "A B", "A B C"]],
   ["he", {style: 'short'}, ["", "A", "A \u05d5-B", "A, B \u05d5-C"]],
 ];
+// CLDR 49 uses U+2011 (non-breaking hyphen) in Hebrew conjunction lists and
+// comma-only in Hebrew unit lists.
 for (const [locale, options, want] of LF_TABLE) {
-  test('sec-formatlist', locale + ' ' + JSON.stringify(options), () => {
+  const variants = [];
+  if (locale === 'he' && (options.type === undefined || options.type === 'conjunction')) {
+    variants.push([
+      { cldrAtLeast: 49 },
+      want.map((s) => s.replace(/\u05d5-/g, '\u05d5\u2011')),
+      'CLDR 49 uses U+2011 non-breaking hyphen in Hebrew conjunction lists',
+    ]);
+  }
+  if (locale === 'he' && options.type === 'unit' && options.style === undefined) {
+    variants.push([
+      { cldrAtLeast: 49 },
+      ['', 'A', 'A, B', 'A, B, C'],
+      'CLDR 49 uses comma-only in Hebrew long unit lists',
+    ]);
+  }
+  dataTest('sec-formatlist', locale + ' ' + JSON.stringify(options), want, variants, (expected) => {
     const lf = new LF(locale, options);
-    for (let i = 0; i < want.length; i++) {
-      assert.sameValue(lf.format(LF_LISTS[i]), want[i], JSON.stringify(LF_LISTS[i]));
-      assert.sameValue(joinParts(lf.formatToParts(LF_LISTS[i])), want[i], 'formatToParts');
+    for (let i = 0; i < expected.length; i++) {
+      assert.sameValue(lf.format(LF_LISTS[i]), expected[i], JSON.stringify(LF_LISTS[i]));
+      assert.sameValue(joinParts(lf.formatToParts(LF_LISTS[i])), expected[i], 'formatToParts');
     }
   });
 }
