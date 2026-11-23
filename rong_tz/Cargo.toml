@@ -1,0 +1,23 @@
+[package]
+name = "rong_tz"
+version = "0.8.0"
+edition.workspace = true
+
+description = "Time zone offsets and wall-clock conversion for RongJS, on the system tz database"
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
+keywords.workspace = true
+categories.workspace = true
+documentation = "https://docs.rs/rong_tz"
+readme = "README.md"
+
+[dependencies]
+# Default features: the system tz database on Unix, a bundled copy on Windows.
+jiff = "1.0"
+log = "0.4"
+
+# No system database is guaranteed there, so carry the bundled copy.
+[target.'cfg(any(target_os = "android", target_env = "ohos"))'.dependencies]
+jiff = { version = "1.0", features = ["tzdb-bundle-always"] }
