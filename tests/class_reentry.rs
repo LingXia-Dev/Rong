@@ -2,7 +2,7 @@
 //! calls a method on the same instance.
 
 use rong::JSEngineValue;
-use rong::function::ThisMut;
+use rong::function::{JSClassRef, ThisMut};
 use rong_macro::{js_class, js_method};
 use rong_test::*;
 
@@ -41,6 +41,7 @@ impl Emitter {
     }
 }
 
+#[js_class]
 struct ScopedEmitter {
     count: i32,
 }
