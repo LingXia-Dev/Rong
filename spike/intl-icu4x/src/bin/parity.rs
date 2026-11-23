@@ -256,19 +256,19 @@ fn bench() {
     use std::hint::black_box;
     use std::time::Instant;
     let loc: Locale = "he".parse().unwrap();
-    let time = |name: &str, n: u32, mut f: Box<dyn FnMut()>| {
+    fn time(name: &str, n: u32, mut f: impl FnMut()) {
         let t = Instant::now();
         for _ in 0..n {
             f();
         }
         println!("BENCH {name}: {} ns", t.elapsed().as_nanos() / n as u128);
-    };
+    }
     time(
         "construct DateTimeFormatter monthDayYearTime",
         2_000,
-        Box::new(|| {
+        || {
             black_box(format_date(&loc, "monthDayYearTime", [2026, 10, 22, 8, 5]).unwrap());
-        }),
+        },
     );
     let mut b = FieldSetBuilder::new();
     b.date_fields = Some(DateFields::YMD);
@@ -280,25 +280,17 @@ fn bench() {
         date: Date::try_new_iso(2026, 11, 22).unwrap(),
         time: Time::try_new(8, 5, 0, 0).unwrap(),
     };
-    time(
-        "format date+time",
-        200_000,
-        Box::new(|| {
-            black_box(f.format(black_box(&dt)).to_string());
-        }),
-    );
-    time(
-        "construct DecimalFormatter",
-        20_000,
-        Box::new(|| {
-            black_box(DecimalFormatter::try_new((&loc).into(), Default::default()).unwrap());
-        }),
-    );
+    time("format date+time", 200_000, || {
+        black_box(f.format(black_box(&dt)).to_string());
+    });
+    time("construct DecimalFormatter", 20_000, || {
+        black_box(DecimalFormatter::try_new((&loc).into(), Default::default()).unwrap());
+    });
     let df = DecimalFormatter::try_new((&loc).into(), Default::default()).unwrap();
     time(
         "format number 12345.678 (from f64, rounded)",
         200_000,
-        Box::new(|| {
+        || {
             let mut d =
                 Decimal::try_from_f64(black_box(12345.678), FloatPrecision::RoundTrip).unwrap();
             d.round_with_mode(
@@ -306,35 +298,23 @@ fn bench() {
                 SignedRoundingMode::Unsigned(UnsignedRoundingMode::HalfExpand),
             );
             black_box(df.format(&d).to_string());
-        }),
+        },
     );
-    time(
-        "construct PluralRules",
-        20_000,
-        Box::new(|| {
-            black_box(icu::plurals::PluralRules::try_new_cardinal((&loc).into()).unwrap());
-        }),
-    );
-    time(
-        "construct ListFormatter",
-        20_000,
-        Box::new(|| {
-            black_box(
-                ListFormatter::try_new_and((&loc).into(), ListFormatterOptions::default()).unwrap(),
-            );
-        }),
-    );
-    time(
-        "construct RelativeTimeFormatter",
-        20_000,
-        Box::new(|| {
-            black_box(
-                RelativeTimeFormatter::try_new_long_day(
-                    (&loc).into(),
-                    RelativeTimeFormatterOptions::default(),
-                )
-                .unwrap(),
-            );
-        }),
-    );
+    time("construct PluralRules", 20_000, || {
+        black_box(icu::plurals::PluralRules::try_new_cardinal((&loc).into()).unwrap());
+    });
+    time("construct ListFormatter", 20_000, || {
+        black_box(
+            ListFormatter::try_new_and((&loc).into(), ListFormatterOptions::default()).unwrap(),
+        );
+    });
+    time("construct RelativeTimeFormatter", 20_000, || {
+        black_box(
+            RelativeTimeFormatter::try_new_long_day(
+                (&loc).into(),
+                RelativeTimeFormatterOptions::default(),
+            )
+            .unwrap(),
+        );
+    });
 }
