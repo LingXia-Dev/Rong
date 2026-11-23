@@ -507,13 +507,16 @@ impl<C: JSContextImpl> JSContext<C> {
         let weak = Rc::downgrade(&ctx.rc);
 
         // save stale address to opaque
-        let opaque = ContextOpaque::<C::Value>::new(weak);
+        let serial = NEXT_CONTEXT_SERIAL.fetch_add(1, Ordering::Relaxed);
+        let opaque = ContextOpaque::<C::Value>::new(weak, serial);
         let raw_ctx = ctx.rc.inner.as_raw();
         let key = C::context_id(raw_ctx);
-        CTX_OPAQUE
-            .write()
-            .unwrap()
-            .insert(key, Box::into_raw(opaque) as usize);
+        let entry = OpaqueEntry {
+            opaque: Box::into_raw(opaque) as usize,
+            serial,
+            runtime: runtime_identity(runtime),
+        };
+        CTX_OPAQUE.write().unwrap().insert(key, entry);
 
         // Before any script can run in the context.
         let reader = thrown_text::ThrownReader::capture(&ctx);
@@ -716,15 +719,17 @@ impl<C: JSContextImpl> JSContext<C> {
             panic!("[JSContext] opaque is empty");
         }
 
-        let context_id = C::context_id(self.as_ref().as_raw());
-
         #[cfg(debug_assertions)]
-        tracing::debug!(target: "rong", context_id, "capturing thrown JS value");
+        {
+            let context_id = C::context_id(self.as_ref().as_raw());
+            tracing::debug!(target: "rong", context_id, "capturing thrown JS value");
+        }
 
+        let serial = unsafe { (*data).serial };
         let mut store = unsafe { (*data).thrown.try_borrow_mut() }
             .expect("[JSContext] Fatal: ThrownValueStore already borrowed. Recursive error handling detected.");
 
-        store.insert(context_id, value.into_value())
+        store.insert(serial, value.into_value())
     }
 
     /// The text of a thrown value, read without running script: `name: message`
@@ -741,30 +746,54 @@ impl<C: JSContextImpl> JSContext<C> {
         reader.as_ref()?.describe(self, value)
     }
 
+    /// The thrown value behind `handle`, which may have been captured in any
+    /// context of this context's runtime.
     pub(crate) fn resolve_thrown(&self, handle: ThrownValueHandle) -> Option<JSValue<C::Value>> {
-        let data = self.get_opaque();
+        let data = self.thrown_owner(handle);
         if data.is_null() {
             return None;
         }
 
-        let context_id = C::context_id(self.as_ref().as_raw());
+        let serial = unsafe { (*data).serial };
         let store = unsafe { (*data).thrown.try_borrow().ok()? };
         store
-            .get(context_id, handle)
+            .get(serial, handle)
             .map(|v| JSValue::from_raw(self, v))
     }
 
+    /// Removes and returns the thrown value behind `handle`, which may have
+    /// been captured in any context of this context's runtime.
     pub(crate) fn take_thrown(&self, handle: ThrownValueHandle) -> Option<JSValue<C::Value>> {
-        let data = self.get_opaque();
+        let data = self.thrown_owner(handle);
         if data.is_null() {
             return None;
         }
 
-        let context_id = C::context_id(self.as_ref().as_raw());
+        let serial = unsafe { (*data).serial };
         let mut store = unsafe { (*data).thrown.try_borrow_mut().ok()? };
         store
-            .take(context_id, handle)
+            .take(serial, handle)
             .map(|v| JSValue::from_raw(self, v))
+    }
+
+    /// The data of the context that captured `handle`, if it is still open and
+    /// shares this context's runtime; null otherwise. Values are usable in any
+    /// context of the runtime that made them. Another runtime's context may
+    /// live on another thread, so its data is never touched.
+    fn thrown_owner(&self, handle: ThrownValueHandle) -> *mut ContextOpaque<C::Value> {
+        let own = self.get_opaque();
+        if !own.is_null() && unsafe { (*own).serial } == handle.serial {
+            return own;
+        }
+        let runtime = runtime_identity(self.runtime());
+        CTX_OPAQUE
+            .read()
+            .unwrap()
+            .values()
+            .find(|entry| entry.serial == handle.serial && entry.runtime == runtime)
+            .map_or(std::ptr::null_mut(), |entry| {
+                entry.opaque as *mut ContextOpaque<C::Value>
+            })
     }
 
     /// Runs `f` and frees, when it returns, the engine handles made inside it;
@@ -1035,8 +1064,8 @@ impl<C: JSContextImpl> JSContext<C> {
 
     fn _get_opaque(raw_ctx: &C::RawContext) -> *mut ContextOpaque<C::Value> {
         let key = C::context_id(raw_ctx);
-        if let Some(opaque_ptr) = CTX_OPAQUE.read().unwrap().get(&key) {
-            *opaque_ptr as *mut ContextOpaque<C::Value>
+        if let Some(entry) = CTX_OPAQUE.read().unwrap().get(&key) {
+            entry.opaque as *mut ContextOpaque<C::Value>
         } else {
             std::ptr::null_mut()
         }
@@ -1056,18 +1085,20 @@ struct ContextOpaque<V: JSValueImpl> {
     reflect_construct: RefCell<Option<V>>,
     ctx_inner: Weak<JSContextInner<V::Context>>,
     thrown: RefCell<ThrownValueStore<V>>,
+    serial: u64,
     /// `None` until the context is set up, and if its built-ins are missing.
     thrown_reader: RefCell<Option<thrown_text::ThrownReader<V>>>,
 }
 
 impl<V: JSValueImpl> ContextOpaque<V> {
-    fn new(ctx_inner: Weak<JSContextInner<V::Context>>) -> Box<Self> {
+    fn new(ctx_inner: Weak<JSContextInner<V::Context>>, serial: u64) -> Box<Self> {
         Box::new(Self {
             registry: RefCell::new(HashMap::new()),
             error_classes: RefCell::new(HashMap::new()),
             reflect_construct: RefCell::new(None),
             ctx_inner,
             thrown: RefCell::new(ThrownValueStore::new()),
+            serial,
             thrown_reader: RefCell::new(None),
         })
     }
@@ -1076,8 +1107,25 @@ impl<V: JSValueImpl> ContextOpaque<V> {
 // Global HashMap to store ContextOpaque<V>
 // Like JavaScriptCore engine, it does not provide API to save opaque on JS Context,
 // that's why we introduce general solution CTX_OPAQUE
-static CTX_OPAQUE: LazyLock<RwLock<HashMap<usize, usize>>> =
+static CTX_OPAQUE: LazyLock<RwLock<HashMap<usize, OpaqueEntry>>> =
     LazyLock::new(|| RwLock::new(HashMap::new()));
+
+static NEXT_CONTEXT_SERIAL: AtomicU64 = AtomicU64::new(1);
+
+#[derive(Clone, Copy)]
+struct OpaqueEntry {
+    /// `*mut ContextOpaque<V>`, owned by the context's thread.
+    opaque: usize,
+    serial: u64,
+    /// See [`runtime_identity`].
+    runtime: usize,
+}
+
+/// Unique among live runtimes: a context keeps its runtime alive, so no two
+/// open contexts of different runtimes share it.
+fn runtime_identity<R: JSRuntimeImpl>(runtime: &JSRuntime<R>) -> usize {
+    Rc::as_ptr(&runtime.inner) as *const () as usize
+}
 
 impl<C> JSContext<C>
 where
@@ -1185,7 +1233,7 @@ impl<C: JSContextImpl> Drop for JSContext<C> {
                 .write()
                 .unwrap()
                 .remove(&key)
-                .map(|ptr| ptr as *mut ContextOpaque<C::Value>)
+                .map(|entry| entry.opaque as *mut ContextOpaque<C::Value>)
                 .unwrap_or(std::ptr::null_mut());
 
             if !data.is_null() {

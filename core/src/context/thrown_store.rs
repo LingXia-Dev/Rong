@@ -4,7 +4,8 @@ use crate::JSValueImpl;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) struct ThrownValueHandle {
-    pub(crate) context_id: usize,
+    /// The capturing context's serial, never reused, unlike its address.
+    pub(crate) serial: u64,
     pub(crate) id: u32,
     pub(crate) generation: u32,
 }
@@ -29,13 +30,13 @@ impl<V: JSValueImpl> ThrownValueStore<V> {
         }
     }
 
-    pub(crate) fn insert(&mut self, context_id: usize, value: V) -> ThrownValueHandle {
+    pub(crate) fn insert(&mut self, serial: u64, value: V) -> ThrownValueHandle {
         if let Some(id) = self.free.pop() {
             let slot = &mut self.slots[id];
             slot.generation = slot.generation.wrapping_add(1).max(1);
             slot.value = Some(value);
             return ThrownValueHandle {
-                context_id,
+                serial,
                 id: id as u32,
                 generation: slot.generation,
             };
@@ -47,14 +48,14 @@ impl<V: JSValueImpl> ThrownValueStore<V> {
             value: Some(value),
         });
         ThrownValueHandle {
-            context_id,
+            serial,
             id: id as u32,
             generation: 1,
         }
     }
 
-    pub(crate) fn get(&self, context_id: usize, handle: ThrownValueHandle) -> Option<V> {
-        if handle.context_id != context_id {
+    pub(crate) fn get(&self, serial: u64, handle: ThrownValueHandle) -> Option<V> {
+        if handle.serial != serial {
             return None;
         }
 
@@ -66,8 +67,8 @@ impl<V: JSValueImpl> ThrownValueStore<V> {
         slot.value.clone()
     }
 
-    pub(crate) fn take(&mut self, context_id: usize, handle: ThrownValueHandle) -> Option<V> {
-        if handle.context_id != context_id {
+    pub(crate) fn take(&mut self, serial: u64, handle: ThrownValueHandle) -> Option<V> {
+        if handle.serial != serial {
             return None;
         }
 
