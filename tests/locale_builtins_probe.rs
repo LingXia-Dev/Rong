@@ -27,6 +27,8 @@ const PROBE: &str = r#"
   item('Intl.supportedValuesOf("timeZone").length', () => Intl.supportedValuesOf('timeZone').length);
   item('Intl.DateTimeFormat().resolvedOptions().locale', () => Intl.DateTimeFormat().resolvedOptions().locale);
   item('Intl.DateTimeFormat().resolvedOptions().timeZone', () => Intl.DateTimeFormat().resolvedOptions().timeZone);
+  item('Intl.DateTimeFormat().resolvedOptions()', () => JSON.stringify(Intl.DateTimeFormat().resolvedOptions()));
+  item('Intl.NumberFormat().resolvedOptions()', () => JSON.stringify(Intl.NumberFormat().resolvedOptions()));
   item('new Date().getTimezoneOffset()', () => new Date().getTimezoneOffset());
   item('new Date(0).toString()', () => new Date(0).toString());
   item("new Date(0).toLocaleString('he-IL')", () => new Date(0).toLocaleString('he-IL'));
@@ -58,6 +60,89 @@ fn host_zone() -> String {
     format!("TZ={tz}; /etc/localtime -> {link}")
 }
 
+/// ICU's own versions, from whichever ICU the process has loaded: JavaScript
+/// exposes none of them. ICU may export its C API under plain names or with
+/// a `_<major>` suffix; a statically linked ICU with hidden symbols is not
+/// found.
+fn icu_versions() -> String {
+    type Version = [u8; 4];
+    let text = |v: Version| format!("{}.{}.{}.{}", v[0], v[1], v[2], v[3]);
+    let names = |base: &str| {
+        let mut names = vec![base.to_string()];
+        names.extend((50..100).map(|major| format!("{base}_{major}")));
+        names
+    };
+    let mut found = Vec::new();
+    for (label, base, takes_status) in [
+        ("ICU", "u_getVersion", false),
+        ("Unicode", "u_getUnicodeVersion", false),
+        ("CLDR", "ulocdata_getCLDRVersion", true),
+    ] {
+        let symbol = names(base)
+            .into_iter()
+            .find_map(|name| lookup(&name).map(|p| (name, p)));
+        let Some((name, ptr)) = symbol else {
+            found.push(format!("{label} not found"));
+            continue;
+        };
+        let mut v: Version = [0; 4];
+        unsafe {
+            if takes_status {
+                let f: extern "C" fn(*mut u8, *mut i32) = std::mem::transmute(ptr);
+                let mut status = 0i32;
+                f(v.as_mut_ptr(), &mut status);
+            } else {
+                let f: extern "C" fn(*mut u8) = std::mem::transmute(ptr);
+                f(v.as_mut_ptr());
+            }
+        }
+        found.push(format!("{label} {} ({name})", text(v)));
+    }
+    found.join("; ")
+}
+
+#[cfg(unix)]
+fn lookup(name: &str) -> Option<*mut std::ffi::c_void> {
+    unsafe extern "C" {
+        fn dlsym(
+            handle: *mut std::ffi::c_void,
+            symbol: *const std::ffi::c_char,
+        ) -> *mut std::ffi::c_void;
+    }
+    // RTLD_DEFAULT: every object loaded into the process.
+    #[cfg(target_vendor = "apple")]
+    let handle = -2isize as *mut std::ffi::c_void;
+    #[cfg(not(target_vendor = "apple"))]
+    let handle = std::ptr::null_mut();
+    let name = std::ffi::CString::new(name).ok()?;
+    let p = unsafe { dlsym(handle, name.as_ptr()) };
+    (!p.is_null()).then_some(p)
+}
+
+#[cfg(windows)]
+fn lookup(name: &str) -> Option<*mut std::ffi::c_void> {
+    #[link(name = "kernel32")]
+    unsafe extern "system" {
+        fn GetModuleHandleA(name: *const std::ffi::c_char) -> *mut std::ffi::c_void;
+        fn GetProcAddress(
+            module: *mut std::ffi::c_void,
+            name: *const std::ffi::c_char,
+        ) -> *mut std::ffi::c_void;
+    }
+    let symbol = std::ffi::CString::new(name).ok()?;
+    let mut modules = vec!["icu.dll".to_string(), "icuuc.dll".to_string()];
+    modules.extend((50..100).map(|major| format!("icuuc{major}.dll")));
+    modules.into_iter().find_map(|m| {
+        let m = std::ffi::CString::new(m).ok()?;
+        let handle = unsafe { GetModuleHandleA(m.as_ptr()) };
+        if handle.is_null() {
+            return None;
+        }
+        let p = unsafe { GetProcAddress(handle, symbol.as_ptr()) };
+        (!p.is_null()).then_some(p)
+    })
+}
+
 #[test]
 fn locale_builtins() -> Result<(), String> {
     let rt = RongJS::runtime();
@@ -66,7 +151,10 @@ fn locale_builtins() -> Result<(), String> {
     let lines: String = ctx
         .eval(Source::from_bytes(PROBE))
         .map_err(|e| e.to_string())?;
-    let mut report = vec![format!("host zone | {}", host_zone())];
+    let mut report = vec![
+        format!("host zone | {}", host_zone()),
+        format!("ICU loaded in process | {}", icu_versions()),
+    ];
     report.extend(lines.lines().map(str::to_string));
     for line in &report {
         let line = format!("[locale_probe] {engine} | {line}");
