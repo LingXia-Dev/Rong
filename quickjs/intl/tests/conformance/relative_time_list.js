@@ -162,13 +162,18 @@ const RTF_TABLE = [
   ["he", {style: 'short'}, ["\u05dc\u05e4\u05e0\u05d9 \u05d9\u05d5\u05dd \u05d0\u05d7\u05d3 (1)", "\u05d1\u05e2\u05d5\u05d3 0 \u05d9\u05de\u05d9\u05dd", "\u05d1\u05e2\u05d5\u05d3 \u05d9\u05d5\u05dd \u05d0\u05d7\u05d3 (1)", "\u05d1\u05e2\u05d5\u05d3 \u05d9\u05d5\u05de\u05d9\u05d9\u05dd (2)", "\u05dc\u05e4\u05e0\u05d9 3 \u05e9\u05e2\u05f3", "\u05d1\u05e2\u05d5\u05d3 5 \u05e9\u05e0\u05d9\u05dd", "\u05dc\u05e4\u05e0\u05d9 0 \u05e9\u05e0\u05f3", "\u05d1\u05e2\u05d5\u05d3 1.5 \u05e9\u05d1\u05f3", "\u05dc\u05e4\u05e0\u05d9 \u05e8\u05d1\u05e2\u05f3 \u05d0\u05d7\u05d3 (1)", "\u05d1\u05e2\u05d5\u05d3 21 \u05d7\u05d5\u05d3\u05e9\u05d9\u05dd"]],
   ["he", {style: 'narrow', numeric: 'auto'}, ["\u05d0\u05ea\u05de\u05d5\u05dc", "\u05d4\u05d9\u05d5\u05dd", "\u05de\u05d7\u05e8", "\u05de\u05d7\u05e8\u05ea\u05d9\u05d9\u05dd", "\u05dc\u05e4\u05e0\u05d9 3 \u05e9\u05e2\u05f3", "\u05d1\u05e2\u05d5\u05d3 5 \u05e9\u05e0\u05d9\u05dd", "\u05e2\u05db\u05e9\u05d9\u05d5", "\u05d1\u05e2\u05d5\u05d3 1.5 \u05e9\u05d1\u05f3", "\u05d4\u05e8\u05d1\u05e2\u05d5\u05df \u05d4\u05e7\u05d5\u05d3\u05dd", "\u05d1\u05e2\u05d5\u05d3 21 \u05d7\u05d5\u05f3"]],
 ];
+// CLDR 46 made latn the default for ar and updated he's relative day wording.
+const RTF_CLDR46 = { ar: true, he: true };
 for (const [locale, options, want] of RTF_TABLE) {
-  test('sec-PartitionRelativeTimePattern', locale + ' ' + JSON.stringify(options), () => {
+  const variants = RTF_CLDR46[locale]
+    ? [[{ cldrBelow: 46 }, SKIP_DATA, 'the ' + locale + ' row holds CLDR 46+ data']]
+    : [];
+  dataTest('sec-PartitionRelativeTimePattern', locale + ' ' + JSON.stringify(options), want, variants, (expected) => {
     const rtf = new RTF(locale, options);
-    for (let i = 0; i < want.length; i++) {
+    for (let i = 0; i < expected.length; i++) {
       const [v, u] = RTF_CASES[i];
-      assert.sameValue(rtf.format(v, u), want[i], v + ' ' + u);
-      assert.sameValue(joinParts(rtf.formatToParts(v, u)), want[i], 'formatToParts');
+      assert.sameValue(rtf.format(v, u), expected[i], v + ' ' + u);
+      assert.sameValue(joinParts(rtf.formatToParts(v, u)), expected[i], 'formatToParts');
     }
   });
 }
