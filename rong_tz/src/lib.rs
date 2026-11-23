@@ -31,7 +31,7 @@ use jiff::Timestamp;
 use jiff::civil::DateTime;
 use jiff::tz::{Offset, TimeZone, TimeZoneDatabase};
 use std::path::PathBuf;
-use std::sync::{OnceLock, RwLock};
+use std::sync::{Mutex, OnceLock};
 
 /// Where the tz database comes from.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -84,8 +84,23 @@ struct Database {
     source: String,
 }
 
-static CONFIGURED: RwLock<Option<Source>> = RwLock::new(None);
-static DATABASE: OnceLock<Database> = OnceLock::new();
+/// What `configure` and the first lookup agree on, under one lock.
+enum State {
+    Unset,
+    Set(Source),
+    /// The first lookup has chosen; nothing changes after this.
+    InUse,
+}
+
+/// The process's choice of database. A type rather than bare statics so tests
+/// can make their own with a slow opener.
+struct Registry {
+    state: Mutex<State>,
+    database: OnceLock<Database>,
+    open: fn(Source, &mut Vec<String>) -> Database,
+}
+
+static REGISTRY: Registry = Registry::new(open_source);
 type Reporter = Box<dyn Fn(&str) + Send + Sync>;
 static REPORTER: OnceLock<Reporter> = OnceLock::new();
 
@@ -113,15 +128,56 @@ impl std::error::Error for ConfigureError {}
 /// any kind (including [`source`]); a second call, or a call after a lookup,
 /// returns an error and changes nothing.
 pub fn configure(source: Source) -> Result<(), ConfigureError> {
-    let mut configured = CONFIGURED.write().unwrap_or_else(|e| e.into_inner());
-    if DATABASE.get().is_some() {
-        return Err(ConfigureError::AlreadyInUse);
+    REGISTRY.configure(source)
+}
+
+impl Registry {
+    const fn new(open: fn(Source, &mut Vec<String>) -> Database) -> Self {
+        Self {
+            state: Mutex::new(State::Unset),
+            database: OnceLock::new(),
+            open,
+        }
     }
-    if configured.is_some() {
-        return Err(ConfigureError::AlreadyConfigured);
+
+    fn state(&self) -> std::sync::MutexGuard<'_, State> {
+        self.state.lock().unwrap_or_else(|e| e.into_inner())
     }
-    *configured = Some(source);
-    Ok(())
+
+    fn configure(&self, source: Source) -> Result<(), ConfigureError> {
+        let mut state = self.state();
+        match *state {
+            State::InUse => Err(ConfigureError::AlreadyInUse),
+            State::Set(_) => Err(ConfigureError::AlreadyConfigured),
+            State::Unset => {
+                *state = State::Set(source);
+                Ok(())
+            }
+        }
+    }
+
+    /// The first call opens the database while holding the state lock and
+    /// marks it in use, so a concurrent `configure` either lands before the
+    /// choice or gets `AlreadyInUse`, never silently ignored.
+    fn database(&self) -> &Database {
+        let mut line = None;
+        let database = self.database.get_or_init(|| {
+            let mut state = self.state();
+            let chosen = match std::mem::replace(&mut *state, State::InUse) {
+                State::Set(source) => source,
+                State::Unset | State::InUse => Source::System,
+            };
+            let mut skipped = Vec::new();
+            let database = (self.open)(chosen, &mut skipped);
+            line = Some(report_line(&database, &skipped));
+            database
+        });
+        // Outside the init, so a reporter that calls back in cannot deadlock.
+        if let Some(line) = line {
+            report(&line);
+        }
+        database
+    }
 }
 
 /// Sets where rong_tz's one report (which database it chose) goes, such as
@@ -144,28 +200,16 @@ pub fn source() -> &'static str {
 }
 
 fn database() -> &'static Database {
-    let mut line = None;
-    let database = DATABASE.get_or_init(|| {
-        let chosen = CONFIGURED
-            .read()
-            .map(|c| c.clone())
-            .unwrap_or_default()
-            .unwrap_or(Source::System);
-        let mut skipped = Vec::new();
-        let found = match chosen {
-            Source::System => system_database(SYSTEM_FIRST, &mut skipped),
-            Source::Path(path) => open_path(&path),
-            Source::Bundled => None,
-        };
-        let database = found.unwrap_or_else(bundled_or_none);
-        line = Some(report_line(&database, &skipped));
-        database
-    });
-    // Outside the init, so a reporter that calls back in cannot deadlock.
-    if let Some(line) = line {
-        report(&line);
-    }
-    database
+    REGISTRY.database()
+}
+
+fn open_source(source: Source, skipped: &mut Vec<String>) -> Database {
+    let found = match source {
+        Source::System => system_database(SYSTEM_FIRST, skipped),
+        Source::Path(path) => open_path(&path),
+        Source::Bundled => None,
+    };
+    found.unwrap_or_else(bundled_or_none)
 }
 
 fn report_line(database: &Database, skipped: &[String]) -> String {
