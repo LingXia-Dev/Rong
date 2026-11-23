@@ -146,9 +146,14 @@ fn a_thrown_value_outlives_the_call_that_threw_it() -> Result<(), String> {
     Ok(())
 }
 
+/// The next step of the chain and the context it belongs to.
+type Next = Rc<RefCell<Option<(JSFunc, JSContext)>>>;
+
 /// One level of the chain: a native function that, from inside its own
 /// native call, drives a call of `next` and checks a value it made before.
-fn install_descend(ctx: &JSContext, next: Rc<RefCell<Option<JSFunc>>>) -> JSResult<()> {
+/// A value thrown in another context cannot be rethrown here (thrown values
+/// live in their context's table), so a failure below crosses as text.
+fn install_descend(ctx: &JSContext, next: Next) -> JSResult<()> {
     let own = ctx.clone();
     ctx.global().set(
         "descend",
@@ -157,11 +162,12 @@ fn install_descend(ctx: &JSContext, next: Rc<RefCell<Option<JSFunc>>>) -> JSResu
             before.set("n", n)?;
             before.set("label", format!("level {n}"))?;
             let inner = if n > 0 {
-                let next = next
+                let (next, next_ctx) = next
                     .borrow()
                     .clone()
                     .ok_or_else(|| failure("chain not set up".into()))?;
-                next.call::<_, String>(None, (n - 1,))?
+                next.call::<_, String>(None, (n - 1,))
+                    .map_err(|e| failure(format!("below level {n}: {}", describe(&next_ctx, &e))))?
             } else {
                 String::from("bottom")
             };
@@ -175,44 +181,64 @@ fn install_descend(ctx: &JSContext, next: Rc<RefCell<Option<JSFunc>>>) -> JSResu
     Ok(())
 }
 
-/// Rust drives `step` in context A; its JS calls A's native `descend`, which
-/// drives `step` in context B, and so on, alternating. Each context keeps
-/// its own operation depth while the other is mid-operation.
-#[test]
-fn reentrant_rust_driven_calls_across_contexts() -> Result<(), String> {
-    const DEPTH: i32 = 8;
-    let rt = RongJS::runtime();
-    let a = rt.context();
-    let b = rt.context();
-    let next_from_a: Rc<RefCell<Option<JSFunc>>> = Rc::default();
-    let next_from_b: Rc<RefCell<Option<JSFunc>>> = Rc::default();
-    let setup = |ctx: &JSContext, next: Rc<RefCell<Option<JSFunc>>>| -> JSResult<JSFunc> {
-        install_descend(ctx, next)?;
-        ctx.eval(Source::from_bytes(
-            "(n) => { const pad = 'p'.repeat(32); return 's' + n + ':' + descend(n) + pad.slice(32); }",
-        ))
-    };
-    let step_a = setup(&a, next_from_a.clone()).map_err(|e| describe(&a, &e))?;
-    let step_b = setup(&b, next_from_b.clone()).map_err(|e| describe(&b, &e))?;
-    *next_from_a.borrow_mut() = Some(step_b);
-    *next_from_b.borrow_mut() = Some(step_a.clone());
+fn install_step(ctx: &JSContext, next: Next) -> JSResult<JSFunc> {
+    install_descend(ctx, next)?;
+    ctx.eval(Source::from_bytes(
+        "(n) => { const pad = 'p'.repeat(32); return 's' + n + ':' + descend(n) + pad.slice(32); }",
+    ))
+}
 
+/// Drives `step(DEPTH)` 100 times and checks the whole chain's result.
+fn drive(ctx: &JSContext, step: &JSFunc) -> Result<(), String> {
+    const DEPTH: i32 = 8;
     let mut expected = String::from("bottom");
     for n in 0..=DEPTH {
         expected = format!("s{n}:d{n}({expected})");
     }
     for round in 0..100 {
-        let got: String = step_a
+        let got: String = step
             .call(None, (DEPTH,))
-            .map_err(|e| format!("round {round}: {}", describe(&a, &e)))?;
+            .map_err(|e| format!("round {round}: {}", describe(ctx, &e)))?;
         if got != expected {
             return Err(format!(
                 "round {round} returned {got:?}, expected {expected:?}"
             ));
         }
     }
+    Ok(())
+}
+
+/// Rust drives `step`; its JS calls the native `descend`, which drives `step`
+/// again from inside its native call, eight levels deep.
+#[test]
+fn reentrant_rust_driven_calls() -> Result<(), String> {
+    let rt = RongJS::runtime();
+    let ctx = rt.context();
+    let next: Next = Rc::default();
+    let step = install_step(&ctx, next.clone()).map_err(|e| describe(&ctx, &e))?;
+    *next.borrow_mut() = Some((step.clone(), ctx.clone()));
+    let result = drive(&ctx, &step);
+    next.borrow_mut().take();
+    result
+}
+
+/// The same chain alternating between two contexts: each level's call goes to
+/// the other context, so each keeps its own operation depth while the other
+/// is mid-operation.
+#[test]
+fn reentrant_rust_driven_calls_across_contexts() -> Result<(), String> {
+    let rt = RongJS::runtime();
+    let a = rt.context();
+    let b = rt.context();
+    let next_from_a: Next = Rc::default();
+    let next_from_b: Next = Rc::default();
+    let step_a = install_step(&a, next_from_a.clone()).map_err(|e| describe(&a, &e))?;
+    let step_b = install_step(&b, next_from_b.clone()).map_err(|e| describe(&b, &e))?;
+    *next_from_a.borrow_mut() = Some((step_b, b.clone()));
+    *next_from_b.borrow_mut() = Some((step_a.clone(), a.clone()));
+    let result = drive(&a, &step_a);
     // Break the cycle between the two contexts' functions.
     next_from_a.borrow_mut().take();
     next_from_b.borrow_mut().take();
-    Ok(())
+    result
 }
