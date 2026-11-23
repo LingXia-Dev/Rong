@@ -760,14 +760,16 @@ fn service_locales(data: &IntlData, service: &str) -> Vec<String> {
 
 /// The data a NumberFormat's options need: the locale format, compact
 /// patterns and the currency's or unit's affixes.
-fn number_format_data(
-    state: &IntlState,
-    options: &number_format::Options,
-) -> JSResult<(
+type NumberFormatData = (
     Rc<number_format::LocaleFormat>,
     Option<Rc<number_format::Compact>>,
     Option<Rc<number_format::Affixes>>,
-)> {
+);
+
+fn number_format_data(
+    state: &IntlState,
+    options: &number_format::Options,
+) -> JSResult<NumberFormatData> {
     let failed = |e: String| {
         report(&format!("rong_quickjs_intl: {e}"));
         bad(&e)
