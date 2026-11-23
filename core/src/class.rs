@@ -159,15 +159,17 @@ pub trait JSClassExt<V: JSValueImpl>: JSClass<V> {
             Err(e) => return e.throw_js_exception(ctx),
         };
 
-        let mut func = match obj.borrow_mut::<RustFunc<V>>() {
-            Ok(f) => f,
+        // Borrowed only to take the call out: the closure runs unborrowed, so
+        // it, or script it calls, can call this function again.
+        let invocation = match obj.borrow::<RustFunc<V>>() {
+            Ok(func) => func.invocation(&accessor),
             Err(_) => {
                 return RongJSError::from(HostError::not_function()).throw_js_exception(ctx);
             }
         };
 
         // ignore checking whether v is exception or error, sicne no one use it again here
-        match func.call(&mut accessor) {
+        match invocation.and_then(|invocation| invocation.run(&mut accessor)) {
             Ok(v) => v,
             Err(e) => e.throw_js_exception(ctx),
         }

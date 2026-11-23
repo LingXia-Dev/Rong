@@ -355,6 +355,14 @@ run_all_core_tests() {
         fi
     fi
 
+    # The examples in `rong::function` include the closures that must not compile.
+    log_info "Running rong doc tests ($engine)"
+    if run_cargo_test -p rong --no-default-features --features="$feature_set" --doc --quiet "${extra[@]}"; then
+        record_suite_result "rong doc tests on $engine" 0
+    else
+        record_suite_result "rong doc tests on $engine" 1 || true
+    fi
+
     log_info "Running rong_core unit tests ($engine)"
     if run_cargo_test -p rong_core --lib --quiet "${extra[@]}"; then
         record_suite_result "rong_core unit tests on $engine" 0
