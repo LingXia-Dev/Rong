@@ -196,12 +196,20 @@ const NF_STYLES = [
   ["es", {notation: 'engineering'}, ["-1,235E3", "0E0", "1E0", "2E0", "1,5E6"]],
 ];
 const NF_STYLE_VALUES = [-1234.5, 0, 1, 2, 1500000];
-// CLDR 46 made latn the default for ar and updated es's JPY currency name.
+// CLDR 46 made latn the default for ar and updated es's JPY currency name;
+// CLDR 49 uses US$ for pl USD symbol.
 for (const [locale, options, want] of NF_STYLES) {
-  const needsCldr46 = locale === 'ar' || (locale === 'es' && options.currencyDisplay === 'name');
-  const variants = needsCldr46
-    ? [[{ cldrBelow: 46 }, SKIP_DATA, 'the ' + locale + ' row holds CLDR 46+ data']]
-    : [];
+  const variants = [];
+  if (locale === 'ar' || (locale === 'es' && options.currencyDisplay === 'name')) {
+    variants.push([{ cldrBelow: 46 }, SKIP_DATA, 'the ' + locale + ' row holds CLDR 46+ data']);
+  }
+  if (locale === 'pl' && options.currency === 'USD' && options.currencySign === 'accounting') {
+    variants.push([
+      { cldrAtLeast: 49 },
+      ['(1234,50\u00a0US$)', '0,00\u00a0US$', '1,00\u00a0US$', '2,00\u00a0US$', '1\u00a0500\u00a0000,00\u00a0US$'],
+      'CLDR 49 uses US$ as pl USD symbol',
+    ]);
+  }
   dataTest('sec-formatnumber', locale + ' ' + JSON.stringify(options), want, variants, (expected) => {
     const nf = new NFS(locale, options);
     for (let i = 0; i < expected.length; i++) {

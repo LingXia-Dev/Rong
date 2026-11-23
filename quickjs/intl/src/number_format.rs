@@ -230,11 +230,15 @@ impl Affixes {
         };
         let category = operands.map_or(PluralCategory::Other, |o| rules.category_for(o));
         let unit = |text: &str| -> Vec<Piece> {
-            let (before, after) = text.split_once("{0}").unwrap_or((text, ""));
-            let mut pieces = unit_pieces(before);
-            pieces.push(Piece::Number);
-            pieces.extend(unit_pieces(after));
-            pieces
+            match text.split_once("{0}") {
+                Some((before, after)) => {
+                    let mut pieces = unit_pieces(before);
+                    pieces.push(Piece::Number);
+                    pieces.extend(unit_pieces(after));
+                    pieces
+                }
+                None => unit_pieces(text),
+            }
         };
         Some(match patterns {
             PluralPatterns::CurrencyName {
@@ -357,7 +361,7 @@ impl Compact {
         } else {
             significand.nonzero_magnitude_start()
         } + i16::from(exponent);
-        let operands = PluralOperands::from_significand_and_exponent(significand, exponent);
+        let operands = PluralOperands::from(significand);
         let mut prefix = String::new();
         let mut suffix = String::new();
         if let Some(t) = self
