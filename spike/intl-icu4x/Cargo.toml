@@ -17,13 +17,15 @@ required-features = ["parity"]
 [features]
 default = []
 # Links the first-cut components, reading data from a blob at run time.
-blob = ["dep:icu", "dep:icu_provider_blob"]
+blob = ["dep:icu", "dep:icu_provider_blob", "dep:icu_provider", "dep:icu_provider_adapters"]
 # Compiled-in data for every locale, for the parity run.
 parity = ["dep:icu", "icu/compiled_data", "dep:serde_json", "dep:fixed_decimal"]
 
 [dependencies]
 icu = { version = "=2.4.0", default-features = false, features = ["serde", "unstable"], optional = true }
 icu_provider_blob = { version = "=2.4.0", features = ["alloc"], optional = true }
+icu_provider = { version = "=2.4.0", features = ["serde"], optional = true }
+icu_provider_adapters = { version = "=2.4.0", optional = true }
 serde_json = { version = "1", optional = true }
 fixed_decimal = { version = "0.7", features = ["ryu"], optional = true }
 

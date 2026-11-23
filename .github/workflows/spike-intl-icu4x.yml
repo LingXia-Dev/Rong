@@ -87,7 +87,11 @@ jobs:
           for l in en zh-Hans he es ar ja; do gen "$l" "$l"; done
           gen en-he-es en he es
           gen modern modern
-          icu4x-datagen --markers-for-bin "$lib" --format blob --out blobs/markers.postcard --locales none -v 2>&1 | grep -iE "marker" | head -60 || true
+          # Where the bytes go: the same data as a file tree, summed per marker.
+          for l in none he; do
+            icu4x-datagen --markers-for-bin "$lib" --format fs --syntax postcard --out "tree-$l" --locales "$l" >/dev/null 2>&1 || echo "TREE $l failed"
+            for m in tree-$l/*/; do echo "MARKER $l $(du -sb "$m" | cut -f1) $(basename "$m")"; done | sort -k3 -n -r | head -40
+          done
       - name: Load a per-locale blob at run time
         working-directory: ${{ env.SPIKE }}
         run: |

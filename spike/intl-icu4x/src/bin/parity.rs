@@ -3,14 +3,14 @@
 //! bag to the nearest ICU4X field set; `2-digit` hours map to column
 //! alignment, the only padding ICU4X offers.
 
-use fixed_decimal::{Decimal, FloatPrecision, SignedRoundingMode};
+use fixed_decimal::{Decimal, FloatPrecision, SignedRoundingMode, UnsignedRoundingMode};
 use icu::calendar::Date;
 use icu::datetime::DateTimeFormatter;
 use icu::datetime::fieldsets::builder::{DateFields, FieldSetBuilder};
 use icu::datetime::options::{Alignment, Length, TimePrecision};
 use icu::decimal::DecimalFormatter;
 use icu::experimental::dimension::units::categorized_formatter::CategorizedFormatter;
-use icu::experimental::dimension::units::options::{UnitsFormatterOptions, Width};
+use icu::experimental::dimension::units::options::Width;
 use icu::experimental::measure::category::Duration;
 use icu::experimental::relativetime::{
     RelativeTimeFormatter, RelativeTimeFormatterOptions, options::Numeric,
@@ -67,7 +67,10 @@ fn format_date(loc: &Locale, shape: &str, at: [u32; 5]) -> Result<String, String
 fn number(loc: &Locale, value: f64, min: i16, max: i16) -> Result<String, String> {
     let mut d =
         Decimal::try_from_f64(value, FloatPrecision::RoundTrip).map_err(|e| format!("{e:?}"))?;
-    d.round_with_mode(-max, SignedRoundingMode::HalfExpand);
+    d.round_with_mode(
+        -max,
+        SignedRoundingMode::Unsigned(UnsignedRoundingMode::HalfExpand),
+    );
     d.absolute.trim_end();
     d.absolute.pad_end(-min);
     let f =
@@ -102,18 +105,16 @@ fn relative(
 }
 
 fn duration(loc: &Locale, value: i64, unit: &str) -> Result<String, String> {
-    let u = match unit {
-        "minute" => Duration::minute(),
-        "hour" => Duration::hour(),
-        "day" => Duration::day(),
+    let make = match unit {
+        "minute" => Duration::minute,
+        "hour" => Duration::hour,
+        "day" => Duration::day,
         _ => return Err(format!("unsupported unit {unit}")),
     };
-    let opts = UnitsFormatterOptions {
-        width: Width::Short,
-        ..Default::default()
-    };
-    let f = CategorizedFormatter::try_new_core(loc.into(), u.clone(), opts)
-        .or_else(|_| CategorizedFormatter::try_new_extended(loc.into(), u, opts))
+    let f = CategorizedFormatter::try_new_core(loc.into(), make(), Width::Short.into())
+        .or_else(|_| {
+            CategorizedFormatter::try_new_extended(loc.into(), make(), Width::Short.into())
+        })
         .map_err(|e| format!("{e:?}"))?;
     let d = Decimal::from(value);
     Ok(f.format_fixed_decimal(&d).to_string())

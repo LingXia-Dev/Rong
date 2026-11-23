@@ -19,62 +19,105 @@ mod probe {
     use icu::plurals::PluralRules;
     use icu::time::DateTime;
     use icu::time::Time;
+    use icu_provider::buf::AsDeserializingBufferProvider;
+    use icu_provider_adapters::fallback::LocaleFallbackProvider;
     use icu_provider_blob::BlobDataProvider;
 
     pub fn run(blob: &[u8], locale: &str) -> String {
         let mut out = String::new();
-        let Ok(p) = BlobDataProvider::try_new_from_blob(blob.to_vec().into_boxed_slice()) else {
-            return out;
+        let p = match BlobDataProvider::try_new_from_blob(blob.to_vec().into_boxed_slice()) {
+            Ok(p) => p,
+            Err(e) => return format!("blob {e:?}"),
         };
         let Ok(mut loc) = locale.parse::<Locale>() else {
             return out;
         };
-        let _ = LocaleFallbacker::try_new_with_buffer_provider(&p);
-        if let Ok(c) = LocaleCanonicalizer::try_new_extended_with_buffer_provider(&p) {
-            c.canonicalize(&mut loc);
-        }
-        if let Ok(e) = LocaleExpander::try_new_extended_with_buffer_provider(&p) {
-            e.maximize(&mut loc.id);
-        }
-        let prefs = (&loc).into();
+        let fallbacker = match LocaleFallbacker::try_new_unstable(&p.as_deserializing()) {
+            Ok(f) => f,
+            Err(e) => return format!("fallbacker {e:?}"),
+        };
+        let fp = LocaleFallbackProvider::new(p.as_deserializing(), fallbacker);
+        let mut note = |name: &str, r: Result<String, String>| {
+            let _ = match r {
+                Ok(text) => write!(out, "{text} | "),
+                Err(e) => write!(out, "{name} failed: {e} | "),
+            };
+        };
+        let err = |e: &dyn core::fmt::Debug| format!("{e:?}");
+        note(
+            "canonicalizer",
+            LocaleCanonicalizer::try_new_extended_unstable(&fp)
+                .map(|c| {
+                    c.canonicalize(&mut loc);
+                    loc.to_string()
+                })
+                .map_err(|e| err(&e)),
+        );
+        note(
+            "expander",
+            LocaleExpander::try_new_extended_unstable(&fp)
+                .map(|e| {
+                    let mut id = loc.id.clone();
+                    e.maximize(&mut id);
+                    id.to_string()
+                })
+                .map_err(|e| err(&e)),
+        );
         let mut b = FieldSetBuilder::new();
         b.date_fields = Some(DateFields::YMDE);
         b.length = Some(Length::Medium);
         b.time_precision = Some(TimePrecision::Minute);
-        if let Ok(fs) = b.build_composite_datetime()
-            && let Ok(f) = DateTimeFormatter::try_new_with_buffer_provider(&p, prefs, fs)
-            && let (Ok(date), Ok(time)) =
-                (Date::try_new_iso(2026, 11, 22), Time::try_new(8, 5, 0, 0))
-        {
-            let _ = write!(out, "{}", f.format(&DateTime { date, time }));
-        }
-        if let Ok(f) =
-            DecimalFormatter::try_new_with_buffer_provider(&p, (&loc).into(), Default::default())
-        {
-            let _ = write!(out, "|{}", f.format(&Decimal::from(12345)));
-        }
-        if let Ok(r) = PluralRules::try_new_cardinal_with_buffer_provider(&p, (&loc).into()) {
-            let _ = write!(out, "|{:?}", r.category_for(3u32));
-        }
-        if let Ok(r) = RelativeTimeFormatter::try_new_long_day_with_buffer_provider(
-            &p,
-            (&loc).into(),
-            RelativeTimeFormatterOptions::default(),
-        ) {
-            let _ = write!(out, "|{}", r.format(Decimal::from(-2)));
-        }
-        if let Ok(l) = ListFormatter::try_new_and_with_buffer_provider(
-            &p,
-            (&loc).into(),
-            ListFormatterOptions::default(),
-        ) {
-            let _ = write!(out, "|{}", l.format(["a", "b", "c"].into_iter()));
-        }
-        if let Ok(c) =
-            Collator::try_new_with_buffer_provider(&p, (&loc).into(), CollatorOptions::default())
-        {
-            let _ = write!(out, "|{:?}", c.as_borrowed().compare("ä", "z"));
-        }
+        note(
+            "datetime",
+            b.build_composite_datetime()
+                .map_err(|e| err(&e))
+                .and_then(|fs| {
+                    DateTimeFormatter::try_new_unstable(&fp, (&loc).into(), fs).map_err(|e| err(&e))
+                })
+                .map(|f| {
+                    let date = Date::try_new_iso(2026, 11, 22).unwrap();
+                    let time = Time::try_new(8, 5, 0, 0).unwrap();
+                    f.format(&DateTime { date, time }).to_string()
+                }),
+        );
+        note(
+            "decimal",
+            DecimalFormatter::try_new_unstable(&fp, (&loc).into(), Default::default())
+                .map(|f| f.format(&Decimal::from(12345)).to_string())
+                .map_err(|e| err(&e)),
+        );
+        note(
+            "plurals",
+            PluralRules::try_new_cardinal_unstable(&fp, (&loc).into())
+                .map(|r| format!("{:?}", r.category_for(3u32)))
+                .map_err(|e| err(&e)),
+        );
+        note(
+            "relativetime",
+            RelativeTimeFormatter::try_new_long_day_unstable(
+                &fp,
+                (&loc).into(),
+                RelativeTimeFormatterOptions::default(),
+            )
+            .map(|r| r.format(Decimal::from(-2)).to_string())
+            .map_err(|e| err(&e)),
+        );
+        note(
+            "list",
+            ListFormatter::try_new_and_unstable(
+                &fp,
+                (&loc).into(),
+                ListFormatterOptions::default(),
+            )
+            .map(|l| l.format(["a", "b", "c"].into_iter()).to_string())
+            .map_err(|e| err(&e)),
+        );
+        note(
+            "collator",
+            Collator::try_new_unstable(&fp, (&loc).into(), CollatorOptions::default())
+                .map(|c| format!("{:?}", c.as_borrowed().compare("ä", "z")))
+                .map_err(|e| err(&e)),
+        );
         out
     }
 }
