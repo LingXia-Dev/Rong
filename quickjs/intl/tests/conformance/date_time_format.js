@@ -533,11 +533,13 @@ test('sec-intl.datetimeformat.supportedlocalesof', 'localeMatcher', () => {
 });
 
 test('regression', 'the extreme time values format, with the zone rule of their season', () => {
-  const at = (zone, x) => new DTF('en', { timeZone: zone, dateStyle: 'short', timeStyle: 'short' }).format(x)
-    .replace(/ /g, ' ');
-  assert.sameValue(at('UTC', 8.64e15), '9/13/60, 12:00 AM');
-  assert.sameValue(at('America/New_York', 8.64e15), '9/12/60, 8:00 PM', 'daylight time in September');
-  assert.sameValue(at('Australia/Sydney', 8.64e15), '9/13/60, 10:00 AM', 'standard time in September');
+  // A numeric year: a short date style's two-digit year is the library's
+  // choice for a year this far out (ICU4X writes it in full).
+  const at = (zone, x) => new DTF('en', { timeZone: zone, year: 'numeric', month: 'numeric', day: 'numeric',
+    hour: 'numeric', minute: '2-digit' }).format(x).replace(/\u202f/g, ' ');
+  assert.sameValue(at('UTC', 8.64e15), '9/13/275760, 12:00 AM');
+  assert.sameValue(at('America/New_York', 8.64e15), '9/12/275760, 8:00 PM', 'daylight time in September');
+  assert.sameValue(at('Australia/Sydney', 8.64e15), '9/13/275760, 10:00 AM', 'standard time in September');
   const offset = (x) => new DTF('en', { timeZone: 'America/New_York', timeZoneName: 'shortOffset' }).formatToParts(x)
     .find((p) => p.type === 'timeZoneName').value;
   assert.sameValue(offset(8.64e15), 'GMT-4');
