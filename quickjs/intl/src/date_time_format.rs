@@ -3,7 +3,10 @@
 //! module turns the resolved options into a formatter, reports the fields
 //! of the pattern it chose, and formats a time value into ECMA-402 parts.
 
-use crate::cldr_dates::{DAY_PERIOD_NAME_SETS, DAY_PERIOD_NAMES, DAY_PERIOD_RULES, HOUR_CYCLES};
+use crate::cldr_dates::{
+    DAY_PERIOD_NAME_SETS, DAY_PERIOD_NAMES, DAY_PERIOD_RULES, DayPeriodName, DayPeriodRule,
+    HOUR_CYCLES,
+};
 use crate::data::IntlData;
 use icu::calendar::types::RataDie;
 use icu::calendar::{Date, Iso};
@@ -89,8 +92,8 @@ struct Fixups {
 
 /// A locale's flexible day periods in one width.
 struct DayPeriods {
-    rules: &'static [(&'static str, u16, u16)],
-    names: &'static [(&'static str, &'static str, &'static str, &'static str)],
+    rules: &'static [DayPeriodRule],
+    names: &'static [DayPeriodName],
     /// 1 narrow, 2 short, 3 long.
     width: u8,
 }
@@ -142,7 +145,7 @@ impl DayPeriods {
             .rules
             .iter()
             .filter(|(_, from, before)| from == before && exact && *from == minute)
-            .find_map(|(p, ..)| named(*p));
+            .find_map(|(p, ..)| named(p));
         at.or_else(|| {
             self.rules
                 .iter()
@@ -154,7 +157,7 @@ impl DayPeriods {
                             minute >= *from || minute < *before
                         }
                 })
-                .find_map(|(p, ..)| named(*p))
+                .find_map(|(p, ..)| named(p))
         })
     }
 }
@@ -432,7 +435,7 @@ fn build(data: &IntlData, request: &Request) -> Result<Format, String> {
     };
     let numeric_field = |key: &str| (Some(key) == numeric_alone).then_some("numeric");
     for (key, value) in &mut fields {
-        if let Some(numeric) = numeric_field(*key) {
+        if let Some(numeric) = numeric_field(key) {
             *value = numeric.to_string();
         }
     }

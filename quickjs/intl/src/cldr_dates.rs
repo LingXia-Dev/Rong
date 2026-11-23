@@ -284,10 +284,15 @@ pub(crate) static HOUR_CYCLES: &[(&str, &str, &str)] = &[
     ("zu-ZA", "h23", "h12"),
 ];
 
-/// The flexible day periods of a language: (period, from, before) in
-/// minutes of the day; `from == before` is an `at` rule. Sorted by
-/// language.
-pub(crate) static DAY_PERIOD_RULES: &[(&str, &[(&str, u16, u16)])] = &[
+/// A day period's rule: (period, from, before) in minutes of the day;
+/// `from == before` is an `at` rule.
+pub(crate) type DayPeriodRule = (&'static str, u16, u16);
+
+/// A day period's names: (period, narrow, short, long).
+pub(crate) type DayPeriodName = (&'static str, &'static str, &'static str, &'static str);
+
+/// Each language's day period rules. Sorted by language.
+pub(crate) static DAY_PERIOD_RULES: &[(&str, &[DayPeriodRule])] = &[
     ("af", &[("midnight", 0, 0), ("morning1", 300, 720), ("afternoon1", 720, 1080), ("evening1", 1080, 1440), ("night1", 0, 300)]),
     ("am", &[("midnight", 0, 0), ("noon", 720, 720), ("morning1", 360, 720), ("afternoon1", 720, 1080), ("evening1", 1080, 1440), ("night1", 0, 360)]),
     ("ar", &[("morning1", 180, 360), ("morning2", 360, 720), ("afternoon1", 720, 780), ("afternoon2", 780, 1080), ("evening1", 1080, 1440), ("night1", 0, 60), ("night2", 60, 180)]),
@@ -379,8 +384,8 @@ pub(crate) static DAY_PERIOD_RULES: &[(&str, &[(&str, u16, u16)])] = &[
     ("zu", &[("morning1", 0, 360), ("morning2", 360, 600), ("afternoon1", 600, 780), ("evening1", 780, 1140), ("night1", 1140, 1440)]),
 ];
 
-/// Day period names in the format context: (period, narrow, short, long).
-pub(crate) static DAY_PERIOD_NAME_SETS: &[&[(&str, &str, &str, &str)]] = &[
+/// Day period names in the format context.
+pub(crate) static DAY_PERIOD_NAME_SETS: &[&[DayPeriodName]] = &[
     &[("am", "AM", "AM", "AM"), ("pm", "PM", "PM", "PM")],
     &[("am", "AM", "AM", "Aqʼabʼil"), ("pm", "PM", "PM", "Kbʼeqʼij")],
     &[("am", "AM", "AM", "Hoseng"), ("pm", "PM", "PM", "Thapama")],

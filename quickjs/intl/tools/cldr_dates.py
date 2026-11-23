@@ -126,10 +126,15 @@ def generate():
         *[f'    ("{k}", "{p}", "{t}"),' for k, p, t in cycles],
         "];",
         "",
-        "/// The flexible day periods of a language: (period, from, before) in",
-        "/// minutes of the day; `from == before` is an `at` rule. Sorted by",
-        "/// language.",
-        "pub(crate) static DAY_PERIOD_RULES: &[(&str, &[(&str, u16, u16)])] = &[",
+        "/// A day period's rule: (period, from, before) in minutes of the day;",
+        "/// `from == before` is an `at` rule.",
+        "pub(crate) type DayPeriodRule = (&'static str, u16, u16);",
+        "",
+        "/// A day period's names: (period, narrow, short, long).",
+        "pub(crate) type DayPeriodName = (&'static str, &'static str, &'static str, &'static str);",
+        "",
+        "/// Each language's day period rules. Sorted by language.",
+        "pub(crate) static DAY_PERIOD_RULES: &[(&str, &[DayPeriodRule])] = &[",
     ]
     for language, spans in rule_lines:
         body = ", ".join(f'("{p}", {a}, {b})' for p, a, b in spans)
@@ -137,8 +142,8 @@ def generate():
     lines += [
         "];",
         "",
-        "/// Day period names in the format context: (period, narrow, short, long).",
-        "pub(crate) static DAY_PERIOD_NAME_SETS: &[&[(&str, &str, &str, &str)]] = &[",
+        "/// Day period names in the format context.",
+        "pub(crate) static DAY_PERIOD_NAME_SETS: &[&[DayPeriodName]] = &[",
     ]
     for entry in sets:
         body = ", ".join(
