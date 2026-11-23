@@ -1,4 +1,8 @@
-//! Time zones for RongJS and its embedders, on every engine.
+//! Time zones for the `Intl` that rong provides on QuickJS.
+//!
+//! Internal to `rong_intl`: it is linked only through `rong_intl`'s QuickJS
+//! build, so an engine with its own `Intl` (JavaScriptCore, ArkJS) carries none
+//! of it. Embedders reach zones through the standard `Intl`, not this crate.
 //!
 //! Three questions, answered from one tz database per process:
 //! - [`offset_seconds`]: a zone's UTC offset at an instant;

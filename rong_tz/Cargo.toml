@@ -3,7 +3,7 @@ name = "rong_tz"
 version = "0.8.0"
 edition.workspace = true
 
-description = "Time zone offsets and wall-clock conversion for RongJS, on the system tz database"
+description = "Time zones for the Intl that RongJS provides on QuickJS; internal to rong_intl"
 license.workspace = true
 repository.workspace = true
 homepage.workspace = true
