@@ -14,6 +14,7 @@
 
 mod cldr_dates;
 mod cldr_numbers;
+mod cldr_units;
 mod data;
 mod date_time_format;
 mod locale;
@@ -339,10 +340,23 @@ where
                     ),
                     _ => None,
                 };
+                let measure = match &options.measure {
+                    Some(measure) => Some(
+                        state
+                            .numbers
+                            .measure(&state.data, &format, &options, measure)
+                            .map_err(|e| {
+                                report(&format!("rong_quickjs_intl: {e}"));
+                                bad(&e)
+                            })?,
+                    ),
+                    None => None,
+                };
                 let parts = number_format::format_to_parts(
                     &format,
                     &options,
                     compact.as_deref(),
+                    measure.as_deref(),
                     &number::to_intl_mv(&value),
                 );
                 Ok(parts
@@ -788,12 +802,35 @@ fn plural_options<E: JSEngine>(slots: &JSObject<E::Value>) -> JSResult<plural::O
 fn number_format_options<E: JSEngine>(
     slots: &JSObject<E::Value>,
 ) -> JSResult<number_format::Options> {
-    use number_format::{Grouping, SignDisplay, Style};
+    use number_format::{CurrencyDisplay, Grouping, Measure, SignDisplay, Style, UnitDisplay};
     let text = |key: &str| -> JSResult<String> { slots.get::<_, String>(key) };
-    let style = match text("style")?.as_str() {
-        "decimal" => Style::Decimal,
-        "percent" => Style::Percent,
-        _ => return Err(bad("this style is not supported yet")),
+    let (style, measure) = match text("style")?.as_str() {
+        "percent" => (Style::Percent, None),
+        "currency" => (
+            Style::Decimal,
+            Some(Measure::Currency {
+                code: text("currency")?,
+                display: match text("currencyDisplay")?.as_str() {
+                    "code" => CurrencyDisplay::Code,
+                    "narrowSymbol" => CurrencyDisplay::NarrowSymbol,
+                    "name" => CurrencyDisplay::Name,
+                    _ => CurrencyDisplay::Symbol,
+                },
+                accounting: text("currencySign")? == "accounting",
+            }),
+        ),
+        "unit" => (
+            Style::Decimal,
+            Some(Measure::Unit {
+                unit: text("unit")?,
+                display: match text("unitDisplay")?.as_str() {
+                    "long" => UnitDisplay::Long,
+                    "narrow" => UnitDisplay::Narrow,
+                    _ => UnitDisplay::Short,
+                },
+            }),
+        ),
+        _ => (Style::Decimal, None),
     };
     let compact_display: Option<String> = slots
         .get_opt::<_, Option<String>>("compactDisplay")?
@@ -823,6 +860,7 @@ fn number_format_options<E: JSEngine>(
         locale: text("dataLocale")?,
         numbering_system: text("numberingSystem")?,
         style,
+        measure,
         notation,
         digits: digit_options::<E>(slots)?,
         grouping,

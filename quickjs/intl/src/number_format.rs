@@ -4,6 +4,7 @@
 //! the type ECMA-402 gives it.
 
 use crate::cldr_numbers::{ENTRIES, ROOT_SYMBOLS, RootSymbols, VALUES, Values};
+use crate::cldr_units;
 use crate::data::IntlData;
 use crate::number::{self, DigitOptions, IntlMV, Rounded};
 pub(crate) use crate::plural::Notation;
@@ -11,8 +12,13 @@ use fixed_decimal::UnsignedDecimal;
 use icu::decimal::provider::{
     DecimalCompactLongV1, DecimalCompactShortV1, DecimalDigitsV1, DecimalSymbolsV1,
 };
-use icu::plurals::{PluralOperands, PluralRules};
+use icu::plurals::{PluralCategory, PluralOperands, PluralRules};
+use icu_experimental::dimension::provider::currency::essentials::CurrencyEssentialsV1;
+use icu_experimental::dimension::provider::currency::extended::CurrencyExtendedDataV1;
+use icu_experimental::dimension::provider::currency::patterns::CurrencyPatternsDataV1;
+use icu_experimental::dimension::provider::currency::symbols::CurrencySymbolsV1;
 use icu_experimental::dimension::provider::percent::DecimalPercentV1;
+use icu_pattern::DoublePlaceholderPattern;
 use icu_pattern::{DoublePlaceholderKey, PatternItem};
 use icu_provider::prelude::*;
 use std::cell::RefCell;
@@ -45,11 +51,45 @@ pub(crate) enum SignDisplay {
     Negative,
 }
 
+/// [[CurrencyDisplay]].
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(crate) enum CurrencyDisplay {
+    Code,
+    Symbol,
+    NarrowSymbol,
+    Name,
+}
+
+/// [[UnitDisplay]].
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(crate) enum UnitDisplay {
+    Long,
+    Short,
+    Narrow,
+}
+
+/// What the currency and unit styles put around the number.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub(crate) enum Measure {
+    Currency {
+        code: String,
+        display: CurrencyDisplay,
+        accounting: bool,
+    },
+    Unit {
+        unit: String,
+        display: UnitDisplay,
+    },
+}
+
 /// One Intl.NumberFormat's resolved slots, as Rust reads them.
 pub(crate) struct Options {
     pub locale: String,
     pub numbering_system: String,
+    /// The number's own style: currency and unit are decimal with a
+    /// measure around it.
     pub style: Style,
+    pub measure: Option<Measure>,
     pub notation: Notation,
     pub digits: DigitOptions,
     pub grouping: Grouping,
@@ -78,12 +118,14 @@ impl Digits {
 
 /// A piece of a sign-dependent pattern.
 #[derive(Clone, Debug)]
-enum Piece {
+pub(crate) enum Piece {
     Literal(String),
     Number,
     Plus(String),
     Minus(String),
     PercentSign(String),
+    Currency(String),
+    Unit(String),
 }
 
 impl LocaleFormat {
@@ -106,6 +148,7 @@ pub(crate) struct LocaleFormat {
     cldr: &'static Values,
     /// The minus sign an exponent takes.
     minus: String,
+    plus: String,
     zero: Vec<Piece>,
     positive: Vec<Piece>,
     negative: Vec<Piece>,
@@ -116,6 +159,172 @@ pub(crate) struct LocaleFormat {
 pub(crate) struct Cache {
     formats: RefCell<HashMap<(String, String, Style), Rc<LocaleFormat>>>,
     compact: RefCell<HashMap<(String, bool), Rc<Compact>>>,
+    measures: RefCell<HashMap<(String, String, Measure), Rc<Affixes>>>,
+}
+
+/// A currency's or unit's text around the number.
+pub(crate) enum Affixes {
+    /// Patterns by sign, the currency in place (code, symbol).
+    Signed {
+        zero: Vec<Piece>,
+        positive: Vec<Piece>,
+        negative: Vec<Piece>,
+    },
+    /// The signed number inside a pattern its plural category picks
+    /// (currency names, units).
+    Plural {
+        rules: PluralRules,
+        patterns: PluralPatterns,
+    },
+}
+
+/// The plural-dependent patterns of a measure.
+pub(crate) enum PluralPatterns {
+    CurrencyName {
+        patterns: DataPayload<CurrencyPatternsDataV1>,
+        names: Option<DataPayload<CurrencyExtendedDataV1>>,
+        code: String,
+    },
+    /// A unit CLDR names, or a numerator over a denominator.
+    Unit(&'static [u16; 7]),
+    PerUnit {
+        numerator: &'static [u16; 7],
+        denominator: &'static [u16; 7],
+        compound: u16,
+    },
+}
+
+/// The index of a plural category among CLDR's counts.
+fn count_index(category: PluralCategory) -> usize {
+    match category {
+        PluralCategory::Zero => 0,
+        PluralCategory::One => 1,
+        PluralCategory::Two => 2,
+        PluralCategory::Few => 3,
+        PluralCategory::Many => 4,
+        PluralCategory::Other => 5,
+    }
+}
+
+/// String `at` of the unit table.
+fn unit_text(at: u16) -> Option<&'static str> {
+    (at != cldr_units::NONE).then(|| {
+        let at = usize::from(at);
+        &cldr_units::TEXT[cldr_units::OFFSETS[at] as usize..cldr_units::OFFSETS[at + 1] as usize]
+    })
+}
+
+/// A unit's pattern for a plural category, else its `other` one.
+fn unit_pattern(entry: &[u16; 7], category: PluralCategory) -> &'static str {
+    unit_text(entry[count_index(category)])
+        .or_else(|| unit_text(entry[5]))
+        .unwrap_or("{0}")
+}
+
+impl Affixes {
+    /// The pattern around the signed number for a value's plural operands
+    /// (`None`: not finite, CLDR's `other`).
+    fn plural_pieces(&self, operands: Option<PluralOperands>) -> Option<Vec<Piece>> {
+        let Affixes::Plural { rules, patterns } = self else {
+            return None;
+        };
+        let category = operands.map_or(PluralCategory::Other, |o| rules.category_for(o));
+        let unit = |text: &str| -> Vec<Piece> {
+            let (before, after) = text.split_once("{0}").unwrap_or((text, ""));
+            let mut pieces = unit_pieces(before);
+            pieces.push(Piece::Number);
+            pieces.extend(unit_pieces(after));
+            pieces
+        };
+        Some(match patterns {
+            PluralPatterns::CurrencyName {
+                patterns,
+                names,
+                code,
+            } => {
+                let pattern = match operands {
+                    Some(o) => patterns.get().get(o, rules),
+                    None => patterns.get().elements.get_default().1,
+                };
+                let name = names.as_ref().map_or(code.as_str(), |n| match operands {
+                    Some(o) => n.get().get(o, rules),
+                    None => n.get().elements.get_default().1,
+                });
+                pattern_pieces(pattern, name, None)
+            }
+            PluralPatterns::Unit(entry) => unit(unit_pattern(entry, category)),
+            PluralPatterns::PerUnit {
+                numerator,
+                denominator,
+                compound,
+            } => {
+                let numerator = unit_pattern(numerator, category);
+                let text = match unit_text(denominator[6]) {
+                    Some(per) => per.replace("{0}", numerator),
+                    None => {
+                        let name = unit_pattern(denominator, PluralCategory::One)
+                            .replace("{0}", "")
+                            .trim()
+                            .to_string();
+                        unit_text(*compound)
+                            .unwrap_or("{0}/{1}")
+                            .replace("{1}", &name)
+                            .replace("{0}", numerator)
+                    }
+                };
+                unit(&text)
+            }
+        })
+    }
+}
+
+/// A currency pattern's pieces: `{0}` the number, `{1}` the currency; a
+/// minus sign in its text (CLDR's `-`, or the locale's) becomes `minus`.
+fn pattern_pieces(
+    pattern: &DoublePlaceholderPattern,
+    currency: &str,
+    minus: Option<&str>,
+) -> Vec<Piece> {
+    let mut pieces = Vec::new();
+    for item in pattern.iter() {
+        match item {
+            PatternItem::Placeholder(DoublePlaceholderKey::Place0) => pieces.push(Piece::Number),
+            PatternItem::Placeholder(DoublePlaceholderKey::Place1) => {
+                pieces.push(Piece::Currency(currency.to_string()))
+            }
+            PatternItem::Literal(text) => {
+                let Some(minus) = minus else {
+                    pieces.push(Piece::Literal(text.to_string()));
+                    continue;
+                };
+                let needle = if text.contains(minus) { minus } else { "-" };
+                let mut rest = text;
+                while let Some(at) = rest.find(needle) {
+                    if at > 0 {
+                        pieces.push(Piece::Literal(rest[..at].to_string()));
+                    }
+                    pieces.push(Piece::Minus(minus.to_string()));
+                    rest = &rest[at + needle.len()..];
+                }
+                if !rest.is_empty() {
+                    pieces.push(Piece::Literal(rest.to_string()));
+                }
+            }
+        }
+    }
+    pieces
+}
+
+/// A unit pattern's text beside the number: its spacing is a literal, the
+/// rest the unit.
+fn unit_pieces(text: &str) -> Vec<Piece> {
+    affix(text, "unit")
+        .into_iter()
+        .map(|(kind, t)| match kind {
+            "literal" => Piece::Literal(t),
+            _ => Piece::Unit(t),
+        })
+        .collect()
 }
 
 /// A locale's compact patterns (short or long) and the plural rules that
@@ -226,6 +435,196 @@ impl Cache {
         let built = Rc::new(Compact { patterns, rules });
         self.compact.borrow_mut().insert(key, built.clone());
         Ok(built)
+    }
+}
+
+impl Cache {
+    /// The currency's or unit's affixes, for a format of the locale and
+    /// numbering system.
+    pub(crate) fn measure(
+        &self,
+        data: &IntlData,
+        format: &LocaleFormat,
+        options: &Options,
+        measure: &Measure,
+    ) -> Result<Rc<Affixes>, String> {
+        let key = (
+            options.locale.clone(),
+            options.numbering_system.clone(),
+            measure.clone(),
+        );
+        if let Some(found) = self.measures.borrow().get(&key) {
+            return Ok(found.clone());
+        }
+        let built = Rc::new(load_measure(
+            data,
+            format,
+            &options.locale,
+            &options.numbering_system,
+            measure,
+        )?);
+        self.measures.borrow_mut().insert(key, built.clone());
+        Ok(built)
+    }
+}
+
+fn load_measure(
+    data: &IntlData,
+    format: &LocaleFormat,
+    locale: &str,
+    numbering_system: &str,
+    measure: &Measure,
+) -> Result<Affixes, String> {
+    let parsed = locale
+        .parse::<icu::locale::Locale>()
+        .map_err(|_| format!("{locale} is not a locale"))?;
+    let data_locale = DataLocale::from(&parsed);
+    let provider = data.provider();
+    let rules = || {
+        PluralRules::try_new_cardinal_unstable(&provider, (&parsed).into())
+            .map_err(|_| format!("the data blob has no plural rules for {locale}"))
+    };
+    match measure {
+        Measure::Currency {
+            code,
+            display: CurrencyDisplay::Name,
+            ..
+        } => {
+            let patterns: DataResponse<CurrencyPatternsDataV1> = provider
+                .load(request(&data_locale, Default::default()))
+                .map_err(|_| format!("the data blob has no currency name patterns for {locale}"))?;
+            // A currency CLDR has no name for is written by its code.
+            let names: Option<DataResponse<CurrencyExtendedDataV1>> =
+                attributes(code).and_then(|a| provider.load(request(&data_locale, a)).ok());
+            Ok(Affixes::Plural {
+                rules: rules()?,
+                patterns: PluralPatterns::CurrencyName {
+                    patterns: patterns.payload,
+                    names: names.map(|n| n.payload),
+                    code: code.clone(),
+                },
+            })
+        }
+        Measure::Currency {
+            code,
+            display,
+            accounting,
+        } => {
+            // The symbol, else (narrow) the symbol, else the code; a code
+            // has letters at both ends.
+            let symbol = |attribute: String| -> Option<(String, bool, bool)> {
+                let a = attributes(&attribute)?;
+                let response: DataResponse<CurrencySymbolsV1> =
+                    provider.load(request(&data_locale, a)).ok()?;
+                let symbol = response.payload.get();
+                (!symbol.as_str().is_empty()).then(|| {
+                    (
+                        symbol.as_str().to_string(),
+                        symbol.starts_with_letter(),
+                        symbol.ends_with_letter(),
+                    )
+                })
+            };
+            let (text, starts, ends) = match display {
+                CurrencyDisplay::NarrowSymbol => {
+                    symbol(format!("{code}n")).or_else(|| symbol(code.clone()))
+                }
+                CurrencyDisplay::Symbol => symbol(code.clone()),
+                _ => None,
+            }
+            .unwrap_or_else(|| (code.clone(), true, true));
+            let by_system: Option<DataResponse<CurrencyEssentialsV1>> =
+                attributes(numbering_system)
+                    .and_then(|a| provider.load(request(&data_locale, a)).ok());
+            let essentials = match by_system {
+                Some(found) => found,
+                None => provider
+                    .load(request(&data_locale, Default::default()))
+                    .map_err(|_| format!("the data blob has no currency patterns for {locale}"))?,
+            };
+            let essentials = essentials.payload.get();
+            let (positive, negative) = if *accounting {
+                (
+                    essentials.get_positive_accounting(starts, ends),
+                    essentials.get_negative_accounting(starts, ends),
+                )
+            } else {
+                (
+                    essentials.get_positive(starts, ends),
+                    essentials.get_negative(starts, ends),
+                )
+            };
+            let minus = Some(format.minus.as_str());
+            let zero = pattern_pieces(positive, &text, minus);
+            // Without a negative pattern the minus sign goes before the
+            // whole (UTS 35).
+            let negative = match negative {
+                Some(pattern) => pattern_pieces(pattern, &text, minus),
+                None => std::iter::once(Piece::Minus(format.minus.clone()))
+                    .chain(zero.iter().cloned())
+                    .collect(),
+            };
+            // A plus sign stands where the minus does.
+            let positive = if negative.iter().any(|p| matches!(p, Piece::Minus(_))) {
+                negative
+                    .iter()
+                    .map(|p| match p {
+                        Piece::Minus(_) => Piece::Plus(format.plus.clone()),
+                        other => other.clone(),
+                    })
+                    .collect()
+            } else {
+                std::iter::once(Piece::Plus(format.plus.clone()))
+                    .chain(zero.iter().cloned())
+                    .collect()
+            };
+            Ok(Affixes::Signed {
+                zero,
+                positive,
+                negative,
+            })
+        }
+        Measure::Unit { unit, display } => {
+            let mut chain = data.fallback_chain(&parsed);
+            chain.push(String::from("und"));
+            let row = chain
+                .iter()
+                .find_map(|l| {
+                    cldr_units::LOCALES
+                        .binary_search_by(|(k, _)| (*k).cmp(l.as_str()))
+                        .ok()
+                })
+                .map(|at| &cldr_units::ROWS[usize::from(cldr_units::LOCALES[at].1)])
+                .ok_or_else(|| format!("no unit patterns for {locale}"))?;
+            let width = match display {
+                UnitDisplay::Long => 0,
+                UnitDisplay::Short => 1,
+                UnitDisplay::Narrow => 2,
+            };
+            let entry = |name: &str| {
+                cldr_units::UNITS.binary_search(&name).ok().map(|at| {
+                    &cldr_units::ENTRIES[usize::from(row[width * cldr_units::UNITS.len() + at])]
+                })
+            };
+            let patterns = match entry(unit) {
+                Some(found) => PluralPatterns::Unit(found),
+                None => {
+                    let (numerator, denominator) = unit
+                        .split_once("-per-")
+                        .and_then(|(n, d)| Some((entry(n)?, entry(d)?)))
+                        .ok_or_else(|| format!("{unit} is not a sanctioned unit"))?;
+                    PluralPatterns::PerUnit {
+                        numerator,
+                        denominator,
+                        compound: row[3 * cldr_units::UNITS.len() + width],
+                    }
+                }
+            };
+            Ok(Affixes::Plural {
+                rules: rules()?,
+                patterns,
+            })
+        }
     }
 }
 
@@ -417,6 +816,7 @@ fn load(
         digits,
         cldr,
         minus,
+        plus: format!("{plus_prefix}{plus_suffix}"),
         zero,
         positive,
         negative,
@@ -494,8 +894,11 @@ pub(crate) fn format_to_parts(
     format: &LocaleFormat,
     options: &Options,
     compact: Option<&Compact>,
+    measure: Option<&Affixes>,
     x: &IntlMV,
 ) -> Vec<Part> {
+    // The plural operands of the value shown, for a measure's pattern.
+    let mut operands = None;
     // The number's own parts (PartitionNotationSubPattern), and the
     // category of the rounded value.
     let (number, category): (Vec<Part>, Category) = match x {
@@ -514,6 +917,7 @@ pub(crate) fn format_to_parts(
             Category::Negative,
         ),
         IntlMV::NegativeZero => {
+            operands = Some(PluralOperands::from(&UnsignedDecimal::default()));
             let rounded = number::format_numeric_to_string(
                 &options.digits,
                 true,
@@ -532,6 +936,16 @@ pub(crate) fn format_to_parts(
                 value.trim_start();
             }
             let (exponent, rounded) = scale_and_round(options, compact, *negative, &value);
+            operands = Some(match (compact, u8::try_from(exponent)) {
+                (Some(_), Ok(shown)) => {
+                    PluralOperands::from_significand_and_exponent(&rounded.value, shown)
+                }
+                _ => {
+                    let mut shown = rounded.value.clone();
+                    shown.multiply_pow10(exponent);
+                    PluralOperands::from(&shown)
+                }
+            });
             let category = match (*negative, rounded.value.is_zero()) {
                 (false, true) => Category::PlusZero,
                 (true, true) => Category::MinusZero,
@@ -545,29 +959,64 @@ pub(crate) fn format_to_parts(
         }
     };
     use Category::*;
-    let pattern = match (options.sign, category) {
-        (SignDisplay::Never, _) => &format.zero,
-        (SignDisplay::Auto, PlusZero | Positive) => &format.zero,
-        (SignDisplay::Auto, _) => &format.negative,
-        (SignDisplay::Always, PlusZero | Positive) => &format.positive,
-        (SignDisplay::Always, _) => &format.negative,
-        (SignDisplay::ExceptZero, PlusZero | MinusZero) => &format.zero,
-        (SignDisplay::ExceptZero, Positive) => &format.positive,
-        (SignDisplay::ExceptZero, Negative) => &format.negative,
-        (SignDisplay::Negative, Negative) => &format.negative,
-        (SignDisplay::Negative, _) => &format.zero,
+    // GetNumberFormatPattern: the zero, positive or negative pattern.
+    #[derive(Clone, Copy)]
+    enum Which {
+        Zero,
+        Positive,
+        Negative,
+    }
+    let which = match (options.sign, category) {
+        (SignDisplay::Never, _) => Which::Zero,
+        (SignDisplay::Auto, PlusZero | Positive) => Which::Zero,
+        (SignDisplay::Auto, _) => Which::Negative,
+        (SignDisplay::Always, PlusZero | Positive) => Which::Positive,
+        (SignDisplay::Always, _) => Which::Negative,
+        (SignDisplay::ExceptZero, PlusZero | MinusZero) => Which::Zero,
+        (SignDisplay::ExceptZero, Positive) => Which::Positive,
+        (SignDisplay::ExceptZero, Negative) => Which::Negative,
+        (SignDisplay::Negative, Negative) => Which::Negative,
+        (SignDisplay::Negative, _) => Which::Zero,
     };
+    let pick = |zero, positive, negative| match which {
+        Which::Zero => zero,
+        Which::Positive => positive,
+        Which::Negative => negative,
+    };
+    let signed: &[Piece] = match measure {
+        Some(Affixes::Signed {
+            zero,
+            positive,
+            negative,
+        }) => pick(zero, positive, negative),
+        _ => pick(&format.zero, &format.positive, &format.negative),
+    };
+    // A plural measure's pattern holds the signed number.
+    let outer = measure.and_then(|m| m.plural_pieces(operands));
     let mut parts = Vec::new();
-    for piece in pattern {
+    for piece in outer.as_deref().unwrap_or(signed) {
         match piece {
-            Piece::Literal(text) => parts.push(("literal", text.clone())),
-            Piece::Number => parts.extend(number.iter().cloned()),
-            Piece::Plus(sign) => parts.push(("plusSign", sign.clone())),
-            Piece::Minus(sign) => parts.push(("minusSign", sign.clone())),
-            Piece::PercentSign(sign) => parts.push(("percentSign", sign.clone())),
+            Piece::Number if outer.is_some() => {
+                for inner in signed {
+                    push_piece(inner, &number, &mut parts);
+                }
+            }
+            _ => push_piece(piece, &number, &mut parts),
         }
     }
     parts
+}
+
+fn push_piece(piece: &Piece, number: &[Part], parts: &mut Vec<Part>) {
+    match piece {
+        Piece::Literal(text) => parts.push(("literal", text.clone())),
+        Piece::Number => parts.extend(number.iter().cloned()),
+        Piece::Plus(sign) => parts.push(("plusSign", sign.clone())),
+        Piece::Minus(sign) => parts.push(("minusSign", sign.clone())),
+        Piece::PercentSign(sign) => parts.push(("percentSign", sign.clone())),
+        Piece::Currency(text) => parts.push(("currency", text.clone())),
+        Piece::Unit(text) => parts.push(("unit", text.clone())),
+    }
 }
 
 /// PartitionNotationSubPattern for a finite rounded value shown at
@@ -599,17 +1048,18 @@ fn notation_parts(
                 return digits;
             };
             let (prefix, suffix) = compact.affixes(&rounded.value, shown);
-            let mut parts = compact_affix(&prefix);
+            let mut parts = affix(&prefix, "compact");
             parts.extend(digits);
-            parts.extend(compact_affix(&suffix));
+            parts.extend(affix(&suffix, "compact"));
             parts
         }
     }
 }
 
-/// A compact pattern's text beside the number: its spacing is a literal,
-/// the rest the compact symbol or name ("K", "thousand", "万").
-fn compact_affix(text: &str) -> Vec<Part> {
+/// A pattern's text beside the number: its spacing is a literal, the rest
+/// a part of `kind` (a compact symbol or name: "K", "thousand", "万"; a
+/// unit).
+fn affix(text: &str, kind: &'static str) -> Vec<Part> {
     let core = text.trim_matches(char::is_whitespace);
     if core.is_empty() {
         return if text.is_empty() {
@@ -624,7 +1074,7 @@ fn compact_affix(text: &str) -> Vec<Part> {
     if start > 0 {
         parts.push(("literal", text[..start].to_string()));
     }
-    parts.push(("compact", core.to_string()));
+    parts.push((kind, core.to_string()));
     if end < text.len() {
         parts.push(("literal", text[end..].to_string()));
     }
@@ -795,15 +1245,39 @@ mod tests {
         sign: SignDisplay,
         value: &str,
     ) -> String {
+        parts_with(locale, system, style, None, sign, value)
+            .iter()
+            .map(|(kind, text)| format!("{kind}:{}", text.escape_default()))
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
+
+    fn text_of(locale: &str, measure: Measure, sign: SignDisplay, value: &str) -> String {
+        parts_with(locale, "latn", Style::Decimal, Some(measure), sign, value)
+            .iter()
+            .map(|(_, text)| text.as_str())
+            .collect()
+    }
+
+    fn parts_with(
+        locale: &str,
+        system: &str,
+        style: Style,
+        measure: Option<Measure>,
+        sign: SignDisplay,
+        value: &str,
+    ) -> Vec<Part> {
         static BLOB: &[u8] = include_bytes!("../tests/data/intl-test.postcard");
         let data = IntlData::try_from_static_blob(BLOB).expect("test blob");
-        let format = Cache::default()
+        let cache = Cache::default();
+        let format = cache
             .get(&data, locale, system, style)
             .expect("format data");
         let options = Options {
             locale: locale.to_string(),
             numbering_system: system.to_string(),
             style,
+            measure: measure.clone(),
             notation: Notation::Standard,
             digits: DigitOptions {
                 min_integer: 1,
@@ -819,11 +1293,104 @@ mod tests {
             grouping: Grouping::Auto,
             sign,
         };
-        format_to_parts(&format, &options, None, &number::to_intl_mv(value))
-            .iter()
-            .map(|(kind, text)| format!("{kind}:{}", text.escape_default()))
-            .collect::<Vec<_>>()
-            .join(" ")
+        let affixes = measure.map(|m| {
+            cache
+                .measure(&data, &format, &options, &m)
+                .expect("measure data")
+        });
+        format_to_parts(
+            &format,
+            &options,
+            None,
+            affixes.as_deref(),
+            &number::to_intl_mv(value),
+        )
+    }
+
+    #[test]
+    fn unit_table_lookups_are_sorted() {
+        assert!(cldr_units::UNITS.windows(2).all(|w| w[0] < w[1]));
+        assert!(cldr_units::LOCALES.windows(2).all(|w| w[0].0 < w[1].0));
+        assert_eq!(
+            cldr_units::OFFSETS.last().map(|end| *end as usize),
+            Some(cldr_units::TEXT.len())
+        );
+    }
+
+    #[test]
+    fn units_take_their_plural_pattern() {
+        let unit = |unit: &str, display| Measure::Unit {
+            unit: unit.to_string(),
+            display,
+        };
+        let long = |value| {
+            text_of(
+                "en",
+                unit("kilometer", UnitDisplay::Long),
+                SignDisplay::Auto,
+                value,
+            )
+        };
+        assert_eq!(long("1"), "1 kilometer");
+        assert_eq!(long("-2"), "-2 kilometers");
+        let speed = text_of(
+            "en",
+            unit("kilometer-per-hour", UnitDisplay::Short),
+            SignDisplay::Auto,
+            "5",
+        );
+        assert_eq!(speed, "5 km/h");
+        // No CLDR name: the denominator's per-unit pattern.
+        let rate = text_of(
+            "en",
+            unit("byte-per-second", UnitDisplay::Short),
+            SignDisplay::Auto,
+            "5",
+        );
+        assert_eq!(rate, "5 byte/s");
+        let percent = text_of(
+            "en",
+            unit("percent", UnitDisplay::Short),
+            SignDisplay::Auto,
+            "50",
+        );
+        assert_eq!(percent, "50%");
+    }
+
+    #[test]
+    fn currencies_take_their_sign_patterns() {
+        let usd = |display, accounting| Measure::Currency {
+            code: String::from("USD"),
+            display,
+            accounting,
+        };
+        let symbol = |sign, value| text_of("en", usd(CurrencyDisplay::Symbol, false), sign, value);
+        assert_eq!(symbol(SignDisplay::Auto, "-1"), "-$1");
+        assert_eq!(symbol(SignDisplay::Always, "1"), "+$1");
+        let accounting = text_of(
+            "en",
+            usd(CurrencyDisplay::Symbol, true),
+            SignDisplay::Auto,
+            "-1",
+        );
+        assert_eq!(accounting, "($1)");
+        let name = |value| {
+            text_of(
+                "en",
+                usd(CurrencyDisplay::Name, false),
+                SignDisplay::Auto,
+                value,
+            )
+        };
+        assert_eq!(name("1"), "1 US dollar");
+        assert_eq!(name("-2"), "-2 US dollars");
+        let code = text_of(
+            "en",
+            usd(CurrencyDisplay::Code, false),
+            SignDisplay::Auto,
+            "1",
+        );
+        assert_eq!(code, "USD\u{a0}1");
     }
 
     #[test]
@@ -858,17 +1425,17 @@ mod tests {
 
     #[test]
     fn compact_affixes_split_spacing_from_the_symbol() {
-        assert_eq!(compact_affix(""), vec![]);
-        assert_eq!(compact_affix("K"), vec![("compact", String::from("K"))]);
+        assert_eq!(affix("", "compact"), vec![]);
+        assert_eq!(affix("K", "compact"), vec![("compact", String::from("K"))]);
         assert_eq!(
-            compact_affix("\u{a0}Tsd."),
+            affix("\u{a0}Tsd.", "compact"),
             vec![
                 ("literal", String::from("\u{a0}")),
                 ("compact", String::from("Tsd."))
             ]
         );
         assert_eq!(
-            compact_affix(" thousand"),
+            affix(" thousand", "compact"),
             vec![
                 ("literal", String::from(" ")),
                 ("compact", String::from("thousand"))
