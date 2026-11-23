@@ -3,7 +3,7 @@
 //! grouping honours `useGrouping: "always"` and every part keeps the type
 //! ECMA-402 gives it.
 
-use crate::cldr_numbers::{ENTRIES, VALUES, Values};
+use crate::cldr_numbers::{ENTRIES, ROOT_SYMBOLS, VALUES, Values};
 use crate::data::IntlData;
 use crate::number::{self, DigitOptions, IntlMV};
 use fixed_decimal::UnsignedDecimal;
@@ -83,7 +83,6 @@ enum Piece {
 
 /// What formatting needs for one locale, numbering system and style.
 pub(crate) struct LocaleFormat {
-    pub numbering_system: String,
     decimal: String,
     group: String,
     primary: u8,
@@ -164,19 +163,37 @@ fn load(
         .map_err(|_| format!("{locale} is not a locale"))?;
     let data_locale = DataLocale::from(&parsed);
     let provider = data.provider();
-    // Symbols for the numbering system, else the locale's own (as ICU4X's
-    // DecimalFormatter resolves them).
-    let symbols: DataResponse<DecimalSymbolsV1> = attributes(numbering_system)
-        .and_then(|a| provider.load(request(&data_locale, a)).ok())
-        .map_or_else(
-            || provider.load(request(&data_locale, Default::default())),
-            Ok,
-        )
+    // Symbols for the numbering system, else the locale's own.
+    let by_system: Option<DataResponse<DecimalSymbolsV1>> =
+        attributes(numbering_system).and_then(|a| provider.load(request(&data_locale, a)).ok());
+    let own: DataResponse<DecimalSymbolsV1> = provider
+        .load(request(&data_locale, Default::default()))
         .map_err(|_| {
             format!("the data blob has no number symbols for {locale} or its fallbacks")
         })?;
+    let locale_system = own.payload.get().strings.numsys().to_string();
+    let has_own = by_system.is_some() || locale_system == numbering_system;
+    let symbols = by_system.unwrap_or(own);
     let symbols = symbols.payload.get();
     let strings = &symbols.strings;
+    // A system the locale has no symbols for uses root's for it where root
+    // has its own (arab, arabext), as CLDR's alias to the locale's latn
+    // symbols applies only to the others.
+    let root = (!has_own)
+        .then(|| ROOT_SYMBOLS.iter().find(|(s, _)| *s == numbering_system))
+        .flatten()
+        .map(|(_, symbols)| symbols);
+    let pick = |own: &str, at: usize| root.map_or(own, |r| r[at]).to_string();
+    let decimal = pick(strings.decimal_separator(), 0);
+    let group = pick(strings.grouping_separator(), 1);
+    let (minus_prefix, minus_suffix) = match root {
+        Some(r) => (r[2], ""),
+        None => (strings.minus_sign_prefix(), strings.minus_sign_suffix()),
+    };
+    let (plus_prefix, plus_suffix) = match root {
+        Some(r) => (r[3], ""),
+        None => (strings.plus_sign_prefix(), strings.plus_sign_suffix()),
+    };
     let digits = match SIMPLE_DIGITS.binary_search_by(|(n, _)| (*n).cmp(numbering_system)) {
         Ok(at) => SIMPLE_DIGITS[at].1,
         Err(_) => {
@@ -205,16 +222,8 @@ fn load(
     let (zero, positive, negative) = match style {
         Style::Decimal => (
             vec![Piece::Number],
-            signed(
-                strings.plus_sign_prefix(),
-                strings.plus_sign_suffix(),
-                Piece::Plus,
-            ),
-            signed(
-                strings.minus_sign_prefix(),
-                strings.minus_sign_suffix(),
-                Piece::Minus,
-            ),
+            signed(plus_prefix, plus_suffix, Piece::Plus),
+            signed(minus_prefix, minus_suffix, Piece::Minus),
         ),
         Style::Percent => {
             let response: DataResponse<DecimalPercentV1> = provider
@@ -223,15 +232,18 @@ fn load(
                     format!("the data blob has no percent patterns for {locale} or its fallbacks")
                 })?;
             let percent = response.payload.get();
+            // The pattern is the locale's own system's; its percent sign
+            // becomes the requested system's.
+            let in_pattern = cldr_values(data, &parsed, &locale_system)[6];
             let percent_sign = cldr[6];
             let literal = |text: &str, out: &mut Vec<Piece>| {
                 let mut rest = text;
-                while let Some(at) = rest.find(percent_sign).filter(|_| !percent_sign.is_empty()) {
+                while let Some(at) = rest.find(in_pattern).filter(|_| !in_pattern.is_empty()) {
                     if at > 0 {
                         out.push(Piece::Literal(rest[..at].to_string()));
                     }
                     out.push(Piece::PercentSign(percent_sign.to_string()));
-                    rest = &rest[at + percent_sign.len()..];
+                    rest = &rest[at + in_pattern.len()..];
                 }
                 if !rest.is_empty() {
                     out.push(Piece::Literal(rest.to_string()));
@@ -261,15 +273,14 @@ fn load(
             };
             (
                 zero,
-                with_sign(Piece::Plus(percent.plus_sign.to_string())),
-                with_sign(Piece::Minus(percent.minus_sign.to_string())),
+                with_sign(Piece::Plus(pick(&percent.plus_sign, 3))),
+                with_sign(Piece::Minus(pick(&percent.minus_sign, 2))),
             )
         }
     };
     Ok(LocaleFormat {
-        numbering_system: numbering_system.to_string(),
-        decimal: strings.decimal_separator().to_string(),
-        group: strings.grouping_separator().to_string(),
+        decimal,
+        group,
         primary: symbols.grouping_sizes.primary,
         secondary: symbols.grouping_sizes.secondary,
         min_grouping: symbols.grouping_sizes.min_grouping,
@@ -281,10 +292,11 @@ fn load(
     })
 }
 
-/// The CLDR values for the locale (through its fallbacks) in the numbering
-/// system, else in `latn`, else the root's.
+/// The CLDR values for the locale (through its fallbacks to root) in the
+/// numbering system, else in `latn`.
 fn cldr_values(data: &IntlData, locale: &icu::locale::Locale, system: &str) -> &'static Values {
-    let chain = data.fallback_chain(locale);
+    let mut chain = data.fallback_chain(locale);
+    chain.push("und".to_string());
     for system in [system, "latn"] {
         for candidate in &chain {
             let key = format!("{candidate}/{system}");
@@ -302,10 +314,10 @@ fn cldr_values(data: &IntlData, locale: &icu::locale::Locale, system: &str) -> &
 /// The sign category GetNumberFormatPattern decides on.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Category {
-    PositiveZero,
-    NegativeZero,
-    PositiveNonZero,
-    NegativeNonZero,
+    PlusZero,
+    MinusZero,
+    Positive,
+    Negative,
 }
 
 /// PartitionNumberPattern for the decimal and percent styles in standard
@@ -315,15 +327,15 @@ pub(crate) fn format_to_parts(format: &LocaleFormat, options: &Options, x: &Intl
     let (number, category): (Vec<Part>, Category) = match x {
         IntlMV::NotANumber => (
             vec![("nan", format.cldr[1].to_string())],
-            Category::PositiveZero,
+            Category::PlusZero,
         ),
         IntlMV::PositiveInfinity => (
             vec![("infinity", format.cldr[2].to_string())],
-            Category::PositiveNonZero,
+            Category::Positive,
         ),
         IntlMV::NegativeInfinity => (
             vec![("infinity", format.cldr[2].to_string())],
-            Category::NegativeNonZero,
+            Category::Negative,
         ),
         IntlMV::NegativeZero => {
             let rounded = number::format_numeric_to_string(
@@ -333,20 +345,22 @@ pub(crate) fn format_to_parts(format: &LocaleFormat, options: &Options, x: &Intl
             );
             (
                 digits_parts(format, options, &rounded.string),
-                Category::NegativeZero,
+                Category::MinusZero,
             )
         }
         IntlMV::Finite { negative, value } => {
             let mut value = value.clone();
             if options.style == Style::Percent {
+                // 0.25 keeps its integer zero, now at the hundreds.
                 value.multiply_pow10(2);
+                value.trim_start();
             }
             let rounded = number::format_numeric_to_string(&options.digits, *negative, &value);
             let category = match (*negative, rounded.value.is_zero()) {
-                (false, true) => Category::PositiveZero,
-                (true, true) => Category::NegativeZero,
-                (false, false) => Category::PositiveNonZero,
-                (true, false) => Category::NegativeNonZero,
+                (false, true) => Category::PlusZero,
+                (true, true) => Category::MinusZero,
+                (false, false) => Category::Positive,
+                (true, false) => Category::Negative,
             };
             (digits_parts(format, options, &rounded.string), category)
         }
@@ -354,14 +368,14 @@ pub(crate) fn format_to_parts(format: &LocaleFormat, options: &Options, x: &Intl
     use Category::*;
     let pattern = match (options.sign, category) {
         (SignDisplay::Never, _) => &format.zero,
-        (SignDisplay::Auto, PositiveZero | PositiveNonZero) => &format.zero,
+        (SignDisplay::Auto, PlusZero | Positive) => &format.zero,
         (SignDisplay::Auto, _) => &format.negative,
-        (SignDisplay::Always, PositiveZero | PositiveNonZero) => &format.positive,
+        (SignDisplay::Always, PlusZero | Positive) => &format.positive,
         (SignDisplay::Always, _) => &format.negative,
-        (SignDisplay::ExceptZero, PositiveZero | NegativeZero) => &format.zero,
-        (SignDisplay::ExceptZero, PositiveNonZero) => &format.positive,
-        (SignDisplay::ExceptZero, NegativeNonZero) => &format.negative,
-        (SignDisplay::Negative, NegativeNonZero) => &format.negative,
+        (SignDisplay::ExceptZero, PlusZero | MinusZero) => &format.zero,
+        (SignDisplay::ExceptZero, Positive) => &format.positive,
+        (SignDisplay::ExceptZero, Negative) => &format.negative,
+        (SignDisplay::Negative, Negative) => &format.negative,
         (SignDisplay::Negative, _) => &format.zero,
     };
     let mut parts = Vec::new();
