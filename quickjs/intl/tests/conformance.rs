@@ -29,6 +29,10 @@ const FILES: &[(&str, &str)] = &[
         include_str!("conformance/number_format_styles.js"),
     ),
     ("to_locale.js", include_str!("conformance/to_locale.js")),
+    (
+        "relative_time_list.js",
+        include_str!("conformance/relative_time_list.js"),
+    ),
     ("robustness.js", include_str!("conformance/robustness.js")),
     ("regressions.js", include_str!("conformance/regressions.js")),
 ];
