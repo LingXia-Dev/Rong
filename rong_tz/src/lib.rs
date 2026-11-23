@@ -144,72 +144,107 @@ pub fn source() -> &'static str {
 }
 
 fn database() -> &'static Database {
-    DATABASE.get_or_init(|| {
+    let mut line = None;
+    let database = DATABASE.get_or_init(|| {
         let chosen = CONFIGURED
             .read()
             .map(|c| c.clone())
             .unwrap_or_default()
             .unwrap_or(Source::System);
+        let mut skipped = Vec::new();
         let found = match chosen {
-            Source::System => system_database(),
+            Source::System => system_database(SYSTEM_FIRST, &mut skipped),
             Source::Path(path) => open_path(&path),
             Source::Bundled => None,
         };
-        let database = found.unwrap_or_else(|| {
-            let db = TimeZoneDatabase::bundled();
-            let source = if db.is_definitively_empty() {
-                String::from("none: no system database and none bundled")
-            } else {
-                String::from("bundled")
-            };
-            Database { db, source }
-        });
-        report(&format!("rong_tz: time zone database: {}", database.source));
+        let database = found.unwrap_or_else(bundled_or_none);
+        line = Some(report_line(&database, &skipped));
         database
-    })
+    });
+    // Outside the init, so a reporter that calls back in cannot deadlock.
+    if let Some(line) = line {
+        report(&line);
+    }
+    database
+}
+
+fn report_line(database: &Database, skipped: &[String]) -> String {
+    let mut line = format!("rong_tz: time zone database: {}", database.source);
+    for note in skipped {
+        line.push_str("; skipped ");
+        line.push_str(note);
+    }
+    line
+}
+
+/// A database counts only if it answers: an existing but empty directory
+/// opens without error and then fails every lookup.
+fn answers(db: &TimeZoneDatabase) -> bool {
+    db.get("Etc/UTC").is_ok() && db.get("America/New_York").is_ok()
+}
+
+fn bundled_or_none() -> Database {
+    let db = TimeZoneDatabase::bundled();
+    if answers(&db) {
+        Database {
+            db,
+            source: String::from("bundled"),
+        }
+    } else {
+        Database {
+            db: TimeZoneDatabase::none(),
+            source: String::from("none: no usable system database and none bundled"),
+        }
+    }
 }
 
 fn open_path(path: &std::path::Path) -> Option<Database> {
     let label = path.display();
-    if path.is_dir() {
-        let db = TimeZoneDatabase::from_dir(path).ok()?;
-        (!db.is_definitively_empty()).then(|| Database {
-            db,
-            source: format!("zoneinfo {label}"),
-        })
+    let (db, source) = if path.is_dir() {
+        (
+            TimeZoneDatabase::from_dir(path).ok()?,
+            format!("zoneinfo {label}"),
+        )
     } else {
-        let db = TimeZoneDatabase::from_concatenated_path(path).ok()?;
-        (!db.is_definitively_empty()).then(|| Database {
-            db,
-            source: format!("packed {label}"),
-        })
-    }
+        (
+            TimeZoneDatabase::from_concatenated_path(path).ok()?,
+            format!("packed {label}"),
+        )
+    };
+    answers(&db).then_some(Database { db, source })
 }
 
-fn system_database() -> Option<Database> {
-    // Places the general search below does not look.
-    let first: &[&str] = if cfg!(target_os = "android") {
-        &["/apex/com.android.tzdata/etc/tz/tzdata"]
-    } else if cfg!(target_env = "ohos") {
-        &["/system/etc/zoneinfo", "/system/etc/zoneinfo/tzdata"]
-    } else {
-        &[]
-    };
+/// Places the general search does not look, tried first. On HarmonyOS the
+/// packed file comes before its directory, which would open but not answer.
+const SYSTEM_FIRST: &[&str] = if cfg!(target_os = "android") {
+    &["/apex/com.android.tzdata/etc/tz/tzdata"]
+} else if cfg!(target_env = "ohos") {
+    &["/system/etc/zoneinfo/tzdata", "/system/etc/zoneinfo"]
+} else {
+    &[]
+};
+
+fn system_database(first: &[&str], skipped: &mut Vec<String>) -> Option<Database> {
     for path in first {
         let path = std::path::Path::new(path);
-        if path.exists()
-            && let Some(db) = open_path(path)
-        {
-            return Some(Database {
-                source: format!("system {}", db.source),
-                db: db.db,
-            });
+        if !path.exists() {
+            continue;
+        }
+        match open_path(path) {
+            Some(db) => {
+                return Some(Database {
+                    source: format!("system {}", db.source),
+                    db: db.db,
+                });
+            }
+            None => skipped.push(format!("{} (cannot answer)", path.display())),
         }
     }
     // TZDIR, the usual zoneinfo directories, Android's older packed file.
     // On Windows this is already the bundled copy.
     let db = TimeZoneDatabase::from_env();
-    if db.is_definitively_empty() {
+    if !answers(&db) {
+        skipped.push(String::from("the general search (cannot answer)"));
         return None;
     }
     let source = if cfg!(windows) {
