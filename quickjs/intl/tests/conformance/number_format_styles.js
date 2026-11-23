@@ -210,6 +210,20 @@ for (const [locale, options, want] of NF_STYLES) {
       'CLDR 49 uses US$ as pl USD symbol',
     ]);
   }
+  if (locale === 'ja' && options.unit === 'liter' && options.unitDisplay === 'long') {
+    variants.push([
+      { vendor: 'apple' },
+      want.map((s) => s.replace(' \u30ea\u30c3\u30c8\u30eb', '\u30ea\u30c3\u30c8\u30eb')),
+      'Apple ICU omits the space before リットル',
+    ]);
+  }
+  if (locale === 'zh' && options.unit === 'kilometer-per-hour') {
+    variants.push([
+      { vendor: 'apple' },
+      want.map((s) => s.replace(' km/h', '\u516c\u91cc/\u65f6')),
+      'Apple ICU writes 公里/时 for zh kilometer-per-hour',
+    ]);
+  }
   dataTest('sec-formatnumber', locale + ' ' + JSON.stringify(options), want, variants, (expected) => {
     const nf = new NFS(locale, options);
     for (let i = 0; i < expected.length; i++) {
