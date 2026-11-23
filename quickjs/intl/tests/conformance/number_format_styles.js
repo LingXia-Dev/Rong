@@ -196,12 +196,17 @@ const NF_STYLES = [
   ["es", {notation: 'engineering'}, ["-1,235E3", "0E0", "1E0", "2E0", "1,5E6"]],
 ];
 const NF_STYLE_VALUES = [-1234.5, 0, 1, 2, 1500000];
+// CLDR 46 made latn the default for ar and updated es's JPY currency name.
 for (const [locale, options, want] of NF_STYLES) {
-  test('sec-formatnumber', locale + ' ' + JSON.stringify(options), () => {
+  const needsCldr46 = locale === 'ar' || (locale === 'es' && options.currencyDisplay === 'name');
+  const variants = needsCldr46
+    ? [[{ cldrBelow: 46 }, SKIP_DATA, 'the ' + locale + ' row holds CLDR 46+ data']]
+    : [];
+  dataTest('sec-formatnumber', locale + ' ' + JSON.stringify(options), want, variants, (expected) => {
     const nf = new NFS(locale, options);
-    for (let i = 0; i < want.length; i++) {
-      assert.sameValue(nf.format(NF_STYLE_VALUES[i]), want[i], show(NF_STYLE_VALUES[i]));
-      assert.sameValue(joinParts(nf.formatToParts(NF_STYLE_VALUES[i])), want[i], 'formatToParts');
+    for (let i = 0; i < expected.length; i++) {
+      assert.sameValue(nf.format(NF_STYLE_VALUES[i]), expected[i], show(NF_STYLE_VALUES[i]));
+      assert.sameValue(joinParts(nf.formatToParts(NF_STYLE_VALUES[i])), expected[i], 'formatToParts');
     }
   });
 }
