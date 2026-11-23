@@ -237,13 +237,14 @@ fn available(data: &IntlData, service: &str, tag: &str) -> bool {
 /// An Intl.PluralRules' slots, as the bootstrap keeps them.
 fn plural_options<E: JSEngine>(slots: &JSObject<E::Value>) -> JSResult<plural::Options> {
     let text = |key: &str| -> JSResult<String> { slots.get::<_, String>(key) };
+    // Digit slots SetNumberFormatDigitOptions leaves unset are absent, not undefined.
     let count = |key: &str| -> JSResult<u8> {
-        let n: Option<f64> = slots.get(key)?;
+        let n: Option<f64> = slots.get_opt(key)?;
         Ok(n.unwrap_or(0.0) as u8)
     };
     let kind = text("type")?;
     let notation = text("notation")?;
-    let compact_display: Option<String> = slots.get("compactDisplay")?;
+    let compact_display: Option<String> = slots.get_opt("compactDisplay")?;
     let digits = number::DigitOptions {
         min_integer: count("minimumIntegerDigits")?,
         min_fraction: count("minimumFractionDigits")?,
