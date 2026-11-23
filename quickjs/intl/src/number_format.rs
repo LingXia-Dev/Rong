@@ -1,13 +1,17 @@
-//! Intl.NumberFormat's PartitionNumberPattern for the decimal and percent
-//! styles, written over ICU4X's data rather than its `DecimalFormatter`:
-//! grouping honours `useGrouping: "always"` and every part keeps the type
-//! ECMA-402 gives it.
+//! Intl.NumberFormat's PartitionNumberPattern, written over ICU4X's data
+//! rather than its `DecimalFormatter`: grouping honours `useGrouping:
+//! "always"`, the notations follow ComputeExponent, and every part keeps
+//! the type ECMA-402 gives it.
 
 use crate::cldr_numbers::{ENTRIES, ROOT_SYMBOLS, RootSymbols, VALUES, Values};
 use crate::data::IntlData;
-use crate::number::{self, DigitOptions, IntlMV};
+use crate::number::{self, DigitOptions, IntlMV, Rounded};
+pub(crate) use crate::plural::Notation;
 use fixed_decimal::UnsignedDecimal;
-use icu::decimal::provider::{DecimalDigitsV1, DecimalSymbolsV1};
+use icu::decimal::provider::{
+    DecimalCompactLongV1, DecimalCompactShortV1, DecimalDigitsV1, DecimalSymbolsV1,
+};
+use icu::plurals::{PluralOperands, PluralRules};
 use icu_experimental::dimension::provider::percent::DecimalPercentV1;
 use icu_pattern::{DoublePlaceholderKey, PatternItem};
 use icu_provider::prelude::*;
@@ -46,6 +50,7 @@ pub(crate) struct Options {
     pub locale: String,
     pub numbering_system: String,
     pub style: Style,
+    pub notation: Notation,
     pub digits: DigitOptions,
     pub grouping: Grouping,
     pub sign: SignDisplay,
@@ -81,6 +86,15 @@ enum Piece {
     PercentSign(String),
 }
 
+impl LocaleFormat {
+    /// ASCII digits in the numbering system's.
+    fn transliterate(&self, s: &str) -> String {
+        s.chars()
+            .map(|c| c.to_digit(10).map_or(c, |d| self.digits.digit(d)))
+            .collect()
+    }
+}
+
 /// What formatting needs for one locale, numbering system and style.
 pub(crate) struct LocaleFormat {
     decimal: String,
@@ -90,6 +104,8 @@ pub(crate) struct LocaleFormat {
     min_grouping: u8,
     digits: Digits,
     cldr: &'static Values,
+    /// The minus sign an exponent takes.
+    minus: String,
     zero: Vec<Piece>,
     positive: Vec<Piece>,
     negative: Vec<Piece>,
@@ -99,6 +115,61 @@ pub(crate) struct LocaleFormat {
 #[derive(Default)]
 pub(crate) struct Cache {
     formats: RefCell<HashMap<(String, String, Style), Rc<LocaleFormat>>>,
+    compact: RefCell<HashMap<(String, bool), Rc<Compact>>>,
+}
+
+/// A locale's compact patterns (short or long) and the plural rules that
+/// pick among them.
+pub(crate) struct Compact {
+    patterns: DataPayload<DecimalCompactShortV1>,
+    rules: PluralRules,
+}
+
+impl Compact {
+    /// ComputeExponentForMagnitude for compact notation: the exponent of the
+    /// last pattern at or below the magnitude, 0 below the first.
+    fn exponent_for_magnitude(&self, magnitude: i16) -> i16 {
+        self.patterns
+            .get()
+            .0
+            .iter()
+            .filter(|t| magnitude >= i16::from(t.sized))
+            .last()
+            .map_or(0, |t| {
+                i16::from(t.sized) - i16::from(t.variable.get_default().0.get())
+            })
+    }
+
+    /// The text around the number in the pattern for a rounded significand
+    /// shown at `exponent`.
+    fn affixes(&self, significand: &UnsignedDecimal, exponent: u8) -> (String, String) {
+        let magnitude = if significand.is_zero() {
+            0
+        } else {
+            significand.nonzero_magnitude_start()
+        } + i16::from(exponent);
+        let operands = PluralOperands::from_significand_and_exponent(significand, exponent);
+        let mut prefix = String::new();
+        let mut suffix = String::new();
+        if let Some(t) = self
+            .patterns
+            .get()
+            .0
+            .iter()
+            .filter(|t| magnitude >= i16::from(t.sized))
+            .last()
+        {
+            let mut after = false;
+            for item in t.variable.get(operands, &self.rules).1.iter() {
+                match item {
+                    PatternItem::Literal(text) if after => suffix.push_str(text),
+                    PatternItem::Literal(text) => prefix.push_str(text),
+                    PatternItem::Placeholder(_) => after = true,
+                }
+            }
+        }
+        (prefix, suffix)
+    }
 }
 
 impl Cache {
@@ -115,6 +186,45 @@ impl Cache {
         }
         let built = Rc::new(load(data, locale, numbering_system, style)?);
         self.formats.borrow_mut().insert(key, built.clone());
+        Ok(built)
+    }
+
+    pub(crate) fn compact(
+        &self,
+        data: &IntlData,
+        locale: &str,
+        long: bool,
+    ) -> Result<Rc<Compact>, String> {
+        let key = (locale.to_string(), long);
+        if let Some(found) = self.compact.borrow().get(&key) {
+            return Ok(found.clone());
+        }
+        let parsed = locale
+            .parse::<icu::locale::Locale>()
+            .map_err(|_| format!("{locale} is not a locale"))?;
+        let data_locale = DataLocale::from(&parsed);
+        let provider = data.provider();
+        let missing = |_| {
+            format!(
+                "the data blob has no {} compact patterns for {locale} or its fallbacks",
+                if long { "long" } else { "short" }
+            )
+        };
+        let patterns = if long {
+            let response: DataResponse<DecimalCompactLongV1> = provider
+                .load(request(&data_locale, Default::default()))
+                .map_err(missing)?;
+            response.payload.cast()
+        } else {
+            let response: DataResponse<DecimalCompactShortV1> = provider
+                .load(request(&data_locale, Default::default()))
+                .map_err(missing)?;
+            response.payload
+        };
+        let rules = PluralRules::try_new_cardinal_unstable(&provider, (&parsed).into())
+            .map_err(|_| format!("the data blob has no plural rules for {locale}"))?;
+        let built = Rc::new(Compact { patterns, rules });
+        self.compact.borrow_mut().insert(key, built.clone());
         Ok(built)
     }
 }
@@ -209,6 +319,7 @@ fn load(
         }
     };
     let cldr = cldr_values(data, &parsed, numbering_system);
+    let minus = format!("{minus_prefix}{minus_suffix}");
     let signed = |prefix: &str, suffix: &str, sign: fn(String) -> Piece| {
         let mut pieces = Vec::new();
         if !prefix.is_empty() {
@@ -305,6 +416,7 @@ fn load(
         min_grouping: symbols.grouping_sizes.min_grouping,
         digits,
         cldr,
+        minus,
         zero,
         positive,
         negative,
@@ -339,10 +451,53 @@ enum Category {
     Negative,
 }
 
-/// PartitionNumberPattern for the decimal and percent styles in standard
-/// notation.
-pub(crate) fn format_to_parts(format: &LocaleFormat, options: &Options, x: &IntlMV) -> Vec<Part> {
-    // The number's own parts, and the category of the rounded value.
+/// ComputeExponentForMagnitude.
+fn exponent_for_magnitude(notation: Notation, compact: Option<&Compact>, magnitude: i16) -> i16 {
+    match notation {
+        Notation::Standard => 0,
+        Notation::Scientific => magnitude,
+        Notation::Engineering => magnitude.div_euclid(3) * 3,
+        Notation::CompactShort | Notation::CompactLong => {
+            compact.map_or(0, |c| c.exponent_for_magnitude(magnitude))
+        }
+    }
+}
+
+/// ComputeExponent, then FormatNumericToString of the value scaled by it.
+fn scale_and_round(
+    options: &Options,
+    compact: Option<&Compact>,
+    negative: bool,
+    x: &UnsignedDecimal,
+) -> (i16, Rounded) {
+    let scaled = |exponent: i16| {
+        let mut value = x.clone();
+        value.multiply_pow10(-exponent);
+        number::format_numeric_to_string(&options.digits, negative, &value)
+    };
+    if x.is_zero() {
+        return (0, scaled(0));
+    }
+    let magnitude = x.nonzero_magnitude_start();
+    let exponent = exponent_for_magnitude(options.notation, compact, magnitude);
+    let rounded = scaled(exponent);
+    if rounded.value.is_zero() || rounded.value.nonzero_magnitude_start() == magnitude - exponent {
+        return (exponent, rounded);
+    }
+    // 999 rounding up to 1000 moves to the next magnitude's exponent.
+    let exponent = exponent_for_magnitude(options.notation, compact, magnitude + 1);
+    (exponent, scaled(exponent))
+}
+
+/// PartitionNumberPattern.
+pub(crate) fn format_to_parts(
+    format: &LocaleFormat,
+    options: &Options,
+    compact: Option<&Compact>,
+    x: &IntlMV,
+) -> Vec<Part> {
+    // The number's own parts (PartitionNotationSubPattern), and the
+    // category of the rounded value.
     let (number, category): (Vec<Part>, Category) = match x {
         // GetNumberFormatPattern: NaN is positive-zero, so "always" signs
         // it ("+NaN") and "exceptZero" does not.
@@ -365,7 +520,7 @@ pub(crate) fn format_to_parts(format: &LocaleFormat, options: &Options, x: &Intl
                 &UnsignedDecimal::default(),
             );
             (
-                digits_parts(format, options, &rounded.string),
+                notation_parts(format, options, compact, &rounded, 0),
                 Category::MinusZero,
             )
         }
@@ -376,14 +531,17 @@ pub(crate) fn format_to_parts(format: &LocaleFormat, options: &Options, x: &Intl
                 value.multiply_pow10(2);
                 value.trim_start();
             }
-            let rounded = number::format_numeric_to_string(&options.digits, *negative, &value);
+            let (exponent, rounded) = scale_and_round(options, compact, *negative, &value);
             let category = match (*negative, rounded.value.is_zero()) {
                 (false, true) => Category::PlusZero,
                 (true, true) => Category::MinusZero,
                 (false, false) => Category::Positive,
                 (true, false) => Category::Negative,
             };
-            (digits_parts(format, options, &rounded.string), category)
+            (
+                notation_parts(format, options, compact, &rounded, exponent),
+                category,
+            )
         }
     };
     use Category::*;
@@ -412,14 +570,71 @@ pub(crate) fn format_to_parts(format: &LocaleFormat, options: &Options, x: &Intl
     parts
 }
 
+/// PartitionNotationSubPattern for a finite rounded value shown at
+/// `exponent`.
+fn notation_parts(
+    format: &LocaleFormat,
+    options: &Options,
+    compact: Option<&Compact>,
+    rounded: &Rounded,
+    exponent: i16,
+) -> Vec<Part> {
+    let digits = digits_parts(format, options, &rounded.string);
+    match options.notation {
+        Notation::Standard => digits,
+        Notation::Scientific | Notation::Engineering => {
+            let mut parts = digits;
+            parts.push(("exponentSeparator", format.cldr.exponential.to_string()));
+            if exponent < 0 {
+                parts.push(("exponentMinusSign", format.minus.clone()));
+            }
+            parts.push((
+                "exponentInteger",
+                format.transliterate(&exponent.unsigned_abs().to_string()),
+            ));
+            parts
+        }
+        Notation::CompactShort | Notation::CompactLong => {
+            let (Some(compact), Ok(shown @ 1..)) = (compact, u8::try_from(exponent)) else {
+                return digits;
+            };
+            let (prefix, suffix) = compact.affixes(&rounded.value, shown);
+            let mut parts = compact_affix(&prefix);
+            parts.extend(digits);
+            parts.extend(compact_affix(&suffix));
+            parts
+        }
+    }
+}
+
+/// A compact pattern's text beside the number: its spacing is a literal,
+/// the rest the compact symbol or name ("K", "thousand", "万").
+fn compact_affix(text: &str) -> Vec<Part> {
+    let core = text.trim_matches(char::is_whitespace);
+    if core.is_empty() {
+        return if text.is_empty() {
+            Vec::new()
+        } else {
+            vec![("literal", text.to_string())]
+        };
+    }
+    let start = text.len() - text.trim_start_matches(char::is_whitespace).len();
+    let end = start + core.len();
+    let mut parts = Vec::new();
+    if start > 0 {
+        parts.push(("literal", text[..start].to_string()));
+    }
+    parts.push(("compact", core.to_string()));
+    if end < text.len() {
+        parts.push(("literal", text[end..].to_string()));
+    }
+    parts
+}
+
 /// The integer, group, decimal and fraction parts of FormatNumericToString's
 /// unsigned ASCII string, in the numbering system's digits.
 fn digits_parts(format: &LocaleFormat, options: &Options, string: &str) -> Vec<Part> {
-    let transliterate = |s: &str| -> String {
-        s.chars()
-            .map(|c| c.to_digit(10).map_or(c, |d| format.digits.digit(d)))
-            .collect()
-    };
+    let transliterate = |s: &str| format.transliterate(s);
     let (int, fraction) = match string.split_once('.') {
         Some((int, fraction)) => (int, Some(fraction)),
         None => (string, None),
@@ -589,6 +804,7 @@ mod tests {
             locale: locale.to_string(),
             numbering_system: system.to_string(),
             style,
+            notation: Notation::Standard,
             digits: DigitOptions {
                 min_integer: 1,
                 min_fraction: 0,
@@ -603,7 +819,7 @@ mod tests {
             grouping: Grouping::Auto,
             sign,
         };
-        format_to_parts(&format, &options, &number::to_intl_mv(value))
+        format_to_parts(&format, &options, None, &number::to_intl_mv(value))
             .iter()
             .map(|(kind, text)| format!("{kind}:{}", text.escape_default()))
             .collect::<Vec<_>>()
@@ -638,6 +854,26 @@ mod tests {
         // en with arab takes root's arab signs in both styles.
         let arab = parts_of("en", "arab", Style::Percent, SignDisplay::Auto, "-0.25");
         assert!(arab.starts_with(r"minusSign:\u{61c}-"), "{arab}");
+    }
+
+    #[test]
+    fn compact_affixes_split_spacing_from_the_symbol() {
+        assert_eq!(compact_affix(""), vec![]);
+        assert_eq!(compact_affix("K"), vec![("compact", String::from("K"))]);
+        assert_eq!(
+            compact_affix("\u{a0}Tsd."),
+            vec![
+                ("literal", String::from("\u{a0}")),
+                ("compact", String::from("Tsd."))
+            ]
+        );
+        assert_eq!(
+            compact_affix(" thousand"),
+            vec![
+                ("literal", String::from(" ")),
+                ("compact", String::from("thousand"))
+            ]
+        );
     }
 
     #[test]

@@ -323,8 +323,28 @@ where
                         report(&format!("rong_quickjs_intl: {e}"));
                         bad(&e)
                     })?;
-                let parts =
-                    number_format::format_to_parts(&format, &options, &number::to_intl_mv(&value));
+                let compact = match options.notation {
+                    plural::Notation::CompactShort | plural::Notation::CompactLong => Some(
+                        state
+                            .numbers
+                            .compact(
+                                &state.data,
+                                &options.locale,
+                                options.notation == plural::Notation::CompactLong,
+                            )
+                            .map_err(|e| {
+                                report(&format!("rong_quickjs_intl: {e}"));
+                                bad(&e)
+                            })?,
+                    ),
+                    _ => None,
+                };
+                let parts = number_format::format_to_parts(
+                    &format,
+                    &options,
+                    compact.as_deref(),
+                    &number::to_intl_mv(&value),
+                );
                 Ok(parts
                     .into_iter()
                     .map(|(kind, value)| vec![kind.to_string(), value])
@@ -775,11 +795,14 @@ fn number_format_options<E: JSEngine>(
         "percent" => Style::Percent,
         _ => return Err(bad("this style is not supported yet")),
     };
-    // Formatting compact, scientific or engineering as standard would be a
-    // wrong answer, not a fallback.
-    if text("notation")? != "standard" {
-        return Err(bad("this notation is not supported yet"));
-    }
+    let compact_display: Option<String> = slots
+        .get_opt::<_, Option<String>>("compactDisplay")?
+        .flatten();
+    let notation = plural::Notation::parse(
+        &text("notation")?,
+        compact_display.as_deref().unwrap_or("short"),
+    )
+    .ok_or_else(|| bad("unknown notation"))?;
     // [[UseGrouping]] is a string or false.
     let grouping: Option<String> = slots.get_opt::<_, String>("useGrouping").ok().flatten();
     let grouping = match grouping.as_deref() {
@@ -800,6 +823,7 @@ fn number_format_options<E: JSEngine>(
         locale: text("dataLocale")?,
         numbering_system: text("numberingSystem")?,
         style,
+        notation,
         digits: digit_options::<E>(slots)?,
         grouping,
         sign,
