@@ -166,8 +166,9 @@ fn install_descend(ctx: &JSContext, next: Next) -> JSResult<()> {
 
 fn install_level(ctx: &JSContext, level: i32, next: Next) -> JSResult<()> {
     let own = ctx.clone();
+    let name = format!("descend{level}");
     ctx.global().set(
-        format!("descend{level}"),
+        name.as_str(),
         JSFunc::new(ctx, move |n: i32| -> JSResult<String> {
             let before = JSObject::new(&own);
             before.set("n", n)?;
