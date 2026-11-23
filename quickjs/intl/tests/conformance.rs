@@ -20,6 +20,10 @@ const FILES: &[(&str, &str)] = &[
         "number_format.js",
         include_str!("conformance/number_format.js"),
     ),
+    (
+        "date_time_format.js",
+        include_str!("conformance/date_time_format.js"),
+    ),
     ("robustness.js", include_str!("conformance/robustness.js")),
     ("regressions.js", include_str!("conformance/regressions.js")),
 ];
