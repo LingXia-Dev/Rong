@@ -12,8 +12,10 @@
 //! The code is written against rong's engine-generic API and instantiated for
 //! QuickJS by `rong_quickjs`, so this crate does not depend on the engine.
 
+mod cldr_dates;
 mod cldr_numbers;
 mod data;
+mod date_time_format;
 mod locale;
 mod number;
 mod number_format;
@@ -62,6 +64,7 @@ struct IntlState {
     settings: settings::SettingsRecord,
     plurals: plural::Cache,
     numbers: number_format::Cache,
+    date_times: date_time_format::Cache,
     /// Services whose default already reported a host locale missing from
     /// the blob.
     reported_defaults: std::cell::RefCell<std::collections::HashSet<String>>,
@@ -113,6 +116,7 @@ pub fn configure<C: JSContextImpl>(ctx: &JSContext<C>, data: IntlData, settings:
         settings: settings::SettingsRecord::new(settings),
         plurals: plural::Cache::default(),
         numbers: number_format::Cache::default(),
+        date_times: Default::default(),
         reported_defaults: Default::default(),
     });
 }
@@ -332,6 +336,153 @@ where
             Ok(f64::from(currency_digits(&state(&own)?.data, &code)))
         })?,
     )?;
+    let own = ctx.clone();
+    natives.set(
+        "resolveDateTimeFormat",
+        JSFunc::<E::Value>::new(
+            ctx,
+            move |requested: Vec<String>,
+                  ca: Option<String>,
+                  nu: Option<String>,
+                  hc: Option<String>|
+                  -> JSResult<Vec<String>> {
+                let state = state(&own)?;
+                let available = |tag: &str| available(&state.data, "DateTimeFormat", tag);
+                let default = state.default_locale("DateTimeFormat");
+                let resolved = locale::resolve_locale(
+                    state.data.canonicalizer(),
+                    &available,
+                    &requested,
+                    &[
+                        ("ca", ca.map(|v| canonical_u_value("ca", v))),
+                        ("nu", nu),
+                        ("hc", hc),
+                    ],
+                    &["ca", "hc", "nu"],
+                    &DateTimeLocaleData(state),
+                    &default,
+                );
+                let value = |key: &str| {
+                    resolved
+                        .values
+                        .iter()
+                        .find_map(|(k, v)| (k == key).then(|| v.clone()).flatten())
+                };
+                let [mut hour_cycle, hour_cycle_12, hour_cycle_24] = state
+                    .date_times
+                    .hour_cycles(&state.data, &resolved.data_locale);
+                if let Some(hc) = state.settings.get().hour_cycle {
+                    hour_cycle = match hc {
+                        HourCycle::H11 => "h11",
+                        HourCycle::H12 => "h12",
+                        HourCycle::H23 => "h23",
+                        HourCycle::H24 => "h24",
+                    }
+                    .to_string();
+                }
+                Ok(vec![
+                    resolved.locale.clone(),
+                    resolved.data_locale.clone(),
+                    value("ca").unwrap_or_else(|| String::from("gregory")),
+                    value("nu").unwrap_or_else(|| String::from("latn")),
+                    value("hc").unwrap_or_else(|| NULL_HC.to_string()),
+                    hour_cycle,
+                    hour_cycle_12,
+                    hour_cycle_24,
+                ])
+            },
+        )?,
+    )?;
+    let own = ctx.clone();
+    natives.set(
+        "primaryTimeZone",
+        JSFunc::<E::Value>::new(ctx, move |name: String| -> JSResult<Option<String>> {
+            Ok(date_time_format::primary_zone(&state(&own)?.data, &name).ok())
+        })?,
+    )?;
+    let own = ctx.clone();
+    natives.set(
+        "systemTimeZone",
+        JSFunc::<E::Value>::new(ctx, move || -> JSResult<String> {
+            let state = state(&own)?;
+            let name = state
+                .settings
+                .get()
+                .time_zone
+                .or_else(rong_quickjs_tz::system_zone)
+                .unwrap_or_else(|| String::from("UTC"));
+            Ok(date_time_format::primary_zone(&state.data, &name)
+                .unwrap_or_else(|_| String::from("UTC")))
+        })?,
+    )?;
+    let own = ctx.clone();
+    natives.set(
+        "dateTimeFormatFields",
+        JSFunc::<E::Value>::new(
+            ctx,
+            move |slots: JSObject<E::Value>| -> JSResult<Vec<Vec<String>>> {
+                let state = state(&own)?;
+                let request = date_time_request::<E>(&slots)?;
+                let format = state.date_times.get(&state.data, &request).map_err(|e| {
+                    report(&format!("rong_quickjs_intl: {e}"));
+                    bad(&e)
+                })?;
+                Ok(format
+                    .fields
+                    .iter()
+                    .map(|(k, v)| vec![k.to_string(), v.clone()])
+                    .collect())
+            },
+        )?,
+    )?;
+    let own = ctx.clone();
+    natives.set(
+        "dateTimeFormatParts",
+        JSFunc::<E::Value>::new(
+            ctx,
+            move |slots: JSObject<E::Value>, x: f64| -> JSResult<Vec<Vec<String>>> {
+                let state = state(&own)?;
+                let request = date_time_request::<E>(&slots)?;
+                let zone: String = slots.get("timeZone")?;
+                let format = state.date_times.get(&state.data, &request).map_err(|e| {
+                    report(&format!("rong_quickjs_intl: {e}"));
+                    bad(&e)
+                })?;
+                let parts = date_time_format::format_to_parts(&state.data, &format, &zone, x)
+                    .map_err(|e| bad(&e))?;
+                Ok(parts
+                    .into_iter()
+                    .map(|(kind, value, _)| vec![kind.to_string(), value])
+                    .collect())
+            },
+        )?,
+    )?;
+    let own = ctx.clone();
+    natives.set(
+        "dateTimeFormatRangeParts",
+        JSFunc::<E::Value>::new(
+            ctx,
+            move |slots: JSObject<E::Value>, x: f64, y: f64| -> JSResult<Vec<Vec<String>>> {
+                let state = state(&own)?;
+                let request = date_time_request::<E>(&slots)?;
+                let zone: String = slots.get("timeZone")?;
+                let format = state.date_times.get(&state.data, &request).map_err(|e| {
+                    report(&format!("rong_quickjs_intl: {e}"));
+                    bad(&e)
+                })?;
+                let parts =
+                    date_time_format::format_range_to_parts(&state.data, &format, &zone, x, y)
+                        .map_err(|e| {
+                            report(&format!("rong_quickjs_intl: {e}"));
+                            bad(&e)
+                        })?;
+                Ok(parts
+                    .into_iter()
+                    .map(|(kind, value, source)| vec![kind.to_string(), value, source.to_string()])
+                    .collect())
+            },
+        )?,
+    )?;
     let install: JSFunc<E::Value> = ctx.eval(Source::from_bytes(BOOTSTRAP))?;
     // The returned helpers serve the constructors from phase 1 on.
     let _helpers: JSObject<E::Value> = install.call(None, (natives,))?;
@@ -356,8 +507,127 @@ fn available(data: &IntlData, service: &str, tag: &str) -> bool {
     match service {
         "PluralRules" => data.has_locale::<icu::plurals::provider::PluralsCardinalV1>(&locale),
         "NumberFormat" => data.has_locale::<icu::decimal::provider::DecimalSymbolsV1>(&locale),
+        "DateTimeFormat" => data.falls_back_into(&locale, &date_time_locales(data)),
         _ => false,
     }
+}
+
+/// The locales with Gregorian date patterns, the base every calendar's
+/// formatting needs.
+fn date_time_locales(data: &IntlData) -> Vec<String> {
+    data.locales_any::<icu::datetime::provider::semantic_skeletons::DatetimePatternsDateGregorianV1>()
+}
+
+/// [[LocaleData]] for `ca`, `nu` and `hc`.
+struct DateTimeLocaleData<'a>(&'a IntlState);
+
+/// The internal value of a null `hc`; matches the bootstrap's.
+const NULL_HC: &str = "<null>";
+
+impl locale::LocaleData for DateTimeLocaleData<'_> {
+    fn values(&self, locale: &str, key: &str) -> Vec<String> {
+        match key {
+            "ca" => {
+                let default = default_calendar(&self.0.data, locale);
+                let mut list = vec![default.clone()];
+                list.extend(
+                    date_time_format::CALENDARS
+                        .iter()
+                        .filter(|c| **c != default)
+                        .map(|c| c.to_string()),
+                );
+                list
+            }
+            "nu" => number_format::numbering_systems(&self.0.data, locale),
+            "hc" => [NULL_HC, "h11", "h12", "h23", "h24"]
+                .iter()
+                .map(|v| v.to_string())
+                .collect(),
+            _ => Vec::new(),
+        }
+    }
+}
+
+/// The locale's preferred calendar as ECMA-402 names it; gregory without
+/// the blob's calendar preferences.
+fn default_calendar(data: &IntlData, locale: &str) -> String {
+    use icu::calendar::AnyCalendarKind;
+    use icu::calendar::preferences::CalendarPreferences;
+    let Ok(parsed) = locale.parse::<icu::locale::Locale>() else {
+        return String::from("gregory");
+    };
+    let kind =
+        AnyCalendarKind::try_new_unstable(&data.provider(), CalendarPreferences::from(&parsed))
+            .unwrap_or(AnyCalendarKind::Gregorian);
+    match kind {
+        AnyCalendarKind::Buddhist => "buddhist",
+        AnyCalendarKind::Chinese => "chinese",
+        AnyCalendarKind::Coptic => "coptic",
+        AnyCalendarKind::Dangi => "dangi",
+        AnyCalendarKind::EthiopianAmeteAlem => "ethioaa",
+        AnyCalendarKind::Ethiopian => "ethiopic",
+        AnyCalendarKind::Hebrew => "hebrew",
+        AnyCalendarKind::Indian => "indian",
+        AnyCalendarKind::HijriTabularTypeIIFriday => "islamic-civil",
+        AnyCalendarKind::HijriTabularTypeIIThursday => "islamic-tbla",
+        AnyCalendarKind::HijriUmmAlQura => "islamic-umalqura",
+        AnyCalendarKind::Iso => "iso8601",
+        AnyCalendarKind::Japanese => "japanese",
+        AnyCalendarKind::Persian => "persian",
+        AnyCalendarKind::Roc => "roc",
+        _ => "gregory",
+    }
+    .to_string()
+}
+
+/// CanonicalizeUValue for a key's option value.
+fn canonical_u_value(key: &str, value: String) -> String {
+    value_aliases::VALUE_ALIASES
+        .iter()
+        .find(|(k, alias, _)| *k == key && *alias == value)
+        .map_or(value, |(_, _, canonical)| canonical.to_string())
+}
+
+/// The date-time request in a DateTimeFormat's slots.
+fn date_time_request<E: JSEngine>(
+    slots: &JSObject<E::Value>,
+) -> JSResult<date_time_format::Request> {
+    // A slot or option may be present and undefined.
+    let text = |key: &str| -> JSResult<Option<String>> {
+        Ok(slots.get_opt::<_, Option<String>>(key)?.flatten())
+    };
+    let options: JSObject<E::Value> = slots.get("formatOptions")?;
+    let mut components = Vec::new();
+    for key in [
+        "weekday",
+        "era",
+        "year",
+        "month",
+        "day",
+        "dayPeriod",
+        "hour",
+        "minute",
+        "second",
+        "fractionalSecondDigits",
+        "timeZoneName",
+    ] {
+        if key == "fractionalSecondDigits" {
+            if let Some(n) = options.get_opt::<_, Option<f64>>(key)?.flatten() {
+                components.push((key.to_string(), (n as u8).to_string()));
+            }
+        } else if let Some(v) = options.get_opt::<_, Option<String>>(key)?.flatten() {
+            components.push((key.to_string(), v));
+        }
+    }
+    Ok(date_time_format::Request {
+        data_locale: text("dataLocale")?.unwrap_or_default(),
+        calendar: text("calendar")?.unwrap_or_else(|| String::from("gregory")),
+        numbering_system: text("numberingSystem")?.unwrap_or_else(|| String::from("latn")),
+        hour_cycle: text("hourCycle")?,
+        date_style: text("dateStyle")?,
+        time_style: text("timeStyle")?,
+        components,
+    })
 }
 
 /// CurrencyDigits: the currency's minor unit digits as CLDR records them
@@ -401,6 +671,7 @@ fn service_locales(data: &IntlData, service: &str) -> Vec<String> {
     match service {
         "PluralRules" => data.locales::<icu::plurals::provider::PluralsCardinalV1>(),
         "NumberFormat" => data.locales::<icu::decimal::provider::DecimalSymbolsV1>(),
+        "DateTimeFormat" => date_time_locales(data),
         _ => Vec::new(),
     }
 }

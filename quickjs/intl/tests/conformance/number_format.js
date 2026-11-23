@@ -721,16 +721,13 @@ const NF_TABLE = [
   ["pt-PT", {style: "percent", signDisplay: "exceptZero", maximumFractionDigits: 1},
     ["0%","0%","+100%","-100%","+123\u00a0456,8%","-123\u00a0456\u00a0789,1%","0%","+100\u00a0000\u00a0000\u00a0000\u00a0000\u00a0000\u00a0000\u00a0000%","0%","NaN%","+\u221e%","-\u221e%"]],
 ];
-// CLDR 46 made latn the default for ar and set minimumGroupingDigits 2 for
-// it and sl; an older ICU (JavaScriptCore on Linux has ICU 74) differs.
-const OLD_DATA = {
-  ar: () => new NF('ar').format(0) !== '0',
-  it: () => new NF('it').format(1234) !== '1234',
-  sl: () => new NF('sl').format(1234) !== '1234',
-};
+// The table holds CLDR 46+ data: CLDR 46 made latn the default for ar and
+// set minimumGroupingDigits 2 for it and sl. An engine on older data skips
+// those rows.
+const NF_CLDR46 = { ar: true, it: true, sl: true };
 for (const [locale, options, want] of NF_TABLE) {
-  const stale = ENGINE === 'reference' && OLD_DATA[locale] !== undefined && OLD_DATA[locale]();
-  unlessOldData(stale, 'the reference\'s ICU predates CLDR 46 for ' + locale, 'sec-formatnumber', locale + ' ' + JSON.stringify(options), () => {
+  const variants = NF_CLDR46[locale] ? [[{ cldrBelow: 46 }, SKIP_DATA, 'the ' + locale + ' rows hold CLDR 46 data']] : [];
+  dataTest('sec-formatnumber', locale + ' ' + JSON.stringify(options), want, variants, (want) => {
     const nf = new NF(locale, options);
     const got = NF_VALUES.map((v) => nf.format(v));
     for (let i = 0; i < got.length; i++) assert.sameValue(got[i], want[i], show(NF_VALUES[i]));

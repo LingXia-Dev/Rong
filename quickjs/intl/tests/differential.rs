@@ -12,9 +12,13 @@ const BLOB: &[u8] = include_bytes!("data/intl-test.postcard");
 const RUN: &str = r#"
 (cases) => cases.map(([expr, expect, note]) => {
   let got;
+  let thrown = '';
   try { got = JSON.stringify((0, eval)(expr)); }
-  catch (e) { got = 'throws ' + (e && e.constructor ? e.constructor.name : String(e)); }
-  return [expr, got, expect, note || ''];
+  catch (e) {
+    got = 'throws ' + (e && e.constructor ? e.constructor.name : String(e));
+    thrown = String(e && e.message);
+  }
+  return [expr, got, expect, note || '', thrown];
 })
 "#;
 
@@ -26,12 +30,7 @@ fn log(line: &str) {
 fn locale_cases_match_on_every_engine() -> Result<(), String> {
     let rt = RongJS::runtime();
     let ctx = rt.context();
-    install_intl(&ctx)?;
-    let native: bool = ctx
-        .eval(Source::from_bytes(
-            "typeof Intl.DateTimeFormat === 'function'",
-        ))
-        .map_err(|e| e.to_string())?;
+    let native = !install_intl(&ctx)?;
     log(&if native {
         String::from("answers from the engine's own Intl")
     } else {
@@ -50,6 +49,7 @@ fn locale_cases_match_on_every_engine() -> Result<(), String> {
         include_str!("cases/locales.json"),
         include_str!("cases/plurals.json"),
         include_str!("cases/numbers.json"),
+        include_str!("cases/dates.json"),
     ] {
         let cases: JSArray = JSArray::from_object(
             JSObject::from_json_string(&ctx, table).map_err(|e| e.to_string())?,
@@ -61,6 +61,12 @@ fn locale_cases_match_on_every_engine() -> Result<(), String> {
     let mut failed = 0;
     for row in &results {
         let (expr, got, expect, note) = (&row[0], &row[1], &row[2], &row[3]);
+        // What a throw said, for a case that did not expect it.
+        let thrown = if got == expect || row[4].is_empty() {
+            String::new()
+        } else {
+            format!(" ({})", row[4])
+        };
         // A case with a note is reported, not failed: its answer follows the
         // engine's CLDR version, or a feature newer than the reference engine.
         let verdict = if got == expect {
@@ -72,7 +78,7 @@ fn locale_cases_match_on_every_engine() -> Result<(), String> {
             "DIFF"
         };
         log(&format!(
-            "{verdict} | {expr} | got {got} | want {expect} {note}"
+            "{verdict} | {expr} | got {got}{thrown} | want {expect} {note}"
         ));
     }
     if failed > 0 {
@@ -82,16 +88,17 @@ fn locale_cases_match_on_every_engine() -> Result<(), String> {
 }
 
 /// QuickJS gets rong's `Intl`; an engine with its own (the reference) is left
-/// as it is.
-fn install_intl(ctx: &JSContext) -> Result<(), String> {
+/// as it is. Whether rong's was installed.
+fn install_intl(ctx: &JSContext) -> Result<bool, String> {
     let native: bool = ctx
         .eval(Source::from_bytes("typeof globalThis.Intl !== 'undefined'"))
         .map_err(|e| e.to_string())?;
     if native {
-        return Ok(());
+        return Ok(false);
     }
     let data =
         rong_quickjs_intl::IntlData::try_from_static_blob(BLOB).map_err(|e| e.to_string())?;
     rong_quickjs_intl::configure(ctx, data, rong_quickjs_intl::IntlSettings::default());
-    rong_quickjs_intl::init::<RongJS>(ctx).map_err(|e| e.to_string())
+    rong_quickjs_intl::init::<RongJS>(ctx).map_err(|e| e.to_string())?;
+    Ok(true)
 }

@@ -26,11 +26,41 @@ function only(engine, reason, section, name, fn) {
   else __results.push([section, name + ' [skipped: ' + reason + ']', 'skip']);
 }
 
-// A case the reference skips when its own data says it predates the
-// CLDR the expectation comes from; rong always runs it.
-function unlessOldData(stale, reason, section, name, fn) {
-  if (ENGINE === 'reference' && stale) __results.push([section, name + ' [skipped: ' + reason + ']', 'skip']);
-  else test(section, name, fn);
+// The engine's locale data, set by the runner: `source` is 'icu4x' (rong)
+// or 'icu'; `cldr` is the CLDR version as a number (49, 44.1), undefined when
+// the engine reports none; `vendor` is 'apple' or 'windows' for those
+// vendors' own ICU builds. Node's runner leaves it unset.
+var DATA = typeof DATA === 'object' ? DATA : { source: 'icu', cldr: undefined, vendor: 'unicode' };
+
+// The expectation that holds for this engine's data. `variants` is a list of
+// [condition, value, why]; the first whose condition matches wins, else
+// `value`. Conditions: { cldrAtLeast: n }, { cldrBelow: n }, { source },
+// { vendor }. A CLDR condition on an engine that reports no CLDR version
+// gives SKIP_DATA, as does a matching variant whose value is SKIP_DATA.
+var SKIP_DATA = { skip: true };
+function forData(value, variants) {
+  for (const [when, other, why] of variants || []) {
+    let match = true;
+    if ('cldrAtLeast' in when || 'cldrBelow' in when) {
+      if (DATA.cldr === undefined) return { value: SKIP_DATA, why: 'the engine reports no CLDR version; ' + why };
+      if ('cldrAtLeast' in when && !(DATA.cldr >= when.cldrAtLeast)) match = false;
+      if ('cldrBelow' in when && !(DATA.cldr < when.cldrBelow)) match = false;
+    }
+    if ('source' in when && DATA.source !== when.source) match = false;
+    if ('vendor' in when && DATA.vendor !== when.vendor) match = false;
+    if (match) return { value: other, why };
+  }
+  return { value, why: '' };
+}
+
+// A case whose expectation depends on the engine's data.
+function dataTest(section, name, value, variants, fn) {
+  const chosen = forData(value, variants);
+  if (chosen.value === SKIP_DATA) {
+    __results.push([section, name + ' [skipped: ' + chosen.why + ']', 'skip']);
+    return;
+  }
+  test(section, name, () => fn(chosen.value));
 }
 
 function show(v) {

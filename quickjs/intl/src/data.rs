@@ -105,6 +105,33 @@ impl IntlData {
             .unwrap_or_default()
     }
 
+    /// The locales the blob holds any data for `M` under, attributes or not,
+    /// short of the root; sorted and without repeats.
+    pub(crate) fn locales_any<M: DataMarker>(&self) -> Vec<String> {
+        let mut out: Vec<String> = self
+            .0
+            .blob
+            .iter_ids_for_marker(M::INFO)
+            .map(|ids| {
+                ids.into_iter()
+                    .filter(|id| !id.locale.is_unknown())
+                    .map(|id| id.locale.to_string())
+                    .collect()
+            })
+            .unwrap_or_default();
+        out.sort();
+        out.dedup();
+        out
+    }
+
+    /// Whether `locale` or a locale it falls back to, short of the root, is
+    /// among `held` (from [`Self::locales_any`]).
+    pub(crate) fn falls_back_into(&self, locale: &icu::locale::Locale, held: &[String]) -> bool {
+        self.fallback_chain(locale)
+            .iter()
+            .any(|l| held.binary_search(l).is_ok())
+    }
+
     pub(crate) fn canonicalizer(&self) -> &LocaleCanonicalizer {
         &self.0.canonicalizer
     }

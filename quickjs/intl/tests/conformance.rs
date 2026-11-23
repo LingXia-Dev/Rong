@@ -20,6 +20,10 @@ const FILES: &[(&str, &str)] = &[
         "number_format.js",
         include_str!("conformance/number_format.js"),
     ),
+    (
+        "date_time_format.js",
+        include_str!("conformance/date_time_format.js"),
+    ),
     ("robustness.js", include_str!("conformance/robustness.js")),
     ("regressions.js", include_str!("conformance/regressions.js")),
 ];
@@ -51,6 +55,163 @@ fn install_intl(ctx: &JSContext, locale: Option<&str>) -> Result<bool, String> {
     Ok(true)
 }
 
+/// The reference engine's ICU, read from the ICU library the process has
+/// loaded: `ulocdata_getCLDRVersion` and `u_getVersion`, unsuffixed (Apple's
+/// libicucore, Windows' icu.dll) or with ICU's version suffix.
+mod icu {
+    use std::ffi::{CString, c_void};
+
+    pub struct Versions {
+        pub icu: Option<String>,
+        pub cldr: Option<String>,
+        pub vendor: &'static str,
+    }
+
+    type GetVersion = unsafe extern "C" fn(*mut u8);
+    type GetCldrVersion = unsafe extern "C" fn(*mut u8, *mut i32);
+
+    #[cfg(unix)]
+    fn symbol(name: &str) -> Option<*mut c_void> {
+        unsafe extern "C" {
+            fn dlsym(handle: *mut c_void, symbol: *const std::ffi::c_char) -> *mut c_void;
+        }
+        // RTLD_DEFAULT
+        let handle = if cfg!(target_os = "macos") {
+            -2isize as *mut c_void
+        } else {
+            std::ptr::null_mut()
+        };
+        let name = CString::new(name).ok()?;
+        let found = unsafe { dlsym(handle, name.as_ptr()) };
+        (!found.is_null()).then_some(found)
+    }
+
+    #[cfg(windows)]
+    fn symbol(name: &str) -> Option<*mut c_void> {
+        unsafe extern "system" {
+            fn GetModuleHandleA(name: *const std::ffi::c_char) -> *mut c_void;
+            fn GetProcAddress(module: *mut c_void, name: *const std::ffi::c_char) -> *mut c_void;
+        }
+        let symbol = CString::new(name).ok()?;
+        let mut modules = vec![
+            "icu.dll".to_string(),
+            "icuin.dll".to_string(),
+            "icuuc.dll".to_string(),
+        ];
+        for n in 50..100 {
+            modules.push(format!("icuin{n}.dll"));
+            modules.push(format!("icuuc{n}.dll"));
+        }
+        modules.iter().find_map(|module| {
+            let module = CString::new(module.as_str()).ok()?;
+            let handle = unsafe { GetModuleHandleA(module.as_ptr()) };
+            if handle.is_null() {
+                return None;
+            }
+            let found = unsafe { GetProcAddress(handle, symbol.as_ptr()) };
+            (!found.is_null()).then_some(found)
+        })
+    }
+
+    #[cfg(not(any(unix, windows)))]
+    fn symbol(_: &str) -> Option<*mut c_void> {
+        None
+    }
+
+    /// The symbol and whether it had no version suffix.
+    fn find(base: &str) -> Option<(*mut c_void, bool)> {
+        if let Some(found) = symbol(base) {
+            return Some((found, true));
+        }
+        (50..100).find_map(|n| symbol(&format!("{base}_{n}")).map(|f| (f, false)))
+    }
+
+    fn text(v: [u8; 4]) -> String {
+        format!("{}.{}", v[0], v[1])
+    }
+
+    pub fn reference() -> Versions {
+        let mut versions = Versions {
+            icu: None,
+            cldr: None,
+            vendor: "unicode",
+        };
+        if let Some((f, plain)) = find("u_getVersion") {
+            let mut v = [0u8; 4];
+            // SAFETY: ICU's u_getVersion(UVersionInfo) writes four bytes.
+            unsafe { std::mem::transmute::<*mut c_void, GetVersion>(f)(v.as_mut_ptr()) };
+            versions.icu = Some(text(v));
+            if plain && cfg!(target_os = "macos") {
+                versions.vendor = "apple";
+            } else if plain && cfg!(windows) {
+                versions.vendor = "windows";
+            }
+        }
+        if let Some((f, _)) = find("ulocdata_getCLDRVersion") {
+            let mut v = [0u8; 4];
+            let mut status = 0i32;
+            // SAFETY: ulocdata_getCLDRVersion(UVersionInfo, UErrorCode*).
+            unsafe {
+                std::mem::transmute::<*mut c_void, GetCldrVersion>(f)(v.as_mut_ptr(), &mut status)
+            };
+            if status <= 0 {
+                versions.cldr = Some(text(v));
+            }
+        }
+        versions
+    }
+}
+
+/// `DATA` for the harness: this crate's data, or the reference engine's ICU.
+fn data_global(ours: bool) -> String {
+    if ours {
+        return String::from(
+            "var DATA = { source: 'icu4x', icu4x: '2.4', cldr: 49, vendor: 'icu4x' };",
+        );
+    }
+    let v = icu::reference();
+    let cldr = v.cldr.as_deref().unwrap_or("undefined");
+    let icu = v
+        .icu
+        .as_deref()
+        .map_or(String::from("undefined"), |i| format!("{i:?}"));
+    format!(
+        "var DATA = {{ source: 'icu', icu: {icu}, cldr: {cldr}, vendor: {:?} }};",
+        v.vendor
+    )
+}
+
+/// A GitHub Actions error annotation: the failing names in the job summary.
+fn annotate(engine: &str, failures: &[String]) {
+    let escape = |s: &str| {
+        s.replace('%', "%25")
+            .replace('\r', "%0D")
+            .replace('\n', "%0A")
+    };
+    let names: Vec<&str> = failures
+        .iter()
+        .map(|f| f.split(": ").next().unwrap_or(f))
+        .collect();
+    let mut message = names.join("; ");
+    if message.len() > 3000 {
+        message.truncate(message.floor_char_boundary(3000));
+        message.push_str(" ...");
+    }
+    println!(
+        "::error title=conformance on {} ({engine}): {} failed::{}",
+        RongJS::name(),
+        failures.len(),
+        escape(&message)
+    );
+    for failure in failures.iter().take(40) {
+        println!(
+            "::error title=conformance {}::{}",
+            RongJS::name(),
+            escape(failure)
+        );
+    }
+}
+
 fn eval<T: FromJSValue<JSEngineValue>>(ctx: &JSContext, source: &str) -> Result<T, String> {
     ctx.eval(Source::from_bytes(source))
         .map_err(|e| e.to_string())
@@ -60,12 +221,17 @@ fn eval<T: FromJSValue<JSEngineValue>>(ctx: &JSContext, source: &str) -> Result<
 fn every_case_passes_on_this_engine() -> Result<(), String> {
     let mut failures = Vec::new();
     let mut total = 0;
+    let mut engine = "rong";
     for (file, source) in FILES {
         let rt = RongJS::runtime();
         let ctx = rt.context();
         let ours = install_intl(&ctx, Some("en-US"))?;
-        let engine = if ours { "rong" } else { "reference" };
-        eval::<()>(&ctx, &format!("var ENGINE = {engine:?};"))?;
+        engine = if ours { "rong" } else { "reference" };
+        let data = data_global(ours);
+        if file == &FILES[0].0 {
+            log(&format!("{engine} data: {data}"));
+        }
+        eval::<()>(&ctx, &format!("var ENGINE = {engine:?}; {data}"))?;
         eval::<()>(&ctx, HARNESS)?;
         if let Err(e) = eval::<()>(&ctx, source) {
             failures.push(format!("{file}: the file threw: {e}"));
@@ -103,7 +269,16 @@ fn every_case_passes_on_this_engine() -> Result<(), String> {
     if failures.is_empty() {
         Ok(())
     } else {
-        Err(format!("{} of {total} cases failed", failures.len()))
+        annotate(engine, &failures);
+        let names: Vec<&str> = failures
+            .iter()
+            .map(|f| f.split(": ").next().unwrap_or(f))
+            .collect();
+        Err(format!(
+            "{} of {total} cases failed: {}",
+            failures.len(),
+            names.join("; ")
+        ))
     }
 }
 

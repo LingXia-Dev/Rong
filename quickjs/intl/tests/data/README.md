@@ -1,6 +1,6 @@
 `intl-test.postcard`: ICU4X 2.4.0 data for the tests: the locale services
-(aliases, likely subtags, parents) and plural, decimal, compact-decimal, percent and currency-fraction data
-for 30 locales. Made with icu4x-datagen 2.4.0 (installed with
+(aliases, likely subtags, parents) and plural, decimal, compact-decimal, percent, currency-fraction, date, time,
+time-zone and calendar data for 45 locales. Made with icu4x-datagen 2.4.0 (installed with
 `--features unstable`):
 
     icu4x-datagen --format blob --out intl-test.postcard \
@@ -9,9 +9,13 @@ for 30 locales. Made with icu4x-datagen 2.4.0 (installed with
         PluralsCardinalV1 PluralsOrdinalV1 PluralsRangesV1 \
         DecimalSymbolsV1 DecimalDigitsV1 DecimalCompactShortV1 DecimalCompactLongV1 \
         DecimalPercentV1 CurrencyFractionsV1 \
-      --locales en en-US en-GB fr de es it pt ru pl uk cs ar he ja zh ko hi cy sl lt ga br mt ro fa gv zh-Hant en-IN pt-PT
+        <every icu_datetime 2.4 data marker: Datetime*V1, Timezone*V1 names> \
+        TimezoneIdentifiersIanaCoreV1 TimezoneIdentifiersIanaExtendedV1 TimezonePeriodsV1 \
+        CalendarJapaneseModernV1 CalendarPreferredV1 CalendarWeekV1 \
+      --locales en en-US en-GB fr de es it pt ru pl uk cs ar he ja zh ko hi cy sl lt ga br mt ro fa gv zh-Hant en-IN pt-PT \
+        de-AT ar-EG sv tr th zh-CN sr sr-Thai si ln pl-PL
 
-107,449 bytes. sha256 f60a1b038c3cc0b4effc3ff2a58c5080bf6e1f6d1f51a9322cf8e84475910b7b.
+1,721,707 bytes. sha256 39fd6ee7e574cd1e43cd1bc102858fbd53f7add3758697bdadfaa91a6fc27a67.
 
 `locale-services.postcard`: the locale services only, no locale-specific
 data; `data_errors.rs` uses it as a blob that lacks what a constructor needs.

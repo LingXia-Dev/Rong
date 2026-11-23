@@ -55,7 +55,7 @@ const CANONICAL = [
   ['und', 'und'],
   ['und-latn', 'und-Latn'],
 ];
-only('rong', 'an alias the reference\'s ICU does not apply', 'sec-canonicalizelocalelist', 'canonical form of cmn', () => {
+only('rong', 'JavaScriptCore does not apply CLDR\'s cmn -> zh macrolanguage alias (in CLDR 44 to 49), which CanonicalizeUnicodeLocaleId requires', 'sec-canonicalizelocalelist', 'canonical form of cmn', () => {
   assert.deepEqual(Intl.getCanonicalLocales('cmn'), ['zh']);
 });
 

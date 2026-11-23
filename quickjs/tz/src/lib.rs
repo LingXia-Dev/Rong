@@ -402,11 +402,54 @@ pub fn canonical_zone(name: &str) -> Result<String, TzError> {
 }
 
 /// The zone's UTC offset in seconds at `epoch_ms` (milliseconds since the
-/// Unix epoch).
+/// Unix epoch). ECMAScript time values reach year 275760, past the range
+/// the zone data is read in (years -9999 to 9999); there an instant moves by
+/// whole 400-year Gregorian cycles, which repeat every date and weekday, so
+/// the zone's last rule (or its first offset) applies as at the real date.
 pub fn offset_seconds(name: &str, epoch_ms: i64) -> Result<i32, TzError> {
     let tz = zone(name)?;
-    let at = Timestamp::from_millisecond(epoch_ms).map_err(|_| TzError::OutOfRange)?;
+    let at =
+        Timestamp::from_millisecond(in_zone_range(epoch_ms)).map_err(|_| TzError::OutOfRange)?;
     Ok(tz.to_offset(at).seconds())
+}
+
+/// 400 Gregorian years in milliseconds: 146097 days.
+const CYCLE_MS: i64 = 146_097 * 86_400_000;
+/// Year 9000; minus it is year -5060. Both lie inside the zone data's range.
+const NEAR_LIMIT_MS: i64 = 221_845_392_000_000;
+
+fn in_zone_range(epoch_ms: i64) -> i64 {
+    let ms = i128::from(epoch_ms);
+    let cycle = i128::from(CYCLE_MS);
+    let limit = i128::from(NEAR_LIMIT_MS);
+    let cycles = |beyond: i128| beyond.div_euclid(cycle) + 1;
+    let moved = if ms > limit {
+        ms - cycles(ms - limit) * cycle
+    } else if ms < -limit {
+        ms + cycles(-limit - ms) * cycle
+    } else {
+        ms
+    };
+    moved as i64
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn extreme_time_values_keep_their_date_in_the_cycle() {
+        for ms in [8.64e15 as i64, -8.64e15 as i64, 1i64 << 50, -(1i64 << 50)] {
+            let moved = in_zone_range(ms);
+            assert!(
+                Timestamp::from_millisecond(moved).is_ok(),
+                "{ms} -> {moved}"
+            );
+            assert_eq!((ms - moved).rem_euclid(CYCLE_MS), 0);
+        }
+        assert_eq!(in_zone_range(0), 0);
+        assert_eq!(in_zone_range(NEAR_LIMIT_MS), NEAR_LIMIT_MS);
+    }
 }
 
 /// The instant, in milliseconds since the Unix epoch, at which the zone's

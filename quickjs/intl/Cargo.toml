@@ -29,6 +29,11 @@ icu_experimental = { version = "=0.7.0", default-features = false, features = ["
 tinystr = { version = "0.8", default-features = false }
 icu_pattern = { version = "=0.5.1", default-features = false, features = ["alloc", "yoke", "zerovec"] }
 log = "0.4"
+# DateTimeFormat: `fieldbag` (ECMA-402's component options to ICU4X field sets)
+# is unstable in ICU4X 2.4, which `icu` pins exactly.
+icu_datetime = { version = "=2.4.0", default-features = false, features = ["serde", "unstable"] }
+writeable = { version = "0.6", default-features = false }
+rong_quickjs_tz = { workspace = true }
 
 # Tests pick their engine and TLS backend through `rong`, such as
 # `--features rong/quickjs,rong/tls-ring` (or `rong/jscore`, the reference).
