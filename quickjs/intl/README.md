@@ -20,6 +20,10 @@ QuickJS and none of this code or data.
 | (`PluralRules`) | plural rules and ranges, ECMA-402 rounding on exact decimals, compact exponents | 124 KB (66 KB gzip) | 97 / 112 KB (62 / 61 KB gzip) | 114 KB (65 KB gzip) | not measured | 117 KB (63 KB gzip) |
 | (`NumberFormat`, decimal and percent) | the formatting layer, `icu_experimental` percent data, the CLDR number table (about 21 KB of this, from its layout: 389 entries, 68 value rows) | 120 KB (42 KB gzip) | 81 / 96 KB (36 / 35 KB gzip) | 112 KB (38 KB gzip) | not measured | 97 KB (39 KB gzip) |
 | (part of `quickjs-intl`, from `DateTimeFormat` on) | time zone code; bundled zone data only where the platform may lack a system database | 256 KB | 484 / 480 KB | 511 KB, incl. 207 KB data | not measured; about Android | 581 KB, incl. 207 KB data |
+| (`DateTimeFormat`) | `DateTimeFormat` (`format`, `formatToParts`, `formatRange`, `formatRangeToParts`), CLDR `timeData` hour cycles and flexible day periods (`src/cldr_dates.rs`) | to be measured | | | | |
+| (`toLocale*`) | `toLocale{String,DateString,TimeString}` on `Number`, `BigInt`, `Date`, `Array`, `%TypedArray%`; `String.prototype.toLocale{Upper,Lower}Case` (`CaseMapper`) | to be measured | | | | |
+| (`NumberFormat`, currency, unit, notation & range) | `style: "currency"` and `"unit"`, `scientific`/`engineering`/`compact` notation, `formatRange`/`formatRangeToParts`, CLDR unit table (`src/cldr_units.rs`) | to be measured | | | | |
+| (`RelativeTimeFormat`, `ListFormat`) | `Intl.RelativeTimeFormat` and `Intl.ListFormat` (`format`, `formatToParts`, `resolvedOptions`, `supportedLocalesOf`) | to be measured | | | | |
 | `quickjs-intl-collator` (planned, with `Collator`) | `Collator` code; its data is a separate optional blob (about 585 KB at root) | to be measured | | | | |
 
 Sizes are added to a stripped release `cdylib` (`opt-level = "s"`, LTO, one
@@ -63,17 +67,21 @@ fallback is reported once through `set_reporter`.
 
 ## Data from outside the blob
 
-- ICU4X's `icu_experimental` crate supplies percent data now (currency and
-  unit data with the styles that use them). It is pre-1.0, so it is pinned
-  exactly (`=0.7.0`, the release that pairs with ICU4X 2.4.0). Data markers
-  used: `DecimalPercentV1`, `CurrencyFractionsV1`.
-- Some CLDR number data has no ICU4X 2.4.0 data marker. It is taken from CLDR
-  directly until ICU4X ships it: the exponent separator, NaN, the infinity
-  sign, the range pattern with the approximately sign, and the percent sign
-  as a symbol of its own. `tools/cldr_numbers.py` generates
-  `src/cldr_numbers.rs` from the CLDR release ICU4X 2.4.0's data uses (CLDR
-  49.0.0; the script fails if the pinned ICU4X uses another), keeping only
-  the locales whose values differ from the root's. It is compiled in; CI
-  checks it is current.
+- ICU4X's `icu_experimental` crate supplies percent, currency and relative-time
+  data. It is pre-1.0, so it is pinned exactly (`=0.7.0`, the release that pairs
+  with ICU4X 2.4.0). Data markers used: `DecimalPercentV1`, `CurrencyFractionsV1`,
+  `CurrencyEssentialsV1`, `CurrencyExtendedDataV1`, `CurrencyPatternsDataV1`,
+  `CurrencySymbolsV1`, and `DatetimeRelative*V1`. See
+  `tests/data/README.md` for the full list of ICU4X data markers per constructor.
+- Some CLDR data has no ICU4X 2.4.0 data marker and is taken from CLDR 49.0.0
+  directly until ICU4X ships it (each generator fails if the pinned ICU4X uses
+  another CLDR release, and CI's `cldr-table` job verifies all three tables are
+  current):
+  - `tools/cldr_numbers.py` → `src/cldr_numbers.rs`: exponent separator, NaN,
+    infinity sign, range/approximately patterns, and standalone percent sign.
+  - `tools/cldr_dates.py` → `src/cldr_dates.rs`: CLDR `timeData` preferred hour
+    cycles and flexible day period (`B`) rules and names.
+  - `tools/cldr_units.py` → `src/cldr_units.rs`: sanctioned ECMA-402 unit and
+    `-per-` compound patterns.
 - The digits of each numbering system come from ECMA-402's table of
   numbering systems with simple digit mappings, compiled in.
