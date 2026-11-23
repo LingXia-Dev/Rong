@@ -36,8 +36,9 @@ fn locale_cases_match_on_every_engine() -> Result<(), String> {
         String::from("answers from the engine's own Intl")
     } else {
         format!(
-            "answers from rong_quickjs_intl on ICU4X {}",
-            rong_quickjs_intl::ICU4X_VERSION
+            "answers from rong_quickjs_intl on ICU4X {}, CLDR {}",
+            rong_quickjs_intl::ICU4X_VERSION,
+            rong_quickjs_intl::CLDR_VERSION
         )
     });
 
@@ -48,6 +49,7 @@ fn locale_cases_match_on_every_engine() -> Result<(), String> {
     for table in [
         include_str!("cases/locales.json"),
         include_str!("cases/plurals.json"),
+        include_str!("cases/numbers.json"),
     ] {
         let cases: JSArray = JSArray::from_object(
             JSObject::from_json_string(&ctx, table).map_err(|e| e.to_string())?,

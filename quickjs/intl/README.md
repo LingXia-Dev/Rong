@@ -51,3 +51,26 @@ How the tag list maps to what is exported:
   collation data it compares in code-point order after NFC normalization and
   says so once in the log, and cannot honour `sensitivity: "base"` or
   `"accent"`.
+
+The default locale is one the blob holds: the host's locale (`IntlSettings`)
+if the blob supports it, through the same lookup as a requested locale;
+otherwise the fallback the app declares with `IntlData::with_fallback_locale`;
+otherwise the first locale the blob holds for that constructor. Each such
+fallback is reported once through `set_reporter`.
+
+## Data from outside the blob
+
+- ICU4X's `icu_experimental` crate supplies percent data now (currency and
+  unit data with the styles that use them). It is pre-1.0, so it is pinned
+  exactly (`=0.7.0`, the release that pairs with ICU4X 2.4.0). Data markers
+  used: `DecimalPercentV1`, `CurrencyFractionsV1`.
+- Some CLDR number data has no ICU4X 2.4.0 data marker. It is taken from CLDR
+  directly until ICU4X ships it: the exponent separator, NaN, the infinity
+  sign, the range pattern with the approximately sign, and the percent sign
+  as a symbol of its own. `tools/cldr_numbers.py` generates
+  `src/cldr_numbers.rs` from the CLDR release ICU4X 2.4.0's data uses (CLDR
+  49.0.0; the script fails if the pinned ICU4X uses another), keeping only
+  the locales whose values differ from the root's. It is compiled in; CI
+  checks it is current.
+- The digits of each numbering system come from ECMA-402's table of
+  numbering systems with simple digit mappings, compiled in.

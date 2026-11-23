@@ -9,8 +9,8 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 
 const BLOB: &[u8] = include_bytes!("data/intl-test.postcard");
-const DEFAULT_PATHS: &str =
-    "test/intl402/Intl/getCanonicalLocales,test/intl402/Intl/builtin.js,test/intl402/PluralRules";
+const DEFAULT_PATHS: &str = "test/intl402/Intl/getCanonicalLocales,test/intl402/Intl/builtin.js,test/intl402/PluralRules,\
+     test/intl402/NumberFormat";
 
 /// The host-defined `$262` the tests may use, as far as rong can give it.
 const HOST: &str = r#"

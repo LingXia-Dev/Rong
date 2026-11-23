@@ -12,9 +12,11 @@
 //! The code is written against rong's engine-generic API and instantiated for
 //! QuickJS by `rong_quickjs`, so this crate does not depend on the engine.
 
+mod cldr_numbers;
 mod data;
 mod locale;
 mod number;
+mod number_format;
 mod plural;
 mod settings;
 mod value_aliases;
@@ -28,6 +30,9 @@ pub use data::IntlData;
 
 /// The ICU4X release whose data format and CLDR version the blobs follow.
 pub const ICU4X_VERSION: &str = "2.4.0";
+/// The CLDR release of ICU4X's data and of the number symbols this crate
+/// takes from CLDR directly.
+pub const CLDR_VERSION: &str = cldr_numbers::CLDR_VERSION;
 pub use settings::{HourCycle, IntlSettings};
 
 type Reporter = Box<dyn Fn(&str) + Send + Sync>;
@@ -56,6 +61,7 @@ struct IntlState {
     data: IntlData,
     settings: settings::SettingsRecord,
     plurals: plural::Cache,
+    numbers: number_format::Cache,
     /// Services whose default already reported a host locale missing from
     /// the blob.
     reported_defaults: std::cell::RefCell<std::collections::HashSet<String>>,
@@ -106,6 +112,7 @@ pub fn configure<C: JSContextImpl>(ctx: &JSContext<C>, data: IntlData, settings:
         data,
         settings: settings::SettingsRecord::new(settings),
         plurals: plural::Cache::default(),
+        numbers: number_format::Cache::default(),
         reported_defaults: Default::default(),
     });
 }
@@ -262,6 +269,69 @@ where
             },
         )?,
     )?;
+    let own = ctx.clone();
+    natives.set(
+        "resolveNumberFormat",
+        JSFunc::<E::Value>::new(
+            ctx,
+            move |requested: Vec<String>, nu: Option<String>| -> JSResult<Vec<String>> {
+                let state = state(&own)?;
+                let available = |tag: &str| available(&state.data, "NumberFormat", tag);
+                let default = state.default_locale("NumberFormat");
+                let resolved = locale::resolve_locale(
+                    state.data.canonicalizer(),
+                    &available,
+                    &requested,
+                    &[("nu", nu)],
+                    &["nu"],
+                    &NumberingSystems(&state.data),
+                    &default,
+                );
+                let nu = resolved
+                    .values
+                    .into_iter()
+                    .find_map(|(k, v)| (k == "nu").then_some(v).flatten())
+                    .unwrap_or_else(|| String::from("latn"));
+                Ok(vec![resolved.locale, resolved.data_locale, nu])
+            },
+        )?,
+    )?;
+    let own = ctx.clone();
+    natives.set(
+        "numberFormatParts",
+        JSFunc::<E::Value>::new(
+            ctx,
+            move |slots: JSObject<E::Value>, value: String| -> JSResult<Vec<Vec<String>>> {
+                let state = state(&own)?;
+                let options = number_format_options::<E>(&slots)?;
+                let format = state
+                    .numbers
+                    .get(
+                        &state.data,
+                        &options.locale,
+                        &options.numbering_system,
+                        options.style,
+                    )
+                    .map_err(|e| {
+                        report(&format!("rong_quickjs_intl: {e}"));
+                        bad(&e)
+                    })?;
+                let parts =
+                    number_format::format_to_parts(&format, &options, &number::to_intl_mv(&value));
+                Ok(parts
+                    .into_iter()
+                    .map(|(kind, value)| vec![kind.to_string(), value])
+                    .collect())
+            },
+        )?,
+    )?;
+    let own = ctx.clone();
+    natives.set(
+        "currencyDigits",
+        JSFunc::<E::Value>::new(ctx, move |code: String| -> JSResult<f64> {
+            Ok(f64::from(currency_digits(&state(&own)?.data, &code)))
+        })?,
+    )?;
     let install: JSFunc<E::Value> = ctx.eval(Source::from_bytes(BOOTSTRAP))?;
     // The returned helpers serve the constructors from phase 1 on.
     let _helpers: JSObject<E::Value> = install.call(None, (natives,))?;
@@ -285,7 +355,44 @@ fn available(data: &IntlData, service: &str, tag: &str) -> bool {
     };
     match service {
         "PluralRules" => data.has_locale::<icu::plurals::provider::PluralsCardinalV1>(&locale),
+        "NumberFormat" => data.has_locale::<icu::decimal::provider::DecimalSymbolsV1>(&locale),
         _ => false,
+    }
+}
+
+/// CurrencyDigits: the currency's minor unit digits as CLDR records them
+/// (ISO 4217's, as ICU's), 2 for a code it does not list.
+fn currency_digits(data: &IntlData, code: &str) -> u8 {
+    use icu_experimental::dimension::provider::currency::fractions::CurrencyFractionsV1;
+    let response: Result<icu_provider::DataResponse<CurrencyFractionsV1>, _> =
+        icu_provider::DataProvider::load(&data.provider(), Default::default());
+    let Ok(response) = response else {
+        static REPORTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+        if !REPORTED.swap(true, std::sync::atomic::Ordering::Relaxed) {
+            report(
+                "rong_quickjs_intl: the data blob has no currency fractions; currencies use 2 digits",
+            );
+        }
+        return 2;
+    };
+    let fractions = response.payload.get();
+    tinystr::TinyAsciiStr::<3>::try_from_str(code)
+        .ok()
+        .and_then(|c| fractions.fractions.get_copied(&c.to_unvalidated()))
+        .unwrap_or(fractions.default)
+        .digits
+}
+
+/// [[LocaleData]] for `nu`: the locale's own numbering system, then every
+/// system with a simple digit mapping.
+struct NumberingSystems<'a>(&'a IntlData);
+
+impl locale::LocaleData for NumberingSystems<'_> {
+    fn values(&self, locale: &str, key: &str) -> Vec<String> {
+        match key {
+            "nu" => number_format::numbering_systems(self.0, locale),
+            _ => Vec::new(),
+        }
     }
 }
 
@@ -293,22 +400,20 @@ fn available(data: &IntlData, service: &str, tag: &str) -> bool {
 fn service_locales(data: &IntlData, service: &str) -> Vec<String> {
     match service {
         "PluralRules" => data.locales::<icu::plurals::provider::PluralsCardinalV1>(),
+        "NumberFormat" => data.locales::<icu::decimal::provider::DecimalSymbolsV1>(),
         _ => Vec::new(),
     }
 }
 
-/// An Intl.PluralRules' slots, as the bootstrap keeps them.
-fn plural_options<E: JSEngine>(slots: &JSObject<E::Value>) -> JSResult<plural::Options> {
+/// The slots SetNumberFormatDigitOptions fills, as the bootstrap keeps them.
+fn digit_options<E: JSEngine>(slots: &JSObject<E::Value>) -> JSResult<number::DigitOptions> {
     let text = |key: &str| -> JSResult<String> { slots.get::<_, String>(key) };
     // Digit slots SetNumberFormatDigitOptions leaves unset are absent, not undefined.
     let count = |key: &str| -> JSResult<u8> {
         let n: Option<f64> = slots.get_opt(key)?;
         Ok(n.unwrap_or(0.0) as u8)
     };
-    let kind = text("type")?;
-    let notation = text("notation")?;
-    let compact_display: Option<String> = slots.get_opt("compactDisplay")?;
-    let digits = number::DigitOptions {
+    Ok(number::DigitOptions {
         min_integer: count("minimumIntegerDigits")?,
         min_fraction: count("minimumFractionDigits")?,
         max_fraction: count("maximumFractionDigits")?,
@@ -320,12 +425,57 @@ fn plural_options<E: JSEngine>(slots: &JSObject<E::Value>) -> JSResult<plural::O
         rounding_mode: number::RoundingMode::parse(&text("roundingMode")?)
             .ok_or_else(|| bad("unknown rounding mode"))?,
         strip_if_integer: text("trailingZeroDisplay")? == "stripIfInteger",
-    };
+    })
+}
+
+/// An Intl.PluralRules' slots, as the bootstrap keeps them.
+fn plural_options<E: JSEngine>(slots: &JSObject<E::Value>) -> JSResult<plural::Options> {
+    let text = |key: &str| -> JSResult<String> { slots.get::<_, String>(key) };
+    let kind = text("type")?;
+    let notation = text("notation")?;
+    let compact_display: Option<String> = slots.get_opt("compactDisplay")?;
     Ok(plural::Options {
         locale: text("locale")?,
         ordinal: kind == "ordinal",
         notation: plural::Notation::parse(&notation, compact_display.as_deref().unwrap_or("short"))
             .ok_or_else(|| bad("unknown notation"))?,
-        digits,
+        digits: digit_options::<E>(slots)?,
+    })
+}
+
+/// An Intl.NumberFormat's slots, as the bootstrap keeps them.
+fn number_format_options<E: JSEngine>(
+    slots: &JSObject<E::Value>,
+) -> JSResult<number_format::Options> {
+    use number_format::{Grouping, SignDisplay, Style};
+    let text = |key: &str| -> JSResult<String> { slots.get::<_, String>(key) };
+    let style = match text("style")?.as_str() {
+        "decimal" => Style::Decimal,
+        "percent" => Style::Percent,
+        _ => return Err(bad("this style is not supported yet")),
+    };
+    // [[UseGrouping]] is a string or false.
+    let grouping: Option<String> = slots.get_opt::<_, String>("useGrouping").ok().flatten();
+    let grouping = match grouping.as_deref() {
+        Some("always") => Grouping::Always,
+        Some("auto") => Grouping::Auto,
+        Some("min2") => Grouping::Min2,
+        _ => Grouping::Off,
+    };
+    let sign = match text("signDisplay")?.as_str() {
+        "auto" => SignDisplay::Auto,
+        "never" => SignDisplay::Never,
+        "always" => SignDisplay::Always,
+        "exceptZero" => SignDisplay::ExceptZero,
+        "negative" => SignDisplay::Negative,
+        _ => return Err(bad("unknown signDisplay")),
+    };
+    Ok(number_format::Options {
+        locale: text("dataLocale")?,
+        numbering_system: text("numberingSystem")?,
+        style,
+        digits: digit_options::<E>(slots)?,
+        grouping,
+        sign,
     })
 }
