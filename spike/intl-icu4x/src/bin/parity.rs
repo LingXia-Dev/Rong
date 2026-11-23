@@ -251,6 +251,7 @@ fn main() {
         }
     }
     print!("{report}");
+    hour_variants();
     bench();
     println!("TOTAL {same} of {total} identical (U+00A0/U+202F compared as spaces)");
 }
@@ -321,4 +322,37 @@ fn bench() {
             .unwrap(),
         );
     });
+}
+
+/// Whether any length, alignment or hour-cycle preference makes ICU4X write
+/// a numeric (unpadded) hour where CLDR's skeleton `Hm` does.
+fn hour_variants() {
+    let dt = DateTime {
+        date: Date::try_new_iso(2026, 11, 22).unwrap(),
+        time: Time::try_new(8, 5, 0, 0).unwrap(),
+    };
+    for tag in ["es", "es-u-hc-h23", "de", "en-GB", "en-US", "he", "ja"] {
+        let loc: Locale = tag.parse().unwrap();
+        for (lname, length) in [
+            ("short", Length::Short),
+            ("medium", Length::Medium),
+            ("long", Length::Long),
+        ] {
+            for (aname, alignment) in [("auto", None), ("column", Some(Alignment::Column))] {
+                let mut b = FieldSetBuilder::new();
+                b.length = Some(length);
+                b.time_precision = Some(TimePrecision::Minute);
+                b.alignment = alignment;
+                let text = b
+                    .build_composite_datetime()
+                    .map_err(|e| format!("{e:?}"))
+                    .and_then(|fs| {
+                        DateTimeFormatter::try_new((&loc).into(), fs).map_err(|e| format!("{e:?}"))
+                    })
+                    .map(|f| f.format(&dt).to_string())
+                    .unwrap_or_else(|e| format!("ERROR {e}"));
+                println!("HOUR {tag} {lname} {aname}: {text:?}");
+            }
+        }
+    }
 }

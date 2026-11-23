@@ -68,30 +68,42 @@ jobs:
           toolchain: stable
       - name: Install icu4x-datagen
         run: cargo install icu4x-datagen --version =2.4.0 --locked --features unstable
-      - name: Build the probe (markers are read from it)
+      - name: Build the probe with and without Collator (markers are read from it)
         working-directory: ${{ env.SPIKE }}
-        run: cargo build --release --lib --features blob
+        run: |
+          set -eu
+          cargo build --release --lib --features blob
+          cp target/release/libintl_icu4x_spike.so lib-nocoll.so
+          cargo build --release --lib --features collator
+          cp target/release/libintl_icu4x_spike.so lib-coll.so
       - name: Blob per locale for the probe's markers
         working-directory: ${{ env.SPIKE }}
         run: |
           set -eu
-          lib=target/release/libintl_icu4x_spike.so
           mkdir -p blobs
           gen() {
-            name=$1; shift
-            icu4x-datagen --markers-for-bin "$lib" --format blob --out "blobs/$name.postcard" --locales "$@" >/dev/null 2>"blobs/$name.log" || { echo "DATAGEN $name failed"; tail -5 "blobs/$name.log"; return 0; }
-            s=$(stat -c %s "blobs/$name.postcard"); z=$(gzip -9c "blobs/$name.postcard" | wc -c)
-            echo "BLOB $name $s bytes (gzip $z)"
+            lib=$1; name=$2; shift 2
+            icu4x-datagen --markers-for-bin "$lib.so" --format blob --out "blobs/$lib-$name.postcard" --locales "$@" >/dev/null 2>"blobs/$lib-$name.log" || { echo "DATAGEN $lib $name failed"; tail -5 "blobs/$lib-$name.log"; return 0; }
+            s=$(stat -c %s "blobs/$lib-$name.postcard"); z=$(gzip -9c "blobs/$lib-$name.postcard" | wc -c)
+            echo "BLOB $lib $name $s bytes (gzip $z)"
           }
-          gen none none
-          for l in en zh-Hans he es ar ja; do gen "$l" "$l"; done
-          gen en-he-es en he es
-          gen modern modern
-          # Where the bytes go: the same data as a file tree, summed per marker.
-          for l in none he; do
-            icu4x-datagen --markers-for-bin "$lib" --format fs --syntax postcard --out "tree-$l" --locales "$l" >/dev/null 2>&1 || echo "TREE $l failed"
-            for m in tree-$l/*/; do echo "MARKER $l $(du -sb "$m" | cut -f1) $(basename "$m")"; done | sort -k3 -n -r | head -40
+          for lib in lib-coll lib-nocoll; do
+            gen $lib none none
+            for l in en en-US en-001 zh-Hans he es ar ja; do gen $lib "$l" "$l"; done
+            gen $lib en-US-he-es en-US he es
+            gen $lib modern modern
           done
+          # Which locales an `en` request exports, per marker.
+          for l in en en-US; do
+            icu4x-datagen --markers-for-bin lib-nocoll.so --format fs --syntax postcard --out "tree-$l" --locales "$l" >/dev/null 2>&1 || echo "TREE $l failed"
+            for m in $(find "tree-$l" -mindepth 1 -maxdepth 3 -type d | sort); do
+              n=$(find "$m" -maxdepth 1 -type f | wc -l)
+              if [ "$n" -gt 0 ]; then echo "LOCALES $l $(du -sb "$m" | cut -f1) ${m#tree-$l/}: $(find "$m" -maxdepth 1 -type f -printf '%f ' | sed 's/\.postcard//g' | head -c 600)"; fi
+            done
+          done
+          cp lib-coll.so target/release/libintl_icu4x_spike.so
+          for f in blobs/lib-coll-*.postcard; do n=${f#blobs/lib-coll-}; cp "$f" "blobs/$n"; done
+          cp blobs/lib-coll-en-US-he-es.postcard blobs/en-he-es.postcard
       - name: Load a per-locale blob at run time
         working-directory: ${{ env.SPIKE }}
         run: |
@@ -108,6 +120,19 @@ jobs:
               print("LOAD", name, loc, out.raw[:n].decode("utf-8", "replace"))
           EOF
           python3 load.py target/release/libintl_icu4x_spike.so
+
+  bridge:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8
+        with:
+          toolchain: stable
+      - name: toLocaleString through rong on QuickJS
+        working-directory: ${{ env.SPIKE }}
+        run: |
+          cargo run --release --features bridge --bin bridge
+          cargo run --release --features bridge --bin bridge
 
   parity:
     runs-on: ubuntu-24.04

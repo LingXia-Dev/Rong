@@ -6,6 +6,7 @@
 mod probe {
     use core::fmt::Write;
     use icu::calendar::Date;
+    #[cfg(feature = "collator")]
     use icu::collator::{Collator, options::CollatorOptions};
     use icu::datetime::DateTimeFormatter;
     use icu::datetime::fieldsets::builder::{DateFields, FieldSetBuilder};
@@ -112,6 +113,7 @@ mod probe {
             .map(|l| l.format(["a", "b", "c"].into_iter()).to_string())
             .map_err(|e| err(&e)),
         );
+        #[cfg(feature = "collator")]
         note(
             "collator",
             Collator::try_new_unstable(&fp, (&loc).into(), CollatorOptions::default())
