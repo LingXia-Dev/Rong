@@ -342,11 +342,14 @@ run_all_core_tests() {
         record_suite_result "rong_core unit tests on $engine" 1 || true
     fi
 
-    log_info "Running rong_tz shared zone table ($engine)"
-    if run_cargo_test -p rong_tz --quiet "${extra[@]}" -- --nocapture; then
-        record_suite_result "rong_tz zone table on $engine" 0
-    else
-        record_suite_result "rong_tz zone table on $engine" 1 || true
+    # Engine-independent; it backs the Intl that rong provides on QuickJS.
+    if [ "$engine" = "quickjs" ]; then
+        log_info "Running rong_tz shared zone table"
+        if run_cargo_test -p rong_tz --quiet "${extra[@]}" -- --nocapture; then
+            record_suite_result "rong_tz zone table" 0
+        else
+            record_suite_result "rong_tz zone table" 1 || true
+        fi
     fi
 }
 
