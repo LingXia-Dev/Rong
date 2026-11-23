@@ -271,15 +271,55 @@ mod tests {
         }
     }
 
+    use crate::{ConfigureError, Database, Registry, Source};
+    use std::time::Duration;
+
+    /// Opens instantly when configured, slowly for the default.
+    fn slow_default(source: Source, _: &mut Vec<String>) -> Database {
+        let label = match source {
+            Source::System => {
+                std::thread::sleep(Duration::from_millis(300));
+                "default"
+            }
+            _ => "configured",
+        };
+        Database {
+            db: jiff::tz::TimeZoneDatabase::none(),
+            source: label.into(),
+        }
+    }
+
     #[test]
     fn a_second_configure_is_an_error() {
-        // The first call may race the table test's first lookup.
-        let first = crate::configure(crate::Source::System);
-        assert!(matches!(
-            first,
-            Ok(()) | Err(crate::ConfigureError::AlreadyInUse)
-        ));
-        assert!(crate::configure(crate::Source::Bundled).is_err());
+        let registry = Registry::new(slow_default);
+        assert_eq!(registry.configure(Source::Bundled), Ok(()));
+        assert_eq!(
+            registry.configure(Source::System),
+            Err(ConfigureError::AlreadyConfigured)
+        );
+        assert_eq!(registry.database().source, "configured");
+        assert_eq!(
+            registry.configure(Source::System),
+            Err(ConfigureError::AlreadyInUse)
+        );
+    }
+
+    /// `configure` during the first lookup's open either takes effect or
+    /// reports `AlreadyInUse`; it is never accepted and then ignored.
+    #[test]
+    fn configure_during_the_first_lookup_is_never_lost() {
+        let registry = Registry::new(slow_default);
+        let result = std::thread::scope(|scope| {
+            let lookup = scope.spawn(|| registry.database().source.clone());
+            std::thread::sleep(Duration::from_millis(50));
+            let result = registry.configure(Source::Bundled);
+            lookup.join().unwrap();
+            result
+        });
+        match (result, registry.database().source.as_str()) {
+            (Ok(()), "configured") | (Err(ConfigureError::AlreadyInUse), "default") => {}
+            other => panic!("configure lost: {other:?}"),
+        }
     }
 
     #[test]
