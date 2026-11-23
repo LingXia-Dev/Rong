@@ -236,13 +236,10 @@ unsafe extern "C" fn promise_reject_handler(
                 report_rejection(env, RejectionHook::Rejected, promise, value);
             }
             arkjs::JSVM_PromiseRejectEvent_JSVM_PROMISE_ADD_HANDLER_AFTER_REJECTED => {
-                // This event may carry no value; the one kept at rejection does.
+                // This event carries no value (GetNamedProperty yields undefined, a
+                // non-null handle); prefer the reason kept when the promise rejected.
                 let kept = take_unhandled_rejection(env, promise);
-                let reason = if value.is_null() {
-                    kept.unwrap_or(ptr::null_mut())
-                } else {
-                    value
-                };
+                let reason = kept.unwrap_or(value);
                 report_rejection(env, RejectionHook::HandlerAdded, promise, reason);
             }
             _ => {}
