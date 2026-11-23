@@ -38,6 +38,9 @@ fn is_str_white_space(c: char) -> bool {
 /// checks: what ToIntlMathematicalValue returns for a String (a Number or
 /// BigInt arrives here as its decimal string, and -0 as `"-0"`).
 pub(crate) fn to_intl_mv(input: &str) -> IntlMV {
+    if let Some(integer) = input.strip_prefix('n') {
+        return big_int(integer);
+    }
     let text = input.trim_matches(is_str_white_space);
     if text.is_empty() {
         return finite(false, UnsignedDecimal::default());
@@ -91,9 +94,10 @@ pub(crate) fn to_intl_mv(input: &str) -> IntlMV {
             finite(false, UnsignedDecimal::default())
         };
     }
-    // Rounding never looks past the 121st significant digit (21 integer plus
-    // 100 fraction), so longer inputs keep a nonzero tail as one sticky digit.
-    const KEEP: usize = 200;
+    // A finite value has at most 309 integer digits and rounding keeps at
+    // most 100 fraction digits, so no output shows a digit past the 410th;
+    // longer inputs keep a nonzero tail as one sticky digit.
+    const KEEP: usize = 410;
     let (digits, exponent) = if digits.len() > KEEP {
         let dropped = &digits[KEEP..];
         let sticky = if dropped.bytes().any(|b| b != b'0') {
@@ -110,7 +114,7 @@ pub(crate) fn to_intl_mv(input: &str) -> IntlMV {
         (digits.to_string(), exponent)
     };
     let mut value = UnsignedDecimal::try_from_str(&digits).unwrap_or_default();
-    // A finite, nonzero Number keeps the exponent of at most 201 digits
+    // A finite, nonzero Number keeps the exponent of at most 411 digits
     // well inside i16; outside it the value would have been an infinity
     // or a zero above.
     let Ok(shift) = i16::try_from(exponent) else {
@@ -124,6 +128,30 @@ pub(crate) fn to_intl_mv(input: &str) -> IntlMV {
     };
     value.multiply_pow10(shift);
     finite(negative, value)
+}
+
+/// ℝ of a BigInt, from its decimal string: exact. A BigInt of more digits
+/// than a decimal holds (32767) is an infinity, an implementation limit.
+fn big_int(text: &str) -> IntlMV {
+    let (negative, digits) = match text.strip_prefix('-') {
+        Some(digits) => (true, digits),
+        None => (false, text),
+    };
+    let digits = digits.trim_start_matches('0');
+    if digits.is_empty() {
+        return finite(false, UnsignedDecimal::default());
+    }
+    if digits.len() > usize::from(i16::MAX.unsigned_abs()) {
+        return if negative {
+            IntlMV::NegativeInfinity
+        } else {
+            IntlMV::PositiveInfinity
+        };
+    }
+    match UnsignedDecimal::try_from_str(digits) {
+        Ok(value) => finite(negative, value),
+        Err(_) => IntlMV::NotANumber,
+    }
 }
 
 fn finite(negative: bool, value: UnsignedDecimal) -> IntlMV {
@@ -494,10 +522,32 @@ mod tests {
         };
         assert_eq!(magnitude("5e-324"), -324);
         assert_eq!(magnitude("1.7976931348623157e308"), 308);
-        // 300 digits keep 201 (one sticky), still at the right place.
+        // Long digit strings stay at the right place.
         assert_eq!(magnitude(&format!("{}e-600", "9".repeat(300))), -301);
         assert_eq!(magnitude(&format!("{}e8", "1".repeat(300))), 307);
         assert_eq!(mv("1e-324"), "0");
+    }
+
+    #[test]
+    fn every_integer_digit_of_a_finite_string_is_kept() {
+        let digits = format!("1{}", "23456789".repeat(37));
+        let exact = |s: &str| match to_intl_mv(s) {
+            IntlMV::Finite { value, .. } => value.to_string(),
+            other => panic!("{s}: {other:?}"),
+        };
+        assert_eq!(exact(&digits), digits);
+        assert_eq!(exact(&format!("{digits}.5")), format!("{digits}.5"));
+    }
+
+    #[test]
+    fn big_ints_are_exact_without_round_mv_result() {
+        let digits = "7".repeat(5000);
+        assert_eq!(mv(&format!("n{digits}")), digits);
+        assert_eq!(mv(&format!("n-{digits}")), format!("-{digits}"));
+        assert_eq!(mv("n0"), "0");
+        assert_eq!(mv(&format!("n{}", "9".repeat(40000))), "PositiveInfinity");
+        // The same digits as a string are past the Number range.
+        assert_eq!(mv(&digits), "PositiveInfinity");
     }
 
     fn options(rounding_type: RoundingType) -> DigitOptions {
