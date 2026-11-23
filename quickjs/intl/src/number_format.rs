@@ -3,7 +3,7 @@
 //! grouping honours `useGrouping: "always"` and every part keeps the type
 //! ECMA-402 gives it.
 
-use crate::cldr_numbers::{ENTRIES, ROOT_SYMBOLS, VALUES, Values};
+use crate::cldr_numbers::{ENTRIES, ROOT_SYMBOLS, RootSymbols, VALUES, Values};
 use crate::data::IntlData;
 use crate::number::{self, DigitOptions, IntlMV};
 use fixed_decimal::UnsignedDecimal;
@@ -183,15 +183,16 @@ fn load(
         .then(|| ROOT_SYMBOLS.iter().find(|(s, _)| *s == numbering_system))
         .flatten()
         .map(|(_, symbols)| symbols);
-    let pick = |own: &str, at: usize| root.map_or(own, |r| r[at]).to_string();
-    let decimal = pick(strings.decimal_separator(), 0);
-    let group = pick(strings.grouping_separator(), 1);
+    let pick =
+        |own: &str, field: fn(&RootSymbols) -> &'static str| root.map_or(own, field).to_string();
+    let decimal = pick(strings.decimal_separator(), |r| r.decimal);
+    let group = pick(strings.grouping_separator(), |r| r.group);
     let (minus_prefix, minus_suffix) = match root {
-        Some(r) => (r[2], ""),
+        Some(r) => (r.minus_sign, ""),
         None => (strings.minus_sign_prefix(), strings.minus_sign_suffix()),
     };
     let (plus_prefix, plus_suffix) = match root {
-        Some(r) => (r[3], ""),
+        Some(r) => (r.plus_sign, ""),
         None => (strings.plus_sign_prefix(), strings.plus_sign_suffix()),
     };
     let digits = match SIMPLE_DIGITS.binary_search_by(|(n, _)| (*n).cmp(numbering_system)) {
@@ -234,8 +235,8 @@ fn load(
             let percent = response.payload.get();
             // The pattern is the locale's own system's; its percent sign
             // becomes the requested system's.
-            let in_pattern = cldr_values(data, &parsed, &locale_system)[6];
-            let percent_sign = cldr[6];
+            let in_pattern = cldr_values(data, &parsed, &locale_system).percent_sign;
+            let percent_sign = cldr.percent_sign;
             let literal = |text: &str, out: &mut Vec<Piece>| {
                 let mut rest = text;
                 while let Some(at) = rest.find(in_pattern).filter(|_| !in_pattern.is_empty()) {
@@ -273,8 +274,8 @@ fn load(
             };
             (
                 zero,
-                with_sign(Piece::Plus(pick(&percent.plus_sign, 3))),
-                with_sign(Piece::Minus(pick(&percent.minus_sign, 2))),
+                with_sign(Piece::Plus(pick(&percent.plus_sign, |r| r.plus_sign))),
+                with_sign(Piece::Minus(pick(&percent.minus_sign, |r| r.minus_sign))),
             )
         }
     };
@@ -326,15 +327,15 @@ pub(crate) fn format_to_parts(format: &LocaleFormat, options: &Options, x: &Intl
     // The number's own parts, and the category of the rounded value.
     let (number, category): (Vec<Part>, Category) = match x {
         IntlMV::NotANumber => (
-            vec![("nan", format.cldr[1].to_string())],
+            vec![("nan", format.cldr.nan.to_string())],
             Category::PlusZero,
         ),
         IntlMV::PositiveInfinity => (
-            vec![("infinity", format.cldr[2].to_string())],
+            vec![("infinity", format.cldr.infinity.to_string())],
             Category::Positive,
         ),
         IntlMV::NegativeInfinity => (
-            vec![("infinity", format.cldr[2].to_string())],
+            vec![("infinity", format.cldr.infinity.to_string())],
             Category::Negative,
         ),
         IntlMV::NegativeZero => {
@@ -535,3 +536,4 @@ pub(crate) static SIMPLE_DIGITS: &[(&str, Digits)] = &[
     ("wara", Digits::Range('\u{118e0}')),
     ("wcho", Digits::Range('\u{1e2f0}')),
 ];
+
