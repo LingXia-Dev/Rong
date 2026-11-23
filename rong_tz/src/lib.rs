@@ -241,11 +241,15 @@ fn parse_offset(name: &str) -> Option<i32> {
     (hours <= 23 && minutes <= 59).then_some(sign * (hours * 3600 + minutes * 60))
 }
 
+/// A zone name's shape. A segment may not start with a sign, so a malformed
+/// offset (`+2400`) is `InvalidName`, not `UnknownZone`; `Etc/GMT+5` and
+/// `America/Port-au-Prince` still pass.
 fn is_name_syntax(name: &str) -> bool {
     !name.is_empty()
         && name.len() <= 255
         && name.split('/').all(|part| {
             !part.is_empty()
+                && !part.starts_with(['+', '-'])
                 && part != "."
                 && part != ".."
                 && part

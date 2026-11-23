@@ -208,6 +208,21 @@ mod tests {
     }
 
     #[test]
+    fn every_malformed_offset_is_an_invalid_name() {
+        for name in [
+            "+24:00", "+2400", "+99", "+0560", "-0", "+:0530", "Etc/+05", "Etc/-x",
+        ] {
+            assert!(
+                matches!(crate::canonical_zone(name), Err(TzError::InvalidName(_))),
+                "{name}"
+            );
+        }
+        for name in ["Etc/GMT+5", "Etc/GMT-14", "America/Port-au-Prince", "UTC"] {
+            assert!(crate::is_name_syntax(name), "{name}");
+        }
+    }
+
+    #[test]
     fn epoch_milliseconds_at_their_bounds() {
         let min = Timestamp::MIN.as_millisecond();
         let max = Timestamp::MAX.as_millisecond();
