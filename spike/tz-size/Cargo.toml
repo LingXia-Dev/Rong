@@ -1,0 +1,23 @@
+[package]
+name = "tz_size"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[lib]
+crate-type = ["cdylib"]
+
+[features]
+tz = ["dep:rong_tz"]
+
+[dependencies]
+rong_tz = { git = "https://github.com/LingXia-Dev/Rong", branch = "feat/tz", optional = true }
+
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

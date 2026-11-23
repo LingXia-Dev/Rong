@@ -146,6 +146,42 @@ jobs:
           name: locale-services-blob
           path: ${{ env.SPIKE }}/locale-services.postcard
 
+  tz-size:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-24.04, targets: "x86_64-unknown-linux-gnu aarch64-linux-android" }
+          - { os: macos-15, targets: "aarch64-apple-darwin aarch64-apple-ios" }
+          - { os: windows-2025, targets: "x86_64-pc-windows-msvc" }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8
+        with:
+          toolchain: stable
+          targets: ${{ matrix.targets }}
+      - name: rong_tz added size
+        shell: bash
+        working-directory: spike/tz-size
+        run: |
+          set -eu
+          if [ -n "${ANDROID_NDK_LATEST_HOME:-}" ]; then
+            ndk="$ANDROID_NDK_LATEST_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin"
+            export CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER="$ndk/aarch64-linux-android24-clang"
+            export CC_aarch64_linux_android="$ndk/aarch64-linux-android24-clang"
+            export AR_aarch64_linux_android="$ndk/llvm-ar"
+          fi
+          size() { python3 -c 'import os,sys,gzip; d=open(sys.argv[1],"rb").read(); print(len(d), len(gzip.compress(d,9)))' "$1"; }
+          for t in ${{ matrix.targets }}; do
+            cargo build -q --release --target "$t" --target-dir base
+            cargo build -q --release --target "$t" --target-dir tz --features tz
+            f=$(ls base/$t/release/ | grep -E '^(lib)?tz_size\.(so|dylib|dll)$')
+            read b bz <<<"$(size base/$t/release/$f)"
+            read i iz <<<"$(size tz/$t/release/$f)"
+            echo "TZSIZE $t baseline $b (gzip $bz); with rong_tz $i (gzip $iz); added $((i-b)) bytes (gzip $((iz-bz)))"
+          done
+
   bridge:
     runs-on: ubuntu-24.04
     steps:
