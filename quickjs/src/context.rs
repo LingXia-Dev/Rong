@@ -1,7 +1,8 @@
 use crate::{QJSRuntime, QJSValue, qjs};
+use rong_core::rejection::{self, RejectionHook};
 use rong_core::{
     HostError, JSClass, JSContextImpl, JSErrorFactory, JSExceptionThrower, JSRuntimeImpl, JSTypeOf,
-    JSValueImpl, RongJSError, Source,
+    JSValueImpl, RejectionEvents, RongJSError, Source,
 };
 use smallvec::SmallVec;
 use std::ffi::CString;
@@ -203,6 +204,50 @@ impl JSContextImpl for QJSContext {
     fn context_id(ctx: &Self::RawContext) -> usize {
         *ctx as *const _ as usize
     }
+
+    fn rejection_events(&self) -> RejectionEvents {
+        RejectionEvents::ALL
+    }
+
+    fn install_rejection_hook(ctx: &rong_core::JSContext<Self>) -> rong_core::JSResult<()> {
+        // One tracker per runtime; it reports to the context it is given.
+        unsafe {
+            qjs::JS_SetHostPromiseRejectionTracker(
+                qjs::JS_GetRuntime(ctx.as_ref().ctx),
+                Some(track_rejection),
+                std::ptr::null_mut(),
+            );
+        }
+        Ok(())
+    }
+}
+
+/// QuickJS reports a rejection without a handler as it happens, and a handler
+/// added to such a promise later.
+unsafe extern "C" fn track_rejection(
+    ctx: *mut qjs::JSContext,
+    promise: qjs::JSValue,
+    reason: qjs::JSValue,
+    is_handled: bool,
+    _opaque: *mut std::os::raw::c_void,
+) {
+    if !rejection::tracking_on_this_thread() {
+        return;
+    }
+    let Some(context) = rong_core::JSContext::<QJSContext>::try_from_borrowed_raw_ptr(&ctx) else {
+        return;
+    };
+    let hook = if is_handled {
+        RejectionHook::HandlerAdded
+    } else {
+        RejectionHook::Rejected
+    };
+    rejection::record(
+        &context,
+        hook,
+        QJSValue::from_borrowed_raw(ctx, promise),
+        QJSValue::from_borrowed_raw(ctx, reason),
+    );
 }
 
 impl QJSContext {

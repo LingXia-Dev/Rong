@@ -44,6 +44,52 @@ impl JSContextImpl for JSCContext {
         *ctx as *const _ as usize
     }
 
+    // JavaScriptCore reports a promise still unhandled when its microtask
+    // queue drains, and nothing about handlers added later. The system
+    // framework offers this only as private API, so only the source build
+    // reports anything.
+    fn rejection_events(&self) -> rong_core::RejectionEvents {
+        if cfg!(jsc_source) {
+            rong_core::RejectionEvents::UNHANDLED
+        } else {
+            rong_core::RejectionEvents::NONE
+        }
+    }
+
+    #[cfg(jsc_source)]
+    fn install_rejection_hook(ctx: &rong_core::JSContext<Self>) -> rong_core::JSResult<()> {
+        use rong_core::rejection::{self, RejectionHook};
+        type Value = rong_core::JSValue<JSCValue>;
+        let callback = rong_core::JSFunc::new(
+            ctx,
+            |ctx: rong_core::JSContext<JSCContext>, promise: Value, reason: Value| {
+                rejection::record(
+                    &ctx,
+                    RejectionHook::Rejected,
+                    promise.into_value(),
+                    reason.into_value(),
+                );
+            },
+        )?;
+        let mut exception: jsc::JSValueRef = ptr::null();
+        unsafe {
+            jsc::JSGlobalContextSetUnhandledRejectionCallback(
+                ctx.as_ref().raw,
+                *callback.as_value().as_raw_value() as jsc::JSObjectRef,
+                &mut exception,
+            );
+        }
+        if exception.is_null() {
+            Ok(())
+        } else {
+            Err(rong_core::HostError::new(
+                rong_core::error::E_INTERNAL,
+                "JavaScriptCore refused the unhandled rejection callback",
+            )
+            .into())
+        }
+    }
+
     fn from_borrowed_raw(ctx: Self::RawContext) -> Self {
         Self::_from_borrowed_raw(ctx)
     }
