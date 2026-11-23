@@ -277,22 +277,33 @@
     return slots;
   }
 
-  class PluralRules {
-    constructor() {
-      const r = ResolveOptions('PluralRules', arguments[0], arguments[1], true);
-      const options = r.options;
-      const slots = $create(null);
-      slots.locale = r.locale;
-      slots.type = GetOption(options, 'type', 'string', ['cardinal', 'ordinal'], 'cardinal');
-      const notation = GetOption(options, 'notation', 'string',
-        ['standard', 'scientific', 'engineering', 'compact'], 'standard');
-      slots.notation = notation;
-      const compactDisplay = GetOption(options, 'compactDisplay', 'string', ['short', 'long'], 'short');
-      if (notation === 'compact') slots.compactDisplay = compactDisplay;
-      SetNumberFormatDigitOptions(slots, options, 0, 3, notation);
-      call($weakSet, pluralSlots, this, slots);
-    }
+  // A function, not a class: a class falls back to %Object.prototype% when
+  // NewTarget's prototype is not an object, and the spec falls back to
+  // %Intl.PluralRules.prototype%.
+  function PluralRules() {
+    if (new.target === undefined) throw new $TypeError("Constructor Intl.PluralRules requires 'new'");
+    let proto = new.target.prototype;
+    if (!isObject(proto)) proto = PluralRulesPrototype;
+    const pr = $create(proto);
+    const r = ResolveOptions('PluralRules', arguments[0], arguments[1], true);
+    const options = r.options;
+    const slots = $create(null);
+    slots.locale = r.locale;
+    slots.type = GetOption(options, 'type', 'string', ['cardinal', 'ordinal'], 'cardinal');
+    const notation = GetOption(options, 'notation', 'string',
+      ['standard', 'scientific', 'engineering', 'compact'], 'standard');
+    slots.notation = notation;
+    const compactDisplay = GetOption(options, 'compactDisplay', 'string', ['short', 'long'], 'short');
+    if (notation === 'compact') slots.compactDisplay = compactDisplay;
+    SetNumberFormatDigitOptions(slots, options, 0, 3, notation);
+    call($weakSet, pluralSlots, pr, slots);
+    return pr;
+  }
+  const PluralRulesPrototype = PluralRules.prototype;
+  $defineProperty(PluralRules, 'prototype', { writable: false });
 
+  // Class methods: non-enumerable, writable, not constructors.
+  class PluralRulesMethods {
     static supportedLocalesOf(locales) {
       return SupportedLocales('PluralRules', locales, arguments[1]);
     }
@@ -337,7 +348,11 @@
       return options;
     }
   }
-  $defineProperty(PluralRules.prototype, $toStringTag, {
+  define(PluralRules, 'supportedLocalesOf', PluralRulesMethods.supportedLocalesOf, false, true);
+  define(PluralRulesPrototype, 'select', PluralRulesMethods.prototype.select, false, true);
+  define(PluralRulesPrototype, 'selectRange', PluralRulesMethods.prototype.selectRange, false, true);
+  define(PluralRulesPrototype, 'resolvedOptions', PluralRulesMethods.prototype.resolvedOptions, false, true);
+  $defineProperty(PluralRulesPrototype, $toStringTag, {
     __proto__: null, value: 'Intl.PluralRules', writable: false, enumerable: false, configurable: true,
   });
 
