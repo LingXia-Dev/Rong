@@ -12,6 +12,7 @@
 //! The code is written against rong's engine-generic API and instantiated for
 //! QuickJS by `rong_quickjs`, so this crate does not depend on the engine.
 
+mod cldr_dates;
 mod cldr_numbers;
 mod data;
 mod date_time_format;

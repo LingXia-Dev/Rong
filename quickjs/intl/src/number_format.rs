@@ -63,7 +63,7 @@ pub(crate) enum Digits {
 }
 
 impl Digits {
-    fn digit(&self, d: u32) -> char {
+    pub(crate) fn digit(&self, d: u32) -> char {
         match self {
             Digits::Range(zero) => char::from_u32(u32::from(*zero) + d).unwrap_or('?'),
             Digits::List(list) => list[d as usize],

@@ -52,5 +52,11 @@
   ["new Intl.DateTimeFormat('en', {dateStyle: 'medium', timeZone: 'UTC'}).formatRange(Date.UTC(2026, 0, 5, 13), Date.UTC(2026, 0, 7, 9))", "\"Jan 5 – 7, 2026\""],
   ["new Intl.DateTimeFormat('en', {timeZone: 'UTC'}).formatRange(Date.UTC(2026, 0, 5, 13), Date.UTC(2026, 0, 5, 18))", "\"1/5/2026\""],
   ["new Intl.DateTimeFormat('en', {month: 'short', day: 'numeric', timeZone: 'UTC'}).formatRangeToParts(Date.UTC(2026, 0, 5, 13), Date.UTC(2026, 0, 7, 9))", "[{\"type\":\"month\",\"value\":\"Jan\",\"source\":\"shared\"},{\"type\":\"literal\",\"value\":\" \",\"source\":\"shared\"},{\"type\":\"day\",\"value\":\"5\",\"source\":\"startRange\"},{\"type\":\"literal\",\"value\":\" – \",\"source\":\"shared\"},{\"type\":\"day\",\"value\":\"7\",\"source\":\"endRange\"}]"],
-  ["new Intl.DateTimeFormat('en').formatRange(Date.UTC(2026, 0, 5, 13))", "throws TypeError"]
+  ["new Intl.DateTimeFormat('en').formatRange(Date.UTC(2026, 0, 5, 13))", "throws TypeError"],
+  ["new Intl.DateTimeFormat('en', {dayPeriod: 'long', timeZone: 'UTC'}).format(Date.UTC(2026, 0, 5, 13, 4, 5, 678))", "\"in the afternoon\""],
+  ["new Intl.DateTimeFormat('en', {hour: 'numeric', dayPeriod: 'short', timeZone: 'UTC'}).format(Date.UTC(2026, 0, 5, 12))", "\"12 noon\""],
+  ["new Intl.DateTimeFormat('en', {minute: '2-digit', second: '2-digit', timeZone: 'UTC'}).format(Date.UTC(2026, 0, 5, 13, 4, 5, 678))", "\"04:05\""],
+  ["new Intl.DateTimeFormat('en', {minute: 'numeric', timeZone: 'UTC'}).format(Date.UTC(2026, 0, 5, 13, 4, 5, 678))", "\"4\""],
+  ["new Intl.DateTimeFormat('en', {minute: 'numeric', second: 'numeric', timeZone: 'UTC'}).resolvedOptions().hour === undefined", "true"],
+  ["new Intl.DateTimeFormat('ja', {hour: 'numeric', hour12: true, timeZone: 'UTC'}).format(Date.UTC(2026, 0, 5, 0, 30))", "\"午前0時\""]
 ]

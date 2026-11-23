@@ -3,6 +3,7 @@
 //! module turns the resolved options into a formatter, reports the fields
 //! of the pattern it chose, and formats a time value into ECMA-402 parts.
 
+use crate::cldr_dates::{DAY_PERIOD_NAME_SETS, DAY_PERIOD_NAMES, DAY_PERIOD_RULES, HOUR_CYCLES};
 use crate::data::IntlData;
 use icu::calendar::types::RataDie;
 use icu::calendar::{Date, Iso};
@@ -65,8 +66,97 @@ pub(crate) struct Format {
     range: RefCell<Option<Rc<DateRangeFormatter<CompositeFieldSet>>>>,
     /// The pattern's fields as resolvedOptions reports them.
     pub fields: Vec<(&'static str, String)>,
+    /// What the parts need that ICU4X cannot write.
+    fixups: Fixups,
+}
+
+/// What the parts need that ICU4X cannot write.
+struct Fixups {
     /// ICU4X has no h24: the pattern is h23's and hour 0 reads 24.
     hour_24: bool,
+    /// The hour ICU4X adds to minutes, seconds or a lone day period, which
+    /// the request did not ask for: taken out of the parts.
+    strip_hour: bool,
+    /// A lone minute or second asked as numeric, which ICU4X writes
+    /// 2-digit.
+    numeric_alone: Option<&'static str>,
+    /// The numbering system's zero.
+    zero: char,
+    /// The flexible day period (`B`) ICU4X 2.4 cannot write: its am/pm part
+    /// takes the CLDR name.
+    day_period: Option<DayPeriods>,
+}
+
+/// A locale's flexible day periods in one width.
+struct DayPeriods {
+    rules: &'static [(&'static str, u16, u16)],
+    names: &'static [(&'static str, &'static str, &'static str, &'static str)],
+    /// 1 narrow, 2 short, 3 long.
+    width: u8,
+}
+
+impl DayPeriods {
+    fn for_locale(data: &IntlData, locale: &str, width: u8) -> Option<Self> {
+        let parsed = locale.parse::<icu::locale::Locale>().ok()?;
+        let mut chain = data.fallback_chain(&parsed);
+        chain.push(String::from("und"));
+        let find = |table: &[(&'static str, u16)]| {
+            chain.iter().find_map(|l| {
+                table
+                    .binary_search_by(|(k, _)| (*k).cmp(l.as_str()))
+                    .ok()
+                    .map(|at| table[at].1)
+            })
+        };
+        let names = DAY_PERIOD_NAME_SETS[usize::from(find(DAY_PERIOD_NAMES)?)];
+        let rules = chain.iter().find_map(|l| {
+            DAY_PERIOD_RULES
+                .binary_search_by(|(k, _)| (*k).cmp(l.as_str()))
+                .ok()
+                .map(|at| DAY_PERIOD_RULES[at].1)
+        })?;
+        Some(DayPeriods {
+            rules,
+            names,
+            width,
+        })
+    }
+
+    /// The name of the period a local time falls in: an `at` rule only at
+    /// its exact minute.
+    fn name(&self, time: Time) -> Option<&'static str> {
+        let minute = u16::from(time.hour.number()) * 60 + u16::from(time.minute.number());
+        let exact = time.second.number() == 0 && time.subsecond.number() == 0;
+        let named = |period: &str| {
+            self.names
+                .iter()
+                .find(|(p, ..)| *p == period)
+                .map(|(_, narrow, short, long)| match self.width {
+                    1 => *narrow,
+                    2 => *short,
+                    _ => *long,
+                })
+                .filter(|n| !n.is_empty())
+        };
+        let at = self
+            .rules
+            .iter()
+            .filter(|(_, from, before)| from == before && exact && *from == minute)
+            .find_map(|(p, ..)| named(*p));
+        at.or_else(|| {
+            self.rules
+                .iter()
+                .filter(|(_, from, before)| {
+                    from != before
+                        && if from < before {
+                            *from <= minute && minute < *before
+                        } else {
+                            minute >= *from || minute < *before
+                        }
+                })
+                .find_map(|(p, ..)| named(*p))
+        })
+    }
 }
 
 #[derive(Default)]
@@ -120,40 +210,35 @@ fn preferences(
     Ok(DateTimeFormatterPreferences::from(&parsed))
 }
 
-/// The hour a formatter writes for 00:30 and 13:30, read with latn digits.
-fn hours_written(data: &IntlData, locale: &str, hc: Option<&str>) -> Option<(u32, u32)> {
-    let mut extensions = vec![("nu", "latn")];
-    if let Some(hc) = hc {
-        extensions.push(("hc", hc));
-    }
-    let prefs = preferences(locale, &extensions).ok()?;
-    let mut builder = FieldSetBuilder::new();
-    builder.time_precision = Some(TimePrecision::Minute);
-    let field_set = builder.build_composite().ok()?;
-    let formatter = DateTimeFormatter::try_new_unstable(&data.provider(), prefs, field_set).ok()?;
-    let hour = |h: u8| -> Option<u32> {
-        let input = zoned_utc(Time::try_new(h, 30, 0, 0).ok()?);
-        let mut sink = Collector::default();
-        formatter.format(&input).write_to_parts(&mut sink).ok()?;
-        sink.text_of(icu::datetime::parts::HOUR)?.parse().ok()
-    };
-    Some((hour(0)?, hour(13)?))
-}
-
-/// The locale's default hour cycle and its 12- and 24-hour ones, from the
-/// hours its patterns write.
+/// The locale's default hour cycle and its 12- and 24-hour ones, from
+/// CLDR's timeData for its likely region.
 fn hour_cycles(data: &IntlData, locale: &str) -> [String; 3] {
-    let twelve = |written: Option<(u32, u32)>| match written {
-        Some((0, _)) => "h11",
-        _ => "h12",
-    };
-    let h12 = twelve(hours_written(data, locale, Some("c12")));
-    let default = match hours_written(data, locale, None) {
-        Some((_, 13)) => "h23",
-        written @ Some(_) => twelve(written),
-        None => "h23",
-    };
-    [default.to_string(), h12.to_string(), String::from("h23")]
+    let found = locale
+        .parse::<icu::locale::LanguageIdentifier>()
+        .ok()
+        .and_then(|mut id| {
+            if let Ok(expander) =
+                icu::locale::LocaleExpander::try_new_extended_unstable(&data.provider())
+            {
+                let _ = expander.maximize(&mut id);
+            }
+            let region = id.region?;
+            [format!("{}-{}", id.language, region), region.to_string()]
+                .into_iter()
+                .find_map(|key| {
+                    HOUR_CYCLES
+                        .binary_search_by(|(k, ..)| (*k).cmp(key.as_str()))
+                        .ok()
+                })
+        })
+        .or_else(|| HOUR_CYCLES.binary_search_by(|(k, ..)| (*k).cmp("001")).ok());
+    let (preferred, twelve) =
+        found.map_or(("h23", "h12"), |at| (HOUR_CYCLES[at].1, HOUR_CYCLES[at].2));
+    [
+        preferred.to_string(),
+        twelve.to_string(),
+        String::from("h23"),
+    ]
 }
 
 /// 1970-01-01.
@@ -261,7 +346,15 @@ fn field_set(request: &Request) -> Result<CompositeFieldSet, String> {
         "2-digit" => field::Hour::TwoDigit,
         _ => field::Hour::Numeric,
     });
-    if bag.hour.is_some() {
+    // A day period alone stands beside an hour the parts drop again.
+    let lone_day_period = bag.day_period.is_some()
+        && bag.hour.is_none()
+        && c("minute").is_none()
+        && c("second").is_none();
+    if lone_day_period {
+        bag.hour = Some(field::Hour::Numeric);
+        bag.hour_kind = Some(field::HourKind::Clock12);
+    } else if bag.hour.is_some() {
         bag.hour_kind = match request.hour_cycle.as_deref() {
             Some("h11" | "h12") => Some(field::HourKind::Clock12),
             Some(_) => Some(field::HourKind::Clock24),
@@ -313,14 +406,77 @@ fn build(data: &IntlData, request: &Request) -> Result<Format, String> {
     // The pattern does not depend on the instant for these field sets.
     let sample = zoned_utc(Time::try_new(0, 0, 0, 0).map_err(|e| e.to_string())?);
     let pattern = formatter.format(&sample).pattern().to_string();
-    let fields = pattern_fields(&pattern);
+    let mut fields = pattern_fields(&pattern);
+    let components = request.date_style.is_none() && request.time_style.is_none();
+    let strip_hour = components
+        && component(request, "hour").is_none()
+        && fields.iter().any(|(k, _)| *k == "hour");
+    if strip_hour {
+        fields.retain(|(k, _)| *k != "hour");
+    }
+    let lone = |key| {
+        component(request, key) == Some("numeric")
+            && request
+                .components
+                .iter()
+                .all(|(k, _)| k == key || k == "timeZoneName")
+    };
+    let numeric_alone = if !strip_hour {
+        None
+    } else if lone("minute") {
+        Some("minute")
+    } else if lone("second") {
+        Some("second")
+    } else {
+        None
+    };
+    let numeric_field = |key: &str| (Some(key) == numeric_alone).then_some("numeric");
+    for (key, value) in &mut fields {
+        if let Some(numeric) = numeric_field(*key) {
+            *value = numeric.to_string();
+        }
+    }
+    // The flexible day period stands where the 12-hour pattern has am/pm.
+    let twelve_hour = has_symbol(&pattern, &['h', 'K']);
+    let day_period = component(request, "dayPeriod")
+        .filter(|_| components && twelve_hour)
+        .and_then(|width| {
+            let width = match width {
+                "narrow" => 1,
+                "short" => 2,
+                _ => 3,
+            };
+            DayPeriods::for_locale(data, &request.data_locale, width)
+        });
+    if let Some(width) = component(request, "dayPeriod").filter(|_| day_period.is_some()) {
+        fields.push(("dayPeriod", width.to_string()));
+    }
     Ok(Format {
         formatter,
         prefs,
         field_set,
         range: RefCell::new(None),
         fields,
-        hour_24,
+        fixups: Fixups {
+            hour_24,
+            strip_hour,
+            numeric_alone,
+            zero: crate::number_format::SIMPLE_DIGITS
+                .binary_search_by(|(n, _)| (*n).cmp(request.numbering_system.as_str()))
+                .map_or('0', |at| crate::number_format::SIMPLE_DIGITS[at].1.digit(0)),
+            day_period,
+        },
+    })
+}
+
+/// Whether a UTS 35 pattern has one of these field symbols outside quotes.
+fn has_symbol(pattern: &str, symbols: &[char]) -> bool {
+    let mut quoted = false;
+    pattern.chars().any(|c| {
+        if c == '\'' {
+            quoted = !quoted;
+        }
+        !quoted && symbols.contains(&c)
     })
 }
 
@@ -423,18 +579,16 @@ pub(crate) type Part = (&'static str, String, &'static str);
 /// The ICU4X input for one instant.
 type Input = ZonedDateTime<Iso, icu::time::TimeZoneInfo<icu::time::zone::models::AtTime>>;
 
-/// ToLocalTime: the ICU4X input for a time value, its local hour and its
-/// offset in seconds.
-fn local_time(data: &IntlData, zone: &str, epoch_ms: f64) -> Result<(Input, u8, i32), String> {
+/// ToLocalTime: the ICU4X input for a time value and its offset in seconds.
+fn local_time(data: &IntlData, zone: &str, epoch_ms: f64) -> Result<(Input, i32), String> {
     let ms = epoch_ms as i64;
     let offset = zone_offset_seconds(zone, ms)?;
     let local = ms + i64::from(offset) * 1000;
     let day = local.div_euclid(86_400_000);
     let in_day = local.rem_euclid(86_400_000);
     let date = Date::from_rata_die(RataDie::new(EPOCH_RATA_DIE + day), Iso);
-    let hour = (in_day / 3_600_000) as u8;
     let time = Time::try_new(
-        hour,
+        (in_day / 3_600_000) as u8,
         (in_day / 60_000 % 60) as u8,
         (in_day / 1000 % 60) as u8,
         (in_day % 1000) as u32 * 1_000_000,
@@ -454,26 +608,73 @@ fn local_time(data: &IntlData, zone: &str, epoch_ms: f64) -> Result<(Input, u8, 
             time,
             zone: zone_info,
         },
-        hour,
         offset,
     ))
 }
 
-/// h24: hour 0 of the part's own instant reads 24.
-fn apply_hour_24(format: &Format, parts: &mut [Part], start_hour: u8, end_hour: u8) {
-    if !format.hour_24 {
-        return;
-    }
-    for (kind, text, source) in parts {
-        let hour = if *source == "endRange" {
-            end_hour
-        } else {
-            start_hour
-        };
-        if *kind == "hour" && hour == 0 {
-            *text = twenty_four(text);
+/// What ICU4X cannot write itself: h24's hour 24, the flexible day period,
+/// and parts without the hour it implied. Each part takes its own side's
+/// local time.
+fn adjust(format: &Fixups, parts: Vec<Part>, start: Time, end: Time) -> Vec<Part> {
+    let time_of = |source: &str| if source == "endRange" { end } else { start };
+    let mut out: Vec<Part> = Vec::with_capacity(parts.len());
+    // Whether a dropped field lies between the last kept part and the next.
+    let mut dropped = false;
+    for (kind, mut text, source) in parts {
+        let time = time_of(source);
+        match kind {
+            "hour" if format.strip_hour => {
+                dropped = true;
+                continue;
+            }
+            "dayPeriod" if format.strip_hour && format.day_period.is_none() => {
+                dropped = true;
+                continue;
+            }
+            "hour" if format.hour_24 && time.hour.number() == 0 => text = twenty_four(&text),
+            "dayPeriod" => {
+                if let Some(name) = format.day_period.as_ref().and_then(|d| d.name(time)) {
+                    text = name.to_string();
+                }
+            }
+            _ => {}
         }
+        if Some(kind) == format.numeric_alone {
+            let mut chars = text.chars();
+            if let (Some(first), Some(_), None) = (chars.next(), chars.next(), chars.next())
+                && first == format.zero
+            {
+                text = text[first.len_utf8()..].to_string();
+            }
+        }
+        if kind == "literal" && dropped {
+            match out.last_mut() {
+                // Nothing before it: the separator went with the field.
+                None => {
+                    dropped = false;
+                    continue;
+                }
+                // Two separators meet where a field was: keep the wider.
+                Some((last_kind, last_text, _)) if *last_kind == "literal" => {
+                    if text.chars().count() > last_text.chars().count() {
+                        *last_text = text;
+                    }
+                    dropped = false;
+                    continue;
+                }
+                _ => {}
+            }
+        }
+        if kind != "literal" {
+            dropped = false;
+        }
+        out.push((kind, text, source));
     }
+    // A separator left at the end went with a dropped field.
+    if dropped && out.last().is_some_and(|(k, ..)| *k == "literal") {
+        out.pop();
+    }
+    out
 }
 
 /// FormatDateTimePattern for a time value already through TimeClip.
@@ -483,16 +684,14 @@ pub(crate) fn format_to_parts(
     zone: &str,
     epoch_ms: f64,
 ) -> Result<Vec<Part>, String> {
-    let (input, hour, _) = local_time(data, zone, epoch_ms)?;
+    let (input, _) = local_time(data, zone, epoch_ms)?;
     let mut sink = Collector::default();
     format
         .formatter
         .format(&input)
         .write_to_parts(&mut sink)
         .map_err(|_| String::from("formatting failed"))?;
-    let mut parts = sink.parts();
-    apply_hour_24(format, &mut parts, hour, hour);
-    Ok(parts)
+    Ok(adjust(&format.fixups, sink.parts(), input.time, input.time))
 }
 
 /// PartitionDateTimeRangePattern for time values already through TimeClip.
@@ -521,8 +720,8 @@ pub(crate) fn format_range_to_parts(
             }
         }
     };
-    let (start, start_hour, start_offset) = local_time(data, zone, x)?;
-    let (mut end, end_hour, end_offset) = local_time(data, zone, y)?;
+    let (start, start_offset) = local_time(data, zone, x)?;
+    let (mut end, end_offset) = local_time(data, zone, y)?;
     // ICU4X compares the zone with its name timestamp, so two instants in
     // one zone never share a range pattern; at the same offset the names are
     // the same.
@@ -534,9 +733,7 @@ pub(crate) fn format_range_to_parts(
         .format(&start, &end)
         .write_to_parts(&mut sink)
         .map_err(|_| String::from("formatting failed"))?;
-    let mut parts = sink.parts();
-    apply_hour_24(format, &mut parts, start_hour, end_hour);
-    Ok(parts)
+    Ok(adjust(&format.fixups, sink.parts(), start.time, end.time))
 }
 
 /// "0" or "00" as 24 in the same digits.
@@ -625,13 +822,6 @@ impl PartsWrite for Collector {
 }
 
 impl Collector {
-    fn text_of(&self, part: writeable::Part) -> Option<&str> {
-        self.spans
-            .iter()
-            .find(|(_, _, p, _)| *p == part)
-            .map(|(s, e, _, _)| &self.text[*s..*e])
-    }
-
     /// ECMA-402 parts: each run takes its outermost date-time field part
     /// (a second with a fraction splits at the decimal separator) and the
     /// range side it falls in.
@@ -726,6 +916,61 @@ mod tests {
         assert_eq!(offset_minutes("-00:45"), Some(-45));
         assert_eq!(offset_minutes("+0530"), None);
         assert_eq!(offset_minutes("Europe/Paris"), None);
+    }
+
+    fn test_data() -> IntlData {
+        static BLOB: &[u8] = include_bytes!("../tests/data/intl-test.postcard");
+        IntlData::try_from_static_blob(BLOB).expect("test blob")
+    }
+
+    fn at(hour: u8, minute: u8) -> Time {
+        Time::try_new(hour, minute, 0, 0).expect("time")
+    }
+
+    #[test]
+    fn flexible_day_periods_follow_the_language_rules() {
+        let data = test_data();
+        let en = DayPeriods::for_locale(&data, "en-GB", 3).expect("en names");
+        assert_eq!(en.name(at(13, 30)), Some("in the afternoon"));
+        assert_eq!(en.name(at(12, 0)), Some("noon"));
+        assert_eq!(en.name(at(0, 0)), Some("midnight"));
+        assert_eq!(en.name(at(0, 1)), Some("in the morning"));
+        assert_eq!(en.name(at(22, 0)), Some("at night"));
+        // ja's night2 runs past midnight, from 23:00 to 04:00.
+        let ja = DayPeriods::for_locale(&data, "ja", 3).expect("ja names");
+        assert_eq!(ja.name(at(2, 0)), ja.name(at(23, 30)));
+        assert_ne!(ja.name(at(2, 0)), ja.name(at(20, 0)));
+    }
+
+    #[test]
+    fn hour_cycles_come_from_the_likely_region() {
+        let data = test_data();
+        assert_eq!(hour_cycles(&data, "en"), ["h12", "h12", "h23"]);
+        assert_eq!(hour_cycles(&data, "de"), ["h23", "h12", "h23"]);
+        assert_eq!(hour_cycles(&data, "ja"), ["h23", "h11", "h23"]);
+    }
+
+    #[test]
+    fn a_dropped_hour_takes_its_separator() {
+        let fixups = Fixups {
+            hour_24: false,
+            strip_hour: true,
+            numeric_alone: None,
+            zero: '0',
+            day_period: None,
+        };
+        let parts: Vec<Part> = vec![
+            ("hour", "1".into(), "shared"),
+            ("literal", ":".into(), "shared"),
+            ("minute", "04".into(), "shared"),
+            ("literal", ":".into(), "shared"),
+            ("second", "05".into(), "shared"),
+            ("literal", " ".into(), "shared"),
+            ("dayPeriod", "PM".into(), "shared"),
+        ];
+        let kept = adjust(&fixups, parts, at(13, 4), at(13, 4));
+        let text: String = kept.iter().map(|(_, t, _)| t.as_str()).collect();
+        assert_eq!(text, "04:05");
     }
 
     #[test]

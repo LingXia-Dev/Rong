@@ -16,12 +16,13 @@ env:
 
 jobs:
   cldr-table:
-    # The CLDR number symbols compiled into the crate match the CLDR of the
-    # pinned ICU4X data, and the table is what the generator makes from it.
+    # The CLDR tables compiled into the crate match the CLDR of the pinned
+    # ICU4X data, and each is what its generator makes from it.
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
       - run: python3 -I quickjs/intl/tools/cldr_numbers.py --check
+      - run: python3 -I quickjs/intl/tools/cldr_dates.py --check
 
   test262:
     strategy:
