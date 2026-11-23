@@ -128,8 +128,6 @@ test('sec-intl.datetimeformat.prototype.resolvedoptions', 'keys and order, defau
   const ro = new DTF('en', { timeZone: 'UTC' }).resolvedOptions();
   assert.deepEqual(Object.keys(ro), ['locale', 'calendar', 'numberingSystem', 'timeZone', 'year', 'month', 'day']);
   assert.deepEqual([ro.year, ro.month, ro.day], ['numeric', 'numeric', 'numeric']);
-  const hour = new DTF('en', { timeZone: 'UTC', hour: 'numeric' }).resolvedOptions();
-  assert.deepEqual(Object.keys(hour), ['locale', 'calendar', 'numberingSystem', 'timeZone', 'hourCycle', 'hour12', 'hour']);
   const styled = new DTF('en', { timeZone: 'UTC', dateStyle: 'short', timeStyle: 'long' }).resolvedOptions();
   assert.deepEqual(Object.keys(styled),
     ['locale', 'calendar', 'numberingSystem', 'timeZone', 'hourCycle', 'hour12', 'dateStyle', 'timeStyle']);
@@ -138,6 +136,12 @@ test('sec-intl.datetimeformat.prototype.resolvedoptions', 'keys and order, defau
   const props = Object.getOwnPropertyDescriptor(ro, 'locale');
   assert.ok(props.writable && props.enumerable && props.configurable);
 });
+
+only('rong', 'JavaScriptCore reports dayPeriod for the am/pm marker; in ECMA-402 Table 16 dayPeriod is the flexible day period (B), and the am/pm marker ({ampm}) is not a resolvedOptions field',
+  'sec-intl.datetimeformat.prototype.resolvedoptions', 'an hour alone reports no dayPeriod', () => {
+    const hour = new DTF('en', { timeZone: 'UTC', hour: 'numeric' }).resolvedOptions();
+    assert.deepEqual(Object.keys(hour), ['locale', 'calendar', 'numberingSystem', 'timeZone', 'hourCycle', 'hour12', 'hour']);
+  });
 
 test('sec-intl.datetimeformat.prototype.resolvedoptions', 'fractionalSecondDigits is a Number', () => {
   const ro = new DTF('en', { timeZone: 'UTC', second: 'numeric', fractionalSecondDigits: '2' }).resolvedOptions();
@@ -176,8 +180,8 @@ test('sec-formatdatetimepattern', 'h24 and h11 at midnight', () => {
 });
 
 const ZONE_IDS = [
-  ['UTC', 'UTC'], ['utc', 'UTC'], ['Etc/UTC', 'UTC'], ['GMT', 'UTC'], ['Etc/GMT', 'UTC'],
-  ['etc/gmt+5', 'Etc/GMT+5'], ['america/new_york', 'America/New_York'], ['US/Eastern', 'America/New_York'],
+  ['UTC', 'UTC'], ['utc', 'UTC'],
+  ['etc/gmt+5', 'Etc/GMT+5'], ['america/new_york', 'America/New_York'],
   ['+05:30', '+05:30'], ['+0530', '+05:30'], ['-00:00', '+00:00'], ['+05', '+05:00'], ['-0330', '-03:30'],
 ];
 for (const [input, want] of ZONE_IDS) {
@@ -192,8 +196,11 @@ test('sec-createdatetimeformat', 'invalid time zones', () => {
   }
 });
 
-only('rong', 'the reference keeps the name given; ECMA-402 stores the primary identifier', 'sec-createdatetimeformat',
+only('rong', 'JavaScriptCore keeps the identifier given; CreateDateTimeFormat sets timeZone to the record\'s [[PrimaryIdentifier]]', 'sec-createdatetimeformat',
   'timeZone: a link resolves to its primary identifier', () => {
+    for (const [given, primary] of [['Etc/UTC', 'UTC'], ['GMT', 'UTC'], ['Etc/GMT', 'UTC'], ['US/Eastern', 'America/New_York']]) {
+      assert.sameValue(new DTF('en', { timeZone: given }).resolvedOptions().timeZone, primary, given);
+    }
     assert.sameValue(new DTF('en', { timeZone: 'Asia/Calcutta' }).resolvedOptions().timeZone, 'Asia/Kolkata');
     assert.sameValue(new DTF('en', { timeZone: 'Asia/Kolkata' }).resolvedOptions().timeZone, 'Asia/Kolkata');
   });
@@ -236,7 +243,9 @@ for (const [zone, ms, want] of ZONES) {
   test('sec-formatdatetimepattern', 'zone ' + zone + ' at ' + ms, () => {
     const f = new DTF('en-US', { timeZone: zone, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit',
       minute: '2-digit', second: '2-digit', hourCycle: 'h23', timeZoneName: 'longOffset' });
-    assert.sameValue(f.format(ms), want);
+    // At offset zero CLDR's gmtZeroFormat ("GMT") and the long form
+    // ("GMT+00:00") are both the localized GMT format ECMA-402 names.
+    assert.sameValue(f.format(ms).replace(/GMT$/, 'GMT+00:00'), want);
   });
 }
 
@@ -457,8 +466,28 @@ const DTF_TABLE = [
   ["zh", {weekday: 'short'}, "\u5468\u4e00", "weekday"],
   ["zh", {minute: '2-digit', second: '2-digit', fractionalSecondDigits: 3}, "04:05.678", "minute literal second literal fractionalSecond"],
 ];
+// Rows whose value is data: [condition, [value, types], why]. The table is
+// CLDR 48 as ICU writes it; these say where other data differs.
+const ARAB = (s) => s.replace(/[0-9]/g, (d) => String.fromCharCode(0x660 + +d)).replace('.', '\u066b');
+const ARAB_DEFAULT = 'ar used arab digits by default before CLDR 46';
+const APPLE = 'Apple\'s ICU carries its own abbreviated weekdays';
+const DTF_DATA = {
+  'ar {"year":"numeric","month":"2-digit","day":"2-digit"}': [[{ cldrBelow: 46 }, [ARAB('05\u200f/01\u200f/2026'), 'day literal month literal year'], ARAB_DEFAULT]],
+  'ar {"hour":"2-digit","minute":"2-digit","hourCycle":"h23"}': [[{ cldrBelow: 46 }, [ARAB('13:04'), 'hour literal minute'], ARAB_DEFAULT]],
+  'ar {"month":"long","day":"numeric"}': [[{ cldrBelow: 46 }, [ARAB('5') + ' \u064a\u0646\u0627\u064a\u0631', 'day literal month'], ARAB_DEFAULT]],
+  'ar {"minute":"2-digit","second":"2-digit","fractionalSecondDigits":3}': [[{ cldrBelow: 46 }, [ARAB('04:05.678'), 'minute literal second literal fractionalSecond'], ARAB_DEFAULT]],
+  'ar {"weekday":"short"}': [[{ vendor: 'apple' }, ['\u0627\u062b\u0646\u064a\u0646', 'weekday'], APPLE]],
+  'pt-PT {"weekday":"short"}': [[{ vendor: 'apple' }, ['seg.', 'weekday'], APPLE]],
+  'ru {"weekday":"short"}': [[{ vendor: 'apple' }, ['\u041f\u043d', 'weekday'], APPLE]],
+  'cy {"month":"long","day":"numeric"}': [[{ cldrAtLeast: 49 }, ['5 Ionawr', 'day literal month'], 'CLDR 49 changed cy MMMMd to d MMMM']],
+  'ko {"year":"numeric","month":"2-digit","day":"2-digit"}': [[{ cldrAtLeast: 49 }, ['2026/01/05', 'year literal month literal day'], 'CLDR 49 changed ko yMd to y/M/d']],
+  'mt {"year":"numeric","month":"2-digit","day":"2-digit"}': [[{ source: 'icu4x' }, ['01/05/2026', 'month literal day literal year'], 'CLDR\'s mt yMd is M/d/y (CLDR 44 to 49); ICU\'s mt data writes d/M/y']],
+  'fa {"minute":"2-digit","second":"2-digit","fractionalSecondDigits":3}': [[{ source: 'icu4x' }, ['\u06f0\u06f4:\u06f0\u06f5\u066b\u06f6\u06f7\u06f8', 'minute literal second literal fractionalSecond'],
+    'best fit: ICU keeps the matched pattern\'s m, ICU4X widens it to the 2-digit asked for']],
+};
 for (const [locale, options, want, types] of DTF_TABLE) {
-  test('sec-formatdatetimepattern', locale + ' ' + JSON.stringify(options), () => {
+  const name = locale + ' ' + JSON.stringify(options);
+  dataTest('sec-formatdatetimepattern', name, [want, types], DTF_DATA[name], ([want, types]) => {
     const f = new DTF(locale, Object.assign({ timeZone: 'UTC' }, options));
     assert.sameValue(f.format(D), want);
     const parts = f.formatToParts(D);
@@ -474,16 +503,17 @@ test('sec-formatdatetimerange', 'arguments', () => {
   assert.throws(TypeError, () => f.formatRangeToParts(D));
   assert.throws(RangeError, () => f.formatRange(D, NaN));
   assert.throws(RangeError, () => f.formatRange(NaN, D));
-  assert.sameValue(f.formatRange(D + 86400000 * 3, D), '1/8/2026\u2009\u2013\u20091/5/2026', 'an end before the start is allowed');
+  // The spaces around the dash are CLDR's thin spaces; WebKit writes ASCII ones.
+  assert.sameValue(f.formatRange(D + 86400000 * 3, D).replace(/\u2009/g, ' '), '1/8/2026 \u2013 1/5/2026', 'an end before the start is allowed');
   assert.sameValue(f.formatRange(D, D), '1/5/2026', 'equal dates collapse');
 });
 
 test('sec-formatdatetimerangetoparts', 'sources', () => {
   const f = new DTF('en', { month: 'short', day: 'numeric', timeZone: 'UTC' });
   const parts = f.formatRangeToParts(Date.UTC(2026, 0, 5, 13), Date.UTC(2026, 0, 7, 9));
-  assert.deepEqual(parts.map((p) => [p.type, p.value, p.source]), [
+  assert.deepEqual(parts.map((p) => [p.type, p.value.replace(/\u2009/g, ' '), p.source]), [
     ['month', 'Jan', 'shared'], ['literal', ' ', 'shared'], ['day', '5', 'startRange'],
-    ['literal', '\u2009\u2013\u2009', 'shared'], ['day', '7', 'endRange']]);
+    ['literal', ' \u2013 ', 'shared'], ['day', '7', 'endRange']]);
   for (const p of parts) assert.deepEqual(Object.keys(p), ['type', 'value', 'source']);
   const same = f.formatRangeToParts(D, D);
   assert.ok(same.every((p) => p.source === 'shared'));
@@ -500,4 +530,16 @@ test('sec-intl.datetimeformat.supportedlocalesof', 'localeMatcher', () => {
   assert.throws(RangeError, () => DTF.supportedLocalesOf('en', { localeMatcher: 'x' }));
   assert.throws(TypeError, () => DTF.supportedLocalesOf('en', null));
   assert.deepEqual(DTF.supportedLocalesOf([]), []);
+});
+
+test('regression', 'the extreme time values format, with the zone rule of their season', () => {
+  const at = (zone, x) => new DTF('en', { timeZone: zone, dateStyle: 'short', timeStyle: 'short' }).format(x)
+    .replace(/ /g, ' ');
+  assert.sameValue(at('UTC', 8.64e15), '9/13/60, 12:00 AM');
+  assert.sameValue(at('America/New_York', 8.64e15), '9/12/60, 8:00 PM', 'daylight time in September');
+  assert.sameValue(at('Australia/Sydney', 8.64e15), '9/13/60, 10:00 AM', 'standard time in September');
+  const offset = (x) => new DTF('en', { timeZone: 'America/New_York', timeZoneName: 'shortOffset' }).formatToParts(x)
+    .find((p) => p.type === 'timeZoneName').value;
+  assert.sameValue(offset(8.64e15), 'GMT-4');
+  new DTF('en', { timeZone: 'America/New_York' }).format(-8.64e15);
 });

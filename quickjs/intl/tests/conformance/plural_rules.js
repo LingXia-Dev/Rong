@@ -385,8 +385,8 @@ for (const [locale, type, categories, selections] of TABLE) {
   });
 }
 
-only('rong', 'CLDR 49 gives Spanish ordinals a one category (1.\u00ba, 3.\u00ba); the reference\'s ICU predates it',
-  'sec-intl.pluralrules.prototype.select', 'es ordinal', () => {
+dataTest('sec-intl.pluralrules.prototype.select', 'es ordinal', null,
+  [[{ cldrBelow: 49 }, SKIP_DATA, 'CLDR 49 gave Spanish ordinals a one category (1.\u00ba, 3.\u00ba)']], () => {
     const pr = new PR('es', { type: 'ordinal' });
     assert.sameValue(pr.resolvedOptions().pluralCategories.join(' '), 'one other');
     assert.sameValue(VALUES.map((v) => pr.select(v)).join(' '),
