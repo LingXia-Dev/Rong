@@ -1,0 +1,58 @@
+name: Intl size
+
+on:
+  push:
+    branches: [spike/intl-icu4x]
+    paths: [".github/workflows/intl-size.yml", "spike/intl-size/**"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  intl-size:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-24.04, targets: "x86_64-unknown-linux-gnu aarch64-linux-android" }
+          - { os: macos-15, targets: "aarch64-apple-darwin aarch64-apple-ios" }
+          - { os: windows-2025, targets: "x86_64-pc-windows-msvc" }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8
+        with:
+          toolchain: stable
+          targets: ${{ matrix.targets }}
+      - name: Intl added size, per revision
+        shell: bash
+        working-directory: spike/intl-size
+        run: |
+          set -eu
+          if [ -n "${ANDROID_NDK_LATEST_HOME:-}" ]; then
+            ndk="$ANDROID_NDK_LATEST_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin"
+            export CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER="$ndk/aarch64-linux-android24-clang"
+            export CC_aarch64_linux_android="$ndk/aarch64-linux-android24-clang"
+            export AR_aarch64_linux_android="$ndk/llvm-ar"
+          fi
+          size() { python3 -c 'import os,sys,gzip; d=open(sys.argv[1],"rb").read(); print(len(d), len(gzip.compress(d,9)))' "$1"; }
+          cp Cargo.toml Cargo.template
+          for t in ${{ matrix.targets }}; do
+            line="INTLSIZE $t"
+            for variant in "master base" "master intl" "${INTL_BRANCH} intl"; do
+              set -- $variant
+              sed "s|BRANCH|$1|" Cargo.template > Cargo.toml
+              rm -f Cargo.lock
+              feat=""; [ "$2" = intl ] && feat="--features intl"
+              dir="out-$(echo "$1" | tr / -)-$2"
+              cargo build -q --release --target "$t" --target-dir "$dir" $feat
+              f=$(ls "$dir/$t/release/" | grep -E '^(lib)?intl_size\.(so|dylib|dll)$')
+              read b z <<<"$(size "$dir/$t/release/$f")"
+              line="$line | $1 $2 $b (gzip $z)"
+            done
+            echo "$line"
+          done
+        env:
+          INTL_BRANCH: feat/intl-plural-rules
+

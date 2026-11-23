@@ -1,0 +1,24 @@
+[package]
+name = "intl_size"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[lib]
+crate-type = ["cdylib"]
+
+[features]
+intl = ["rong/quickjs-intl"]
+
+[dependencies]
+# The workflow points `branch` at the revision being measured.
+rong = { git = "https://github.com/LingXia-Dev/Rong", branch = "BRANCH", default-features = false, features = ["quickjs", "tls-ring"] }
+
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
