@@ -1,0 +1,42 @@
+name: intl test262
+
+on:
+  pull_request:
+    paths:
+      - "modules/rong_intl/**"
+      - ".github/workflows/intl-test262.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  TEST262_SHA: 2a1ade303f72d3de80565c921d685222405c32ce
+
+jobs:
+  test262:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-24.04, engine: quickjs }
+          - { os: macos-15, engine: jscore }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8
+        with:
+          toolchain: stable
+      - name: Fetch test262
+        run: |
+          git init -q test262 && cd test262
+          git remote add origin https://github.com/tc39/test262.git
+          git fetch -q --depth 1 origin "$TEST262_SHA"
+          git checkout -q FETCH_HEAD
+      - name: intl402 on ${{ matrix.engine }}
+        env:
+          TEST262_DIR: ${{ github.workspace }}/test262
+        run: |
+          cargo test -p rong_intl --no-default-features --features ${{ matrix.engine }},tls-ring \
+            --test test262 --test differential -- --nocapture 2>&1 | tee run.log
+          grep -E "^\[(test262|intl_diff)\]" run.log
