@@ -1,4 +1,5 @@
-//! A native function Rust creates and drops is freed with its closure.
+//! A native function Rust creates and drops is freed with its closure,
+//! whether it was created inside a native call or by Rust at top level.
 //!
 //! JavaScriptCore collects from run-loop timers the test harness does not
 //! service (see `tests/gc.rs`), so it does not run this test. `target_env =
@@ -14,13 +15,14 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 const FUNCTIONS: usize = 10_000;
-static DROPPED: AtomicUsize = AtomicUsize::new(0);
+static DROPPED_IN_CALL: AtomicUsize = AtomicUsize::new(0);
+static DROPPED_AT_TOP: AtomicUsize = AtomicUsize::new(0);
 
-struct DropMarker;
+struct DropMarker(&'static AtomicUsize);
 
 impl Drop for DropMarker {
     fn drop(&mut self) {
-        DROPPED.fetch_add(1, Ordering::SeqCst);
+        self.0.fetch_add(1, Ordering::SeqCst);
     }
 }
 
@@ -65,7 +67,7 @@ fn dropped_native_functions_are_freed() -> Result<(), String> {
             "makeHandlers",
             JSFunc::new(&ctx, move |count: u32| -> JSResult<()> {
                 for i in 0..count {
-                    let marker = DropMarker;
+                    let marker = DropMarker(&DROPPED_IN_CALL);
                     let func = JSFunc::new(&make_ctx, move || {
                         let _ = &marker;
                     })?;
@@ -79,11 +81,53 @@ fn dropped_native_functions_are_freed() -> Result<(), String> {
         )
         .map_err(err)?;
 
-    let handles_before = global_handles(&ctx);
-    let first = create_and_collect(&rt, &ctx)?;
-    let second = create_and_collect(&rt, &ctx)?;
+    let create = || {
+        ctx.eval::<()>(Source::from_bytes(format!(
+            "for (let i = 0; i < {}; i++) makeHandlers(100); delete globalThis.handler;",
+            FUNCTIONS / 100
+        )))
+        .map_err(err)
+    };
+    two_rounds(&rt, &ctx, "in a native call", &DROPPED_IN_CALL, create)
+}
+
+/// Created by Rust outside any native call, as a host sets up handlers at
+/// startup. On engines with scoped handles nothing but the backend's own
+/// scope frees the handles these calls make.
+#[test]
+fn native_functions_created_at_top_level_are_freed() -> Result<(), String> {
+    let rt = RongJS::runtime();
+    let ctx = rt.context();
+    let err = |e: RongJSError| e.to_string();
+    let create = || {
+        for i in 0..FUNCTIONS {
+            let marker = DropMarker(&DROPPED_AT_TOP);
+            let func = JSFunc::new(&ctx, move || {
+                let _ = &marker;
+            })
+            .map_err(err)?;
+            if i % 2 == 1 {
+                ctx.global().set("handler", func).map_err(err)?;
+            }
+        }
+        ctx.eval::<()>(Source::from_bytes("delete globalThis.handler;"))
+            .map_err(err)
+    };
+    two_rounds(&rt, &ctx, "at top level", &DROPPED_AT_TOP, create)
+}
+
+fn two_rounds(
+    rt: &JSRuntime,
+    ctx: &JSContext,
+    label: &str,
+    dropped: &AtomicUsize,
+    create: impl Fn() -> Result<(), String>,
+) -> Result<(), String> {
+    let handles_before = global_handles(ctx);
+    let first = create_and_collect(rt, ctx, dropped, &create)?;
+    let second = create_and_collect(rt, ctx, dropped, &create)?;
     let report = format!(
-        "global handles {handles_before} bytes before; round 1: {first}; round 2: {second}"
+        "{label}: global handles {handles_before} bytes before; round 1: {first}; round 2: {second}"
     );
     log_line(&report);
 
@@ -120,20 +164,21 @@ impl std::fmt::Display for Round {
     }
 }
 
-fn create_and_collect(rt: &JSRuntime, ctx: &JSContext) -> Result<Round, String> {
-    let before = DROPPED.load(Ordering::SeqCst);
-    ctx.eval::<()>(Source::from_bytes(format!(
-        "for (let i = 0; i < {}; i++) makeHandlers(100); delete globalThis.handler;",
-        FUNCTIONS / 100
-    )))
-    .map_err(|e| e.to_string())?;
+fn create_and_collect(
+    rt: &JSRuntime,
+    ctx: &JSContext,
+    dropped: &AtomicUsize,
+    create: &impl Fn() -> Result<(), String>,
+) -> Result<Round, String> {
+    let before = dropped.load(Ordering::SeqCst);
+    create()?;
     let after_creating = global_handles(ctx);
 
     let deadline = Instant::now() + Duration::from_secs(10);
     let freed = loop {
         rt.run_gc();
         rt.run_pending_jobs();
-        let freed = DROPPED.load(Ordering::SeqCst) - before;
+        let freed = dropped.load(Ordering::SeqCst) - before;
         if freed >= FUNCTIONS || Instant::now() >= deadline {
             break freed;
         }
