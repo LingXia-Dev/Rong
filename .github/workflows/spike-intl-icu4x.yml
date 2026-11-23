@@ -121,6 +121,31 @@ jobs:
           EOF
           python3 load.py target/release/libintl_icu4x_spike.so
 
+  phase0-blob:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8
+        with:
+          toolchain: stable
+      - name: Install icu4x-datagen
+        run: cargo install icu4x-datagen --version 2.4.0 --locked --features unstable
+      - name: Locale-services blob for phase 0
+        working-directory: ${{ env.SPIKE }}
+        run: |
+          set -eu
+          cargo build --release --features blob --bin locale_markers
+          icu4x-datagen --markers-for-bin target/release/locale_markers --format blob --locales none --out locale-services.postcard
+          icu4x-datagen --markers-for-bin target/release/locale_markers --format blob --locales none --out /dev/null 2>&1 | tail -3 || true
+          strings -n 8 target/release/locale_markers | grep -o 'Locale[A-Za-z]*V[0-9]' | sort -u
+          echo "BLOB locale-services $(stat -c %s locale-services.postcard) bytes"
+          sha256sum locale-services.postcard
+          target/release/locale_markers locale-services.postcard
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: locale-services-blob
+          path: ${{ env.SPIKE }}/locale-services.postcard
+
   bridge:
     runs-on: ubuntu-24.04
     steps:

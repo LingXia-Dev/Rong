@@ -15,6 +15,10 @@ name = "parity"
 required-features = ["parity"]
 
 [[bin]]
+name = "locale_markers"
+required-features = ["blob"]
+
+[[bin]]
 name = "bridge"
 required-features = ["bridge"]
 
