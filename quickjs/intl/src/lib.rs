@@ -30,7 +30,8 @@ pub use data::IntlData;
 pub const ICU4X_VERSION: &str = "2.4.0";
 pub use settings::{HourCycle, IntlSettings};
 
-static REPORTER: std::sync::OnceLock<Box<dyn Fn(&str) + Send + Sync>> = std::sync::OnceLock::new();
+type Reporter = Box<dyn Fn(&str) + Send + Sync>;
+static REPORTER: std::sync::OnceLock<Reporter> = std::sync::OnceLock::new();
 
 /// Sets where problems with the app's data blob are reported, such as the
 /// host's device log; the `log` crate otherwise. The first call wins;
