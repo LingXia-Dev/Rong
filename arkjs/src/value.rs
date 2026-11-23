@@ -153,6 +153,16 @@ impl ArkJSValue {
         self.value_type == ArkJSValueType::Object
     }
 
+    /// The JS type of a primitive kept by value, known without a JSVM call.
+    pub(crate) fn primitive_type(&self) -> Option<arkjs::JSVM_ValueType> {
+        self.primitive.map(|p| match p {
+            Primitive::Undefined => arkjs::JSVM_ValueType_JSVM_UNDEFINED,
+            Primitive::Null => arkjs::JSVM_ValueType_JSVM_NULL,
+            Primitive::Bool(_) => arkjs::JSVM_ValueType_JSVM_BOOLEAN,
+            Primitive::Number(_) => arkjs::JSVM_ValueType_JSVM_NUMBER,
+        })
+    }
+
     fn pending_exception_or_type_error(&self, message: &str) -> Self {
         unsafe {
             let mut exception: arkjs::JSVM_Value = ptr::null_mut();
@@ -436,7 +446,6 @@ impl JSValueImpl for ArkJSValue {
 
 impl Clone for ArkJSValue {
     fn clone(&self) -> Self {
-        let _scope = crate::scope::OpScope::enter(self.env);
         if self.primitive.is_some() {
             return ArkJSValue {
                 value: self.value,
@@ -447,6 +456,7 @@ impl Clone for ArkJSValue {
                 _context_guard: self._context_guard.clone(),
             };
         }
+        let _scope = crate::scope::OpScope::enter(self.env);
         // Each clone owns its own reference to the value the original reads now.
         let mut cloned = ArkJSValue::new(self.env, self.resolve_handle());
         cloned.value_type = self.value_type;
