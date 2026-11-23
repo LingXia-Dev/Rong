@@ -25,7 +25,7 @@ jobs:
               LocaleLikelySubtagsExtendedV1 LocaleParentsV1 \
               PluralsCardinalV1 PluralsOrdinalV1 PluralsRangesV1 \
               DecimalSymbolsV1 DecimalDigitsV1 DecimalCompactShortV1 DecimalCompactLongV1 \
-            --locales en en-US en-GB fr de es it pt ru pl uk cs ar he ja zh ko hi cy sl lt ga br mt ro
+            --locales en en-US en-GB fr de es it pt ru pl uk cs ar he ja zh ko hi cy sl lt ga br mt ro fa gv
           echo "BLOB intl-test $(stat -c %s intl-test.postcard) bytes, gzip $(gzip -9c intl-test.postcard | wc -c)"
           sha256sum intl-test.postcard
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
