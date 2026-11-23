@@ -15,11 +15,16 @@ QuickJS and none of this code or data.
 
 | `rong` feature | Adds | Linux | macOS / iOS | Android | HarmonyOS | Windows |
 |---|---|---|---|---|---|---|
-| `quickjs-intl` | `Intl` on QuickJS: ICU4X code for the constructors that have landed, and time zones for `DateTimeFormat` | ICU4X code measured as each constructor lands | same | same | same | same |
+| `quickjs-intl` | `Intl` on QuickJS; the rows below are what each part adds | | | | | |
+| (base) | locale services: canonicalization, fallback, `getCanonicalLocales`, the data blob reader | 116 KB (54 KB gzip) | 97 / 80 KB (48 / 47 KB gzip) | 106 KB (52 KB gzip) | not measured | 104 KB (52 KB gzip) |
+| (`PluralRules`) | plural rules and ranges, ECMA-402 rounding on exact decimals, compact exponents | 124 KB (66 KB gzip) | 97 / 112 KB (62 / 61 KB gzip) | 114 KB (65 KB gzip) | not measured | 117 KB (63 KB gzip) |
 | (part of `quickjs-intl`, from `DateTimeFormat` on) | time zone code; bundled zone data only where the platform may lack a system database | 256 KB | 484 / 480 KB | 511 KB, incl. 207 KB data | not measured; about Android | 581 KB, incl. 207 KB data |
 | `quickjs-intl-collator` (planned, with `Collator`) | `Collator` code; its data is a separate optional blob (about 585 KB at root) | to be measured | | | | |
 
-Sizes are added to a release library (`opt-level = "s"`, LTO). Locale data
+Sizes are added to a stripped release `cdylib` (`opt-level = "s"`, LTO, one
+codegen unit) that runs one QuickJS script; KB is 1,024 bytes. Linux is
+x86_64, macOS and iOS aarch64, Android aarch64, Windows x86_64 MSVC. HarmonyOS
+is not in the size job; expect about Android. Locale data
 is not compiled in: the app's blob holds it (about 160 KB, 48 KB gzipped, for
 `en-US`, `he` and `es` without collation).
 
