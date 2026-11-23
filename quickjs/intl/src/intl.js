@@ -157,11 +157,12 @@
   }
 
   // ToIntlMathematicalValue up to the string the natives parse exactly;
-  // -0 travels as "-0".
+  // -0 travels as "-0", a BigInt as "n" and its digits (exact, no
+  // RoundMVResult). No StringNumericLiteral starts with "n".
   function ToIntlMathematicalValue(value) {
     const prim = ToPrimitiveNumber(value);
-    if (typeof prim === 'bigint') return $String(prim);
-    if (typeof prim === 'string') return prim;
+    if (typeof prim === 'bigint') return 'n' + $String(prim);
+    if (typeof prim === 'string') return prim[0] === 'n' ? 'NaN' : prim;
     const x = $Number(prim);
     if (x === 0 && 1 / x < 0) return '-0';
     return $String(x);

@@ -90,3 +90,29 @@ test('regression', 'percent digits default to zero fraction digits', () => {
   assert.sameValue(new Intl.NumberFormat('en', { style: 'percent' }).format(0.1234), '12%');
   assert.sameValue(new Intl.NumberFormat('en', { style: 'percent', maximumFractionDigits: 2 }).format(0.123456), '12.35%');
 });
+
+test('regression', 'a BigInt is exact, never an infinity of RoundMVResult', () => {
+  const nf = new Intl.NumberFormat('en', { useGrouping: false });
+  const big = 10n ** 400n + 7n;
+  assert.sameValue(nf.format(big), String(big));
+  assert.sameValue(nf.format(-big), String(-big));
+  assert.sameValue(nf.format('n1'), 'NaN', 'a string starting with n is not a BigInt');
+});
+
+test('regression', 'every integer digit of a long numeric string is kept', () => {
+  const nf = new Intl.NumberFormat('en', { useGrouping: false, maximumFractionDigits: 2 });
+  const digits = '1' + '23456789'.repeat(37);
+  assert.sameValue(nf.format(digits), digits);
+  assert.sameValue(nf.format(digits + '.125'), digits + '.13');
+});
+
+only('rong', 'the reference reads select\'s value with ToNumber, from before ToIntlMathematicalValue', 'sec-intl.pluralrules.prototype.select',
+  'PluralRules selects a BigInt exactly', () => {
+    const pr = new Intl.PluralRules('en');
+    assert.sameValue(pr.select(1n), 'one');
+    assert.sameValue(pr.select(10n ** 400n + 1n), 'other');
+  });
+
+only('rong', 'the reference has no such bound', 'regression', 'a BigInt past 32767 digits is an infinity (implementation limit)', () => {
+  assert.sameValue(new Intl.NumberFormat('en').format(10n ** 40000n), '∞');
+});
