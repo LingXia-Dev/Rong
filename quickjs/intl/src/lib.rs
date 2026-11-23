@@ -65,6 +65,8 @@ struct IntlState {
     plurals: plural::Cache,
     numbers: number_format::Cache,
     date_times: date_time_format::Cache,
+    /// ICU4X's case mapper, loaded on the first tailored case mapping.
+    case_mapper: std::cell::OnceCell<Option<icu::casemap::CaseMapper>>,
     /// Services whose default already reported a host locale missing from
     /// the blob.
     reported_defaults: std::cell::RefCell<std::collections::HashSet<String>>,
@@ -117,6 +119,7 @@ pub fn configure<C: JSContextImpl>(ctx: &JSContext<C>, data: IntlData, settings:
         plurals: plural::Cache::default(),
         numbers: number_format::Cache::default(),
         date_times: Default::default(),
+        case_mapper: Default::default(),
         reported_defaults: Default::default(),
     });
 }
@@ -483,6 +486,22 @@ where
             },
         )?,
     )?;
+    let own = ctx.clone();
+    natives.set(
+        "transformCase",
+        JSFunc::<E::Value>::new(
+            ctx,
+            move |text: String,
+                  requested: Option<String>,
+                  upper: bool|
+                  -> JSResult<Option<String>> {
+                let state = state(&own)?;
+                let tag = requested
+                    .unwrap_or_else(|| state.settings.default_locale(state.data.canonicalizer()));
+                Ok(transform_case(state, &text, &tag, upper))
+            },
+        )?,
+    )?;
     let install: JSFunc<E::Value> = ctx.eval(Source::from_bytes(BOOTSTRAP))?;
     // The returned helpers serve the constructors from phase 1 on.
     let _helpers: JSObject<E::Value> = install.call(None, (natives,))?;
@@ -510,6 +529,37 @@ fn available(data: &IntlData, service: &str, tag: &str) -> bool {
         "DateTimeFormat" => data.falls_back_into(&locale, &date_time_locales(data)),
         _ => false,
     }
+}
+
+/// The languages whose case mappings ICU4X tailors (SpecialCasing's lt, tr
+/// and az, and CLDR's el and hy); every other locale maps as `und`.
+const CASE_LOCALES: &[&str] = &["az", "el", "hy", "lt", "tr"];
+
+/// TransformCase for a tailored language: `None` when `tag`
+/// (LookupMatchingLocaleByPrefix over [`CASE_LOCALES`]) falls to `und`,
+/// whose mapping is the engine's own default case conversion.
+fn transform_case(state: &IntlState, text: &str, tag: &str, upper: bool) -> Option<String> {
+    let language = tag.split('-').next().unwrap_or_default();
+    if CASE_LOCALES.binary_search(&language).is_err() {
+        return None;
+    }
+    let mapper = state.case_mapper.get_or_init(|| {
+        icu::casemap::CaseMapper::try_new_unstable(&state.data.provider())
+            .inspect_err(|e| {
+                report(&format!(
+                    "rong_quickjs_intl: the data blob has no case mapping data \
+                     (CaseMapV1); {tag} cases as und: {e}"
+                ))
+            })
+            .ok()
+    });
+    let mapper = mapper.as_ref()?.as_borrowed();
+    let id: icu::locale::LanguageIdentifier = language.parse().ok()?;
+    Some(if upper {
+        mapper.uppercase_to_string(text, &id).into_owned()
+    } else {
+        mapper.lowercase_to_string(text, &id).into_owned()
+    })
 }
 
 /// The locales with Gregorian date patterns, the base every calendar's
