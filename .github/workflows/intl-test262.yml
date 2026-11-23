@@ -47,5 +47,5 @@ jobs:
           TEST262_DIR: ${{ github.workspace }}/test262
         run: |
           cargo test -p rong_quickjs_intl --features rong/${{ matrix.engine }},rong/tls-ring \
-            --no-fail-fast --test test262 --test differential -- --nocapture 2>&1 | tee run.log
-          grep -E "^\[(test262|intl_diff)\]" run.log
+            --no-fail-fast --test test262 --test differential --test conformance -- --nocapture 2>&1 | tee run.log
+          grep -E "^\[(test262|intl_diff|conformance)\]" run.log
