@@ -3,6 +3,7 @@ name: Spike Intl on ICU4X
 on:
   push:
     branches: [spike/intl-icu4x]
+    paths-ignore: [".github/workflows/intl-test-blob.yml"]
 
 permissions:
   contents: read

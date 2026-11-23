@@ -1,0 +1,34 @@
+name: Intl test blob
+
+on:
+  push:
+    branches: [spike/intl-icu4x]
+    paths: [".github/workflows/intl-test-blob.yml"]
+
+permissions:
+  contents: read
+
+jobs:
+  blob:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8
+        with:
+          toolchain: stable
+      - name: Install icu4x-datagen
+        run: cargo install icu4x-datagen --version 2.4.0 --locked --features unstable
+      - name: Test blob for rong_quickjs_intl
+        run: |
+          set -eu
+          icu4x-datagen --format blob --out intl-test.postcard \
+            --markers LocaleAliasesV1 LocaleLikelySubtagsLanguageV1 LocaleLikelySubtagsScriptRegionV1 \
+              LocaleLikelySubtagsExtendedV1 LocaleParentsV1 \
+              PluralsCardinalV1 PluralsOrdinalV1 PluralsRangesV1 \
+              DecimalSymbolsV1 DecimalDigitsV1 DecimalCompactShortV1 DecimalCompactLongV1 \
+            --locales en en-US en-GB fr de es it pt ru pl uk cs ar he ja zh ko hi cy sl lt ga br mt ro
+          echo "BLOB intl-test $(stat -c %s intl-test.postcard) bytes, gzip $(gzip -9c intl-test.postcard | wc -c)"
+          sha256sum intl-test.postcard
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: intl-test-blob
+          path: intl-test.postcard
