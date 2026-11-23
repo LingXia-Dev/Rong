@@ -1179,35 +1179,33 @@
     return relativeTimeParts(slots, slots.numberFormat, unit, x);
   }
 
-  function RelativeTimeFormat() {
-    if (new.target === undefined) throw new $TypeError("Constructor Intl.RelativeTimeFormat requires 'new'");
-    let proto = new.target.prototype;
-    if (!isObject(proto)) proto = RelativeTimeFormatPrototype;
-    const rtf = $create(proto);
-    const requested = CanonicalizeLocaleList(arguments[0]);
-    const options = CoerceOptionsToObject(arguments[1]);
-    GetOption(options, 'localeMatcher', 'string', ['lookup', 'best fit'], 'best fit');
-    let nu = GetOption(options, 'numberingSystem', 'string', undefined, undefined);
-    if (nu !== undefined) {
-      if (!isUnicodeType(nu)) throw new $RangeError('Invalid numberingSystem: ' + nu);
-      nu = asciiCase(nu, false);
+  // Derived and never calling super, as PluralRules.
+  class RelativeTimeFormat extends $Object {
+    constructor() {
+      let proto = new.target.prototype;
+      if (!isObject(proto)) proto = RelativeTimeFormatPrototype;
+      const rtf = $create(proto);
+      const requested = CanonicalizeLocaleList(arguments[0]);
+      const options = CoerceOptionsToObject(arguments[1]);
+      GetOption(options, 'localeMatcher', 'string', ['lookup', 'best fit'], 'best fit');
+      let nu = GetOption(options, 'numberingSystem', 'string', undefined, undefined);
+      if (nu !== undefined) {
+        if (!isUnicodeType(nu)) throw new $RangeError('Invalid numberingSystem: ' + nu);
+        nu = asciiCase(nu, false);
+      }
+      const resolved = resolveNumberFormat(requested, nu, 'RelativeTimeFormat');
+      const slots = $create(null);
+      slots.locale = resolved[0];
+      slots.dataLocale = resolved[1];
+      slots.numberingSystem = resolved[2];
+      slots.style = GetOption(options, 'style', 'string', ['long', 'short', 'narrow'], 'long');
+      slots.numeric = GetOption(options, 'numeric', 'string', ['always', 'auto'], 'always');
+      const nf = new NumberFormat(slots.locale, { __proto__: null, numberingSystem: slots.numberingSystem });
+      slots.numberFormat = call($weakGet, numberFormatSlots, nf);
+      call($weakSet, relativeTimeFormatSlots, rtf, slots);
+      return rtf;
     }
-    const resolved = resolveNumberFormat(requested, nu, 'RelativeTimeFormat');
-    const slots = $create(null);
-    slots.locale = resolved[0];
-    slots.dataLocale = resolved[1];
-    slots.numberingSystem = resolved[2];
-    slots.style = GetOption(options, 'style', 'string', ['long', 'short', 'narrow'], 'long');
-    slots.numeric = GetOption(options, 'numeric', 'string', ['always', 'auto'], 'always');
-    const nf = new NumberFormat(slots.locale, { __proto__: null, numberingSystem: slots.numberingSystem });
-    slots.numberFormat = call($weakGet, numberFormatSlots, nf);
-    call($weakSet, relativeTimeFormatSlots, rtf, slots);
-    return rtf;
-  }
-  const RelativeTimeFormatPrototype = RelativeTimeFormat.prototype;
-  $defineProperty(RelativeTimeFormat, 'prototype', { writable: false });
 
-  class RelativeTimeFormatMethods {
     static supportedLocalesOf(locales) {
       return SupportedLocales('RelativeTimeFormat', locales, arguments[1]);
     }
@@ -1244,10 +1242,8 @@
       return options;
     }
   }
-  define(RelativeTimeFormat, 'supportedLocalesOf', RelativeTimeFormatMethods.supportedLocalesOf, false, true);
-  define(RelativeTimeFormatPrototype, 'format', RelativeTimeFormatMethods.prototype.format, false, true);
-  define(RelativeTimeFormatPrototype, 'formatToParts', RelativeTimeFormatMethods.prototype.formatToParts, false, true);
-  define(RelativeTimeFormatPrototype, 'resolvedOptions', RelativeTimeFormatMethods.prototype.resolvedOptions, false, true);
+  $setPrototypeOf(RelativeTimeFormat, $FunctionPrototype);
+  const RelativeTimeFormatPrototype = RelativeTimeFormat.prototype;
   $defineProperty(RelativeTimeFormatPrototype, $toStringTag, {
     __proto__: null, value: 'Intl.RelativeTimeFormat', writable: false, enumerable: false, configurable: true,
   });
@@ -1291,25 +1287,23 @@
     }
   }
 
-  function ListFormat() {
-    if (new.target === undefined) throw new $TypeError("Constructor Intl.ListFormat requires 'new'");
-    let proto = new.target.prototype;
-    if (!isObject(proto)) proto = ListFormatPrototype;
-    const lf = $create(proto);
-    const requested = CanonicalizeLocaleList(arguments[0]);
-    const options = GetOptionsObject(arguments[1]);
-    GetOption(options, 'localeMatcher', 'string', ['lookup', 'best fit'], 'best fit');
-    const slots = $create(null);
-    slots.locale = resolveLocale('ListFormat', requested);
-    slots.type = GetOption(options, 'type', 'string', ['conjunction', 'disjunction', 'unit'], 'conjunction');
-    slots.style = GetOption(options, 'style', 'string', ['long', 'short', 'narrow'], 'long');
-    call($weakSet, listFormatSlots, lf, slots);
-    return lf;
-  }
-  const ListFormatPrototype = ListFormat.prototype;
-  $defineProperty(ListFormat, 'prototype', { writable: false });
+  // Derived and never calling super, as PluralRules.
+  class ListFormat extends $Object {
+    constructor() {
+      let proto = new.target.prototype;
+      if (!isObject(proto)) proto = ListFormatPrototype;
+      const lf = $create(proto);
+      const requested = CanonicalizeLocaleList(arguments[0]);
+      const options = GetOptionsObject(arguments[1]);
+      GetOption(options, 'localeMatcher', 'string', ['lookup', 'best fit'], 'best fit');
+      const slots = $create(null);
+      slots.locale = resolveLocale('ListFormat', requested);
+      slots.type = GetOption(options, 'type', 'string', ['conjunction', 'disjunction', 'unit'], 'conjunction');
+      slots.style = GetOption(options, 'style', 'string', ['long', 'short', 'narrow'], 'long');
+      call($weakSet, listFormatSlots, lf, slots);
+      return lf;
+    }
 
-  class ListFormatMethods {
     static supportedLocalesOf(locales) {
       return SupportedLocales('ListFormat', locales, arguments[1]);
     }
@@ -1344,10 +1338,8 @@
       return options;
     }
   }
-  define(ListFormat, 'supportedLocalesOf', ListFormatMethods.supportedLocalesOf, false, true);
-  define(ListFormatPrototype, 'format', ListFormatMethods.prototype.format, false, true);
-  define(ListFormatPrototype, 'formatToParts', ListFormatMethods.prototype.formatToParts, false, true);
-  define(ListFormatPrototype, 'resolvedOptions', ListFormatMethods.prototype.resolvedOptions, false, true);
+  $setPrototypeOf(ListFormat, $FunctionPrototype);
+  const ListFormatPrototype = ListFormat.prototype;
   $defineProperty(ListFormatPrototype, $toStringTag, {
     __proto__: null, value: 'Intl.ListFormat', writable: false, enumerable: false, configurable: true,
   });
