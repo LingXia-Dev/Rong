@@ -20,10 +20,13 @@ type Patterns = DataPayload<DatetimeRelativeSecondLongV1>;
 /// the [[Unit]].
 pub(crate) type RelativePart = (&'static str, String, Option<&'static str>);
 
+/// A locale, a unit and a style.
+type PatternKey = (String, &'static str, &'static str);
+
 /// ICU4X data per context, loaded on first use.
 #[derive(Default)]
 pub(crate) struct Cache {
-    patterns: RefCell<HashMap<(String, &'static str, &'static str), Rc<Patterns>>>,
+    patterns: RefCell<HashMap<PatternKey, Rc<Patterns>>>,
 }
 
 /// The singular units, as ECMA-402's SingularRelativeTimeUnit returns them.
