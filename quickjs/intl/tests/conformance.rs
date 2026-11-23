@@ -24,6 +24,7 @@ const FILES: &[(&str, &str)] = &[
         "date_time_format.js",
         include_str!("conformance/date_time_format.js"),
     ),
+    ("to_locale.js", include_str!("conformance/to_locale.js")),
     ("robustness.js", include_str!("conformance/robustness.js")),
     ("regressions.js", include_str!("conformance/regressions.js")),
 ];
