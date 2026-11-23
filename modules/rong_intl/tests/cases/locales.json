@@ -4,7 +4,7 @@
   ["Intl.getCanonicalLocales(['en-US', 'en-us', 'EN-US'])", "[\"en-US\"]"],
   ["Intl.getCanonicalLocales('zh-hans-cn')", "[\"zh-Hans-CN\"]"],
   ["Intl.getCanonicalLocales('iw')", "[\"he\"]"],
-  ["Intl.getCanonicalLocales('cmn')", "[\"zh\"]"],
+  ["Intl.getCanonicalLocales('cmn')", "[\"zh\"]", "data: an alias JavaScriptCore on ICU 74 (Linux) does not apply"],
   ["Intl.getCanonicalLocales('art-lojban')", "[\"jbo\"]"],
   ["Intl.getCanonicalLocales('sgn-GR')", "[\"gss\"]"],
   ["Intl.getCanonicalLocales('en-u-kn-true')", "[\"en-u-kn\"]"],
