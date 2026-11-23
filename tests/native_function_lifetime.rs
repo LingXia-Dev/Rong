@@ -122,7 +122,7 @@ impl std::fmt::Display for Round {
 
 fn create_and_collect(rt: &JSRuntime, ctx: &JSContext) -> Result<Round, String> {
     let before = DROPPED.load(Ordering::SeqCst);
-    ctx.eval::<()>(Source::from_bytes(&format!(
+    ctx.eval::<()>(Source::from_bytes(format!(
         "for (let i = 0; i < {}; i++) makeHandlers(100); delete globalThis.handler;",
         FUNCTIONS / 100
     )))
