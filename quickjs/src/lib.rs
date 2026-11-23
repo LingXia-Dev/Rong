@@ -1,5 +1,7 @@
 mod class;
 mod context;
+#[cfg(feature = "intl")]
+pub mod intl;
 mod runtime;
 mod stack;
 mod value;

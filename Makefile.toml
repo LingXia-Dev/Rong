@@ -148,6 +148,10 @@ elif [ "${ENGINE}" = "arkjs" ]; then
 fi
 
 cargo clippy ${workspace_args} --lib --bins --tests --no-default-features --features "${engine_features}" -- -D warnings
+if [ "${ENGINE}" = "quickjs" ]; then
+  # The opt-in QuickJS Intl adds code paths the default feature set skips.
+  cargo clippy -p rong -p rong_quickjs --lib --tests --no-default-features --features "${engine_features},quickjs-intl" -- -D warnings
+fi
 # The opt-in network observer adds code paths the default feature set skips.
 cargo clippy -p rong_rt -p rong_http --lib --tests --no-default-features --features "${engine_features},network-observer" -- -D warnings
 '''
@@ -182,6 +186,9 @@ if ($env:ENGINE -eq "jscore" -and $env:RONG_JSC_SOURCE) {
 if ($env:ENGINE -eq "quickjs") {
     $workspaceArgs += @("--exclude", "rong_jscore", "--exclude", "rong_jscore_sys")
     & cargo clippy @workspaceArgs --lib --bins --tests "--no-default-features" "--features=$engineFeatures" -- -D warnings
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    # The opt-in QuickJS Intl adds code paths the default feature set skips.
+    & cargo clippy -p rong -p rong_quickjs --lib --tests "--no-default-features" "--features=$engineFeatures,quickjs-intl" -- -D warnings
 } elseif ($env:ENGINE -eq "jscore") {
     $workspaceArgs += @("--exclude", "rong_quickjs", "--exclude", "rong_quickjs_sys")
     & cargo clippy @workspaceArgs --lib --bins --tests "--no-default-features" "--features=$engineFeatures" -- -D warnings

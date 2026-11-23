@@ -1,7 +1,7 @@
 use icu::locale::LocaleCanonicalizer;
 use icu_provider::buf::AsDeserializingBufferProvider;
 use icu_provider_blob::BlobDataProvider;
-use rong::{HostError, JSResult};
+use rong_core::{HostError, JSResult, RongJSError};
 use std::rc::Rc;
 
 /// An app's ICU4X locale data, loaded once from a data blob made by
@@ -48,9 +48,9 @@ impl IntlData {
     }
 }
 
-fn invalid(e: impl std::fmt::Display) -> rong::RongJSError {
+fn invalid(e: impl std::fmt::Display) -> RongJSError {
     HostError::new(
-        rong::error::E_INVALID_ARG,
+        rong_core::error::E_INVALID_ARG,
         format!("Intl data blob cannot be used: {e}"),
     )
     .into()

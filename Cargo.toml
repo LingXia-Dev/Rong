@@ -2,7 +2,7 @@
 members = [
     "core",
     "rong_macro",
-    "quickjs", "quickjs/sys", "quickjs/tz",
+    "quickjs", "quickjs/sys", "quickjs/intl", "quickjs/tz",
     "javascriptcore", "javascriptcore/sys",
     "arkjs", "arkjs/sys",
     "testing/rong_test",
@@ -15,7 +15,6 @@ members = [
     "modules/rong_http", "modules/rong_encoding", "modules/rong_event",
     "modules/rong_assert", "modules/rong_exception", "modules/rong_storage",
     "modules/rong_abort", "modules/rong_console", "modules/rong_url", "modules/rong_buffer",
-    "modules/rong_intl",
     "modules/rong_fs", "modules/rong_stream",
     "modules/rong_crypto",
     "modules/rong_compression",
@@ -45,6 +44,7 @@ rong = { path = ".", default-features = false      , version = "0.8.0" }
 rong_core = { path = "core"      , version = "0.8.0" }
 rong_quickjs = { path = "quickjs"      , version = "0.8.0" }
 rong_quickjs_sys = { path = "quickjs/sys"      , version = "0.7.0" }
+rong_quickjs_intl = { path = "quickjs/intl"      , version = "0.8.0" }
 rong_quickjs_tz = { path = "quickjs/tz"      , version = "0.8.0" }
 rong_jscore = { path = "javascriptcore"      , version = "0.8.0" }
 rong_jscore_sys = { path = "javascriptcore/sys"      , version = "0.6.1" }
@@ -70,7 +70,6 @@ rong_event = { path = "modules/rong_event"   , default-features = false   , vers
 rong_exception = { path = "modules/rong_exception"   , default-features = false   , version = "0.8.0" }
 rong_abort = { path = "modules/rong_abort"   , default-features = false   , version = "0.8.0" }
 rong_url = { path = "modules/rong_url"   , default-features = false   , version = "0.8.0" }
-rong_intl = { path = "modules/rong_intl"   , default-features = false   , version = "0.8.0" }
 rong_buffer = { path = "modules/rong_buffer"   , default-features = false   , version = "0.8.0" }
 rong_stream = { path = "modules/rong_stream"   , default-features = false   , version = "0.8.0" }
 rong_crypto = { path = "modules/rong_crypto"   , default-features = false   , version = "0.8.0" }
@@ -161,6 +160,9 @@ futures = { workspace = true }
 # The CLI/examples keep desktop-friendly defaults for out-of-the-box runs.
 default = []
 quickjs = ["dep:rong_quickjs"]
+# ECMA-402 `Intl` for QuickJS, which has none (`rong::quickjs::intl`). Needs
+# `quickjs`; JavaScriptCore and ArkJS have their own and never carry this.
+quickjs-intl = ["rong_quickjs?/intl"]
 jscore = ["dep:rong_jscore"]
 # Source/JSCOnly builds always enable hard interruption in `rong_jscore`.
 jscore-source = ["jscore", "rong_jscore/source"]

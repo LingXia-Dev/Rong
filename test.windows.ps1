@@ -245,6 +245,22 @@ function Run-AllCoreTests([string]$EngineName, [string[]]$CoreTests) {
     & cargo test @testArgs
     Record-SuiteResult -Name "Core integration tests on $EngineName" -ExitCode $LASTEXITCODE
 
+    # Engine-generic crate: name the engine and TLS backend through `rong`.
+    $intlFeatures = ($featureSet -split ',' | ForEach-Object { if ($_ -match '/') { $_ } else { "rong/$_" } }) -join ','
+    Log-Info "Running Intl tests ($EngineName)"
+    $intlArgs = @("-p", "rong_quickjs_intl", "--features=$intlFeatures", "--quiet")
+    if (-not $script:FailFast) {
+        $intlArgs += "--no-fail-fast"
+    }
+    & cargo test @intlArgs -- --nocapture
+    Record-SuiteResult -Name "Intl tests on $EngineName" -ExitCode $LASTEXITCODE
+    if ($EngineName -eq "quickjs") {
+        Log-Info "Running the quickjs-intl feature test"
+        $featArgs = @("-p", "rong", "--no-default-features", "--features=$featureSet,quickjs-intl", "--test", "quickjs_intl", "--quiet")
+        & cargo test @featArgs
+        Record-SuiteResult -Name "quickjs-intl feature" -ExitCode $LASTEXITCODE
+    }
+
     Log-Info "Running rong_core unit tests ($EngineName)"
     $unitArgs = @("-p", "rong_core", "--lib", "--quiet")
     if (-not $script:FailFast) {

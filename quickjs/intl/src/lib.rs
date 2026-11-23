@@ -1,34 +1,25 @@
-//! ECMA-402 `Intl` for engines that have none.
+//! ECMA-402 `Intl` for QuickJS, which has none.
 //!
-//! rong provides `Intl` only where the engine has none: QuickJS. JavaScriptCore
-//! and ArkJS keep their own, and [`init`] leaves an existing `Intl` untouched.
+//! Internal to `rong_quickjs`: embedders turn it on with `rong`'s
+//! `quickjs-intl` feature and use `rong::quickjs::intl`, not this crate.
+//! JavaScriptCore and ArkJS have their own `Intl` and never link this one.
 //! The bar is ECMA-402 itself, with JavaScriptCore and ArkJS as references.
 //!
 //! Locale data comes from an ICU4X data blob loaded per app ([`IntlData`]), so
 //! an app carries only the locales it ships. The default locale, time zone and
-//! hour cycle come from the embedder's [`IntlSettings`]; on engines with their
-//! own `Intl` the engine's (the system's) defaults apply instead.
+//! hour cycle come from the embedder's [`IntlSettings`].
 //!
-//! ```rust,no_run
-//! use rong::*;
-//!
-//! fn setup(ctx: &JSContext, blob: Vec<u8>) -> JSResult<()> {
-//!     let data = rong_intl::IntlData::try_from_blob(blob.into_boxed_slice())?;
-//!     let settings = rong_intl::IntlSettings {
-//!         locale: Some("he-IL".into()),
-//!         ..Default::default()
-//!     };
-//!     rong_intl::configure(ctx, data, settings);
-//!     rong_intl::init(ctx)
-//! }
-//! ```
+//! The code is written against rong's engine-generic API and instantiated for
+//! QuickJS by `rong_quickjs`, so this crate does not depend on the engine.
 
 mod data;
 mod locale;
 mod settings;
 mod value_aliases;
 
-use rong::*;
+use rong_core::{
+    JSContext, JSContextImpl, JSContextService, JSEngine, JSFunc, JSObject, JSResult, Source,
+};
 
 pub use data::IntlData;
 
@@ -50,7 +41,7 @@ impl JSContextService for IntlState {}
 
 /// Gives `ctx` its locale data and settings. Call before [`init`]; settings
 /// can change later with [`set_settings`].
-pub fn configure(ctx: &JSContext, data: IntlData, settings: IntlSettings) {
+pub fn configure<C: JSContextImpl>(ctx: &JSContext<C>, data: IntlData, settings: IntlSettings) {
     ctx.set_service(IntlState {
         data,
         settings: settings::SettingsRecord::new(settings),
@@ -59,7 +50,7 @@ pub fn configure(ctx: &JSContext, data: IntlData, settings: IntlSettings) {
 
 /// Replaces the settings record. Its generation advances, so formatters
 /// cached for the default locale, zone or hour cycle are rebuilt on next use.
-pub fn set_settings(ctx: &JSContext, settings: IntlSettings) -> bool {
+pub fn set_settings<C: JSContextImpl>(ctx: &JSContext<C>, settings: IntlSettings) -> bool {
     match ctx.get_service::<IntlState>() {
         Some(state) => {
             state.settings.replace(settings);
@@ -70,23 +61,25 @@ pub fn set_settings(ctx: &JSContext, settings: IntlSettings) -> bool {
 }
 
 /// The current settings, if [`configure`] was called.
-pub fn settings(ctx: &JSContext) -> Option<IntlSettings> {
+pub fn settings<C: JSContextImpl>(ctx: &JSContext<C>) -> Option<IntlSettings> {
     ctx.get_service::<IntlState>()
         .map(|state| state.settings.get())
 }
 
-/// Installs `Intl` when the engine has none and [`configure`] gave it data.
-/// An engine's own `Intl` is never replaced, extended or shadowed.
-pub fn init(ctx: &JSContext) -> JSResult<()> {
-    let has_intl: bool = ctx.eval(Source::from_bytes("typeof globalThis.Intl !== 'undefined'"))?;
-    if has_intl || ctx.get_service::<IntlState>().is_none() {
+/// Installs `Intl` on `ctx` once [`configure`] gave it data; without data it
+/// does nothing. QuickJS only: `rong_quickjs` instantiates it for QuickJS.
+pub fn init<E: JSEngine>(ctx: &JSContext<E::Context>) -> JSResult<()>
+where
+    E::Context: 'static,
+{
+    if ctx.get_service::<IntlState>().is_none() {
         return Ok(());
     }
-    let natives = JSObject::new(ctx);
+    let natives = JSObject::<E::Value>::new(ctx);
     let own = ctx.clone();
     natives.set(
         "canonicalizeTag",
-        JSFunc::new(ctx, move |tag: String| -> Option<String> {
+        JSFunc::<E::Value>::new(ctx, move |tag: String| -> Option<String> {
             let state = own.get_service::<IntlState>()?;
             locale::canonicalize(state.data.canonicalizer(), &tag)
         })?,
@@ -94,7 +87,7 @@ pub fn init(ctx: &JSContext) -> JSResult<()> {
     let own = ctx.clone();
     natives.set(
         "defaultLocale",
-        JSFunc::new(ctx, move || -> String {
+        JSFunc::<E::Value>::new(ctx, move || -> String {
             own.get_service::<IntlState>()
                 .map(|state| state.settings.default_locale(state.data.canonicalizer()))
                 .unwrap_or_else(|| String::from(settings::FALLBACK_LOCALE))
@@ -103,13 +96,13 @@ pub fn init(ctx: &JSContext) -> JSResult<()> {
     let own = ctx.clone();
     natives.set(
         "settingsGeneration",
-        JSFunc::new(ctx, move || -> f64 {
+        JSFunc::<E::Value>::new(ctx, move || -> f64 {
             own.get_service::<IntlState>()
                 .map_or(0.0, |state| state.settings.generation() as f64)
         })?,
     )?;
-    let install: JSFunc = ctx.eval(Source::from_bytes(BOOTSTRAP))?;
+    let install: JSFunc<E::Value> = ctx.eval(Source::from_bytes(BOOTSTRAP))?;
     // The returned helpers serve the constructors from phase 1 on.
-    let _helpers: JSObject = install.call(None, (natives,))?;
+    let _helpers: JSObject<E::Value> = install.call(None, (natives,))?;
     Ok(())
 }
