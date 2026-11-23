@@ -1,6 +1,7 @@
 //! Uses exactly the locale services phase 0 needs, so datagen's
 //! `--markers-for-bin` reads their markers from this binary.
 use icu::locale::{LocaleCanonicalizer, LocaleExpander, fallback::LocaleFallbacker};
+use icu_provider::buf::AsDeserializingBufferProvider;
 use icu_provider_blob::BlobDataProvider;
 
 fn main() {
