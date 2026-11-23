@@ -544,7 +544,7 @@
       if (!isUnicodeType(nu)) throw new $RangeError('Invalid numberingSystem: ' + nu);
       nu = asciiCase(nu, false);
     }
-    const resolved = resolveNumberFormat(requested, nu);
+    const resolved = resolveNumberFormat(requested, nu, 'NumberFormat');
     const slots = $create(null);
     slots.locale = resolved[0];
     slots.dataLocale = resolved[1];
