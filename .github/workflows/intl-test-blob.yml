@@ -26,7 +26,33 @@ jobs:
               PluralsCardinalV1 PluralsOrdinalV1 PluralsRangesV1 \
               DecimalSymbolsV1 DecimalDigitsV1 DecimalCompactShortV1 DecimalCompactLongV1 \
               DecimalPercentV1 CurrencyFractionsV1 \
-            --locales en en-US en-GB fr de es it pt ru pl uk cs ar he ja zh ko hi cy sl lt ga br mt ro fa gv zh-Hant en-IN pt-PT
+              DatetimeNamesDayperiodV1 DatetimeNamesMonthBuddhistV1 DatetimeNamesMonthChineseV1 \
+              DatetimeNamesMonthCopticV1 DatetimeNamesMonthDangiV1 DatetimeNamesMonthEthiopianV1 \
+              DatetimeNamesMonthGregorianV1 DatetimeNamesMonthHebrewV1 DatetimeNamesMonthHijriV1 \
+              DatetimeNamesMonthIndianV1 DatetimeNamesMonthJapaneseV1 DatetimeNamesMonthPersianV1 \
+              DatetimeNamesMonthRocV1 DatetimeNamesWeekdayV1 DatetimeNamesYearBuddhistV1 \
+              DatetimeNamesYearChineseV1 DatetimeNamesYearCopticV1 DatetimeNamesYearDangiV1 \
+              DatetimeNamesYearEthiopianV1 DatetimeNamesYearGregorianV1 DatetimeNamesYearHebrewV1 \
+              DatetimeNamesYearHijriV1 DatetimeNamesYearIndianV1 DatetimeNamesYearJapaneseV1 \
+              DatetimeNamesYearPersianV1 DatetimeNamesYearRocV1 DatetimePatternsDateBuddhistV1 \
+              DatetimePatternsDateChineseV1 DatetimePatternsDateCopticV1 DatetimePatternsDateDangiV1 \
+              DatetimePatternsDateEthiopianV1 DatetimePatternsDateGregorianV1 \
+              DatetimePatternsDateHebrewV1 DatetimePatternsDateHijriV1 DatetimePatternsDateIndianV1 \
+              DatetimePatternsDateJapaneseV1 DatetimePatternsDatePersianV1 DatetimePatternsDateRocV1 \
+              DatetimePatternsGlueV1 DatetimePatternsRangeDateBuddhistV1 \
+              DatetimePatternsRangeDateChineseV1 DatetimePatternsRangeDateCopticV1 \
+              DatetimePatternsRangeDateDangiV1 DatetimePatternsRangeDateEthiopianV1 \
+              DatetimePatternsRangeDateGregorianV1 DatetimePatternsRangeDateHebrewV1 \
+              DatetimePatternsRangeDateHijriV1 DatetimePatternsRangeDateIndianV1 \
+              DatetimePatternsRangeDateJapaneseV1 DatetimePatternsRangeDatePersianV1 \
+              DatetimePatternsRangeDateRocV1 DatetimePatternsRangeGlueV1 DatetimePatternsRangeTimeV1 \
+              DatetimePatternsTimeV1 TimezoneMetazonePeriodsV1 TimezoneNamesCitiesOverrideV1 \
+              TimezoneNamesCitiesRootV1 TimezoneNamesEssentialsV1 TimezoneNamesGenericLongV1 \
+              TimezoneNamesGenericShortV1 TimezoneNamesLocationsOverrideV1 TimezoneNamesLocationsRootV1 \
+              TimezoneNamesSpecificLongV1 TimezoneNamesSpecificShortV1 TimezoneNamesStandardLongV1 \
+              TimezoneIdentifiersIanaCoreV1 TimezoneIdentifiersIanaExtendedV1 TimezonePeriodsV1 \
+              TimezoneVariantsOffsetsV1 CalendarJapaneseModernV1 CalendarPreferredV1 CalendarWeekV1 \
+            --locales en en-US en-GB fr de es it pt ru pl uk cs ar he ja zh ko hi cy sl lt ga br mt ro fa gv zh-Hant en-IN pt-PT de-AT ar-EG sv tr th zh-CN sr sr-Thai si ln pl-PL
           echo "BLOB intl-test $(stat -c %s intl-test.postcard) bytes, gzip $(gzip -9c intl-test.postcard | wc -c)"
           sha256sum intl-test.postcard
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
