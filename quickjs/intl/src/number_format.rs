@@ -906,6 +906,18 @@ pub(crate) fn format_to_parts(
     partition(format, options, compact, measure, x).0
 }
 
+/// PartitionNumberPattern, with the plural operands of the value shown
+/// (`None` for a value that is not finite).
+pub(crate) fn format_with_operands(
+    format: &LocaleFormat,
+    options: &Options,
+    compact: Option<&Compact>,
+    x: &IntlMV,
+) -> (Vec<Part>, Option<PluralOperands>) {
+    let (parts, _, operands) = partition(format, options, compact, None, x);
+    (parts, operands)
+}
+
 /// A range part: ECMA-402's [[Type]], [[Value]] and [[Source]].
 pub(crate) type RangePart = (&'static str, String, &'static str);
 
@@ -918,8 +930,8 @@ pub(crate) fn format_range_to_parts(
     x: &IntlMV,
     y: &IntlMV,
 ) -> Vec<RangePart> {
-    let (start, start_core) = partition(format, options, compact, measure, x);
-    let (end, end_core) = partition(format, options, compact, measure, y);
+    let (start, start_core, _) = partition(format, options, compact, measure, x);
+    let (end, end_core, _) = partition(format, options, compact, measure, y);
     let text = |parts: &[Part]| parts.iter().map(|(_, t)| t.as_str()).collect::<String>();
     let tagged = |parts: &[Part], source| {
         parts
@@ -1013,7 +1025,7 @@ fn partition(
     compact: Option<&Compact>,
     measure: Option<&Affixes>,
     x: &IntlMV,
-) -> (Vec<Part>, (usize, usize)) {
+) -> (Vec<Part>, (usize, usize), Option<PluralOperands>) {
     // The plural operands of the value shown, for a measure's pattern.
     let mut operands = None;
     // The number's own parts (PartitionNotationSubPattern), and the
@@ -1131,7 +1143,7 @@ fn partition(
             _ => push(piece, &mut parts),
         }
     }
-    (parts, core)
+    (parts, core, operands)
 }
 
 fn push_piece(piece: &Piece, parts: &mut Vec<Part>) {

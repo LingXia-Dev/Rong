@@ -17,10 +17,12 @@ mod cldr_numbers;
 mod cldr_units;
 mod data;
 mod date_time_format;
+mod list_format;
 mod locale;
 mod number;
 mod number_format;
 mod plural;
+mod relative_time;
 mod settings;
 mod value_aliases;
 
@@ -67,6 +69,8 @@ struct IntlState {
     plurals: plural::Cache,
     numbers: number_format::Cache,
     date_times: date_time_format::Cache,
+    relative_times: relative_time::Cache,
+    lists: list_format::Cache,
     /// ICU4X's case mapper, loaded on the first tailored case mapping.
     case_mapper: std::cell::OnceCell<Option<icu::casemap::CaseMapper>>,
     /// Services whose default already reported a host locale missing from
@@ -121,6 +125,8 @@ pub fn configure<C: JSContextImpl>(ctx: &JSContext<C>, data: IntlData, settings:
         plurals: plural::Cache::default(),
         numbers: number_format::Cache::default(),
         date_times: Default::default(),
+        relative_times: Default::default(),
+        lists: Default::default(),
         case_mapper: Default::default(),
         reported_defaults: Default::default(),
     });
@@ -283,10 +289,15 @@ where
         "resolveNumberFormat",
         JSFunc::<E::Value>::new(
             ctx,
-            move |requested: Vec<String>, nu: Option<String>| -> JSResult<Vec<String>> {
+            move |requested: Vec<String>,
+                  nu: Option<String>,
+                  service: Option<String>|
+                  -> JSResult<Vec<String>> {
                 let state = state(&own)?;
-                let available = |tag: &str| available(&state.data, "NumberFormat", tag);
-                let default = state.default_locale("NumberFormat");
+                // NumberFormat, or a service that formats with one.
+                let service = service.unwrap_or_else(|| String::from("NumberFormat"));
+                let available = |tag: &str| available(&state.data, &service, tag);
+                let default = state.default_locale(&service);
                 let resolved = locale::resolve_locale(
                     state.data.canonicalizer(),
                     &available,
@@ -321,6 +332,84 @@ where
                     measure.as_deref(),
                     &number::to_intl_mv(&value),
                 );
+                Ok(parts
+                    .into_iter()
+                    .map(|(kind, value)| vec![kind.to_string(), value])
+                    .collect())
+            },
+        )?,
+    )?;
+    let own = ctx.clone();
+    natives.set(
+        "relativeTimeParts",
+        JSFunc::<E::Value>::new(
+            ctx,
+            move |slots: JSObject<E::Value>,
+                  number_slots: JSObject<E::Value>,
+                  unit: String,
+                  value: String|
+                  -> JSResult<Vec<Vec<String>>> {
+                let state = state(&own)?;
+                let text = |key: &str| -> JSResult<String> { slots.get::<_, String>(key) };
+                let options = number_format_options::<E>(&number_slots)?;
+                let (format, compact, _) = number_format_data(state, &options)?;
+                let locale = text("dataLocale")?;
+                let rules = state.plurals.rules(&state.data, &options.locale, false);
+                let parts = relative_time::format_to_parts(
+                    &state.relative_times,
+                    &state.data,
+                    rules.as_ref().map(|r| r.rules()),
+                    &locale,
+                    &text("style")?,
+                    text("numeric")? == "auto",
+                    &unit,
+                    &number::to_intl_mv(&value),
+                    |x| {
+                        number_format::format_with_operands(
+                            &format,
+                            &options,
+                            compact.as_deref(),
+                            x,
+                        )
+                    },
+                )
+                .map_err(|e| {
+                    report(&format!("rong_quickjs_intl: {e}"));
+                    bad(&e)
+                })?;
+                Ok(parts
+                    .into_iter()
+                    .map(|(kind, value, unit)| {
+                        vec![
+                            kind.to_string(),
+                            value,
+                            unit.unwrap_or_default().to_string(),
+                        ]
+                    })
+                    .collect())
+            },
+        )?,
+    )?;
+    let own = ctx.clone();
+    natives.set(
+        "listParts",
+        JSFunc::<E::Value>::new(
+            ctx,
+            move |slots: JSObject<E::Value>, list: Vec<String>| -> JSResult<Vec<Vec<String>>> {
+                let state = state(&own)?;
+                let text = |key: &str| -> JSResult<String> { slots.get::<_, String>(key) };
+                let parts = list_format::format_to_parts(
+                    &state.lists,
+                    &state.data,
+                    &text("locale")?,
+                    &text("type")?,
+                    &text("style")?,
+                    &list,
+                )
+                .map_err(|e| {
+                    report(&format!("rong_quickjs_intl: {e}"));
+                    bad(&e)
+                })?;
                 Ok(parts
                     .into_iter()
                     .map(|(kind, value)| vec![kind.to_string(), value])
@@ -753,6 +842,10 @@ fn service_locales(data: &IntlData, service: &str) -> Vec<String> {
     match service {
         "PluralRules" => data.locales::<icu::plurals::provider::PluralsCardinalV1>(),
         "NumberFormat" => data.locales::<icu::decimal::provider::DecimalSymbolsV1>(),
+        "RelativeTimeFormat" => {
+            data.locales::<icu_experimental::relativetime::provider::DatetimeRelativeSecondLongV1>()
+        }
+        "ListFormat" => data.locales::<icu::list::provider::ListAndV1>(),
         "DateTimeFormat" => date_time_locales(data),
         _ => Vec::new(),
     }
