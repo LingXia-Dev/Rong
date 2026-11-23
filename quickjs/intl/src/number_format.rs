@@ -250,6 +250,16 @@ fn load(
                     out.push(Piece::Literal(rest.to_string()));
                 }
             };
+            // The percent data is the locale's own system's: its signs hold
+            // only there (ar-EG's arab minus carries a bidi mark latn's has
+            // not); another system takes the signs resolved above.
+            let sign = |own: &str, prefix: &str, suffix: &str| {
+                if numbering_system == locale_system {
+                    own.to_string()
+                } else {
+                    format!("{prefix}{suffix}")
+                }
+            };
             let mut zero = Vec::new();
             for item in percent.unsigned_pattern.iter() {
                 match item {
@@ -274,8 +284,16 @@ fn load(
             };
             (
                 zero,
-                with_sign(Piece::Plus(pick(&percent.plus_sign, |r| r.plus_sign))),
-                with_sign(Piece::Minus(pick(&percent.minus_sign, |r| r.minus_sign))),
+                with_sign(Piece::Plus(sign(
+                    &percent.plus_sign,
+                    plus_prefix,
+                    plus_suffix,
+                ))),
+                with_sign(Piece::Minus(sign(
+                    &percent.minus_sign,
+                    minus_prefix,
+                    minus_suffix,
+                ))),
             )
         }
     };
@@ -326,6 +344,8 @@ enum Category {
 pub(crate) fn format_to_parts(format: &LocaleFormat, options: &Options, x: &IntlMV) -> Vec<Part> {
     // The number's own parts, and the category of the rounded value.
     let (number, category): (Vec<Part>, Category) = match x {
+        // GetNumberFormatPattern: NaN is positive-zero, so "always" signs
+        // it ("+NaN") and "exceptZero" does not.
         IntlMV::NotANumber => (
             vec![("nan", format.cldr.nan.to_string())],
             Category::PlusZero,
@@ -551,5 +571,77 @@ mod tests {
                 .iter()
                 .all(|(_, at)| usize::from(*at) < VALUES.len())
         );
+    }
+
+    fn parts_of(
+        locale: &str,
+        system: &str,
+        style: Style,
+        sign: SignDisplay,
+        value: &str,
+    ) -> String {
+        static BLOB: &[u8] = include_bytes!("../tests/data/intl-test.postcard");
+        let data = IntlData::try_from_static_blob(BLOB).expect("test blob");
+        let format = Cache::default()
+            .get(&data, locale, system, style)
+            .expect("format data");
+        let options = Options {
+            locale: locale.to_string(),
+            numbering_system: system.to_string(),
+            style,
+            digits: DigitOptions {
+                min_integer: 1,
+                min_fraction: 0,
+                max_fraction: 0,
+                min_significant: 1,
+                max_significant: 21,
+                increment: 1,
+                rounding_type: number::RoundingType::FractionDigits,
+                rounding_mode: number::RoundingMode::HalfExpand,
+                strip_if_integer: false,
+            },
+            grouping: Grouping::Auto,
+            sign,
+        };
+        format_to_parts(&format, &options, &number::to_intl_mv(value))
+            .iter()
+            .map(|(kind, text)| format!("{kind}:{}", text.escape_default()))
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
+
+    #[test]
+    fn percent_signs_follow_the_requested_numbering_system() {
+        let latn = |sign, value| parts_of("ar-EG", "latn", Style::Percent, sign, value);
+        let decimal = |sign, value| parts_of("ar-EG", "latn", Style::Decimal, sign, value);
+        // ar-EG's own system is arab; with latn the percent signs are the
+        // decimal style's latn signs.
+        let sign_of = |parts: String, kind: &str| {
+            parts
+                .split(' ')
+                .find(|p| p.starts_with(kind))
+                .map(str::to_string)
+        };
+        assert_eq!(
+            sign_of(latn(SignDisplay::Negative, "-0.25"), "minusSign:"),
+            sign_of(decimal(SignDisplay::Negative, "-1"), "minusSign:"),
+        );
+        assert_eq!(
+            sign_of(latn(SignDisplay::Always, "0.25"), "plusSign:"),
+            sign_of(decimal(SignDisplay::Always, "1"), "plusSign:"),
+        );
+        // en with arab takes root's arab signs in both styles.
+        let arab = parts_of("en", "arab", Style::Percent, SignDisplay::Auto, "-0.25");
+        assert!(arab.starts_with(r"minusSign:\u{61c}-"), "{arab}");
+    }
+
+    #[test]
+    fn nan_takes_the_positive_zero_pattern() {
+        let nan = |sign| parts_of("en", "latn", Style::Decimal, sign, "NaN");
+        assert_eq!(nan(SignDisplay::Auto), "nan:NaN");
+        assert_eq!(nan(SignDisplay::Never), "nan:NaN");
+        assert_eq!(nan(SignDisplay::Always), "plusSign:+ nan:NaN");
+        assert_eq!(nan(SignDisplay::ExceptZero), "nan:NaN");
+        assert_eq!(nan(SignDisplay::Negative), "nan:NaN");
     }
 }
