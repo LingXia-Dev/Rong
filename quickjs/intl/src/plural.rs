@@ -64,12 +64,7 @@ impl Cache {
 
     /// The compact formatter, which knows where the locale puts its compact
     /// exponents. `None` when the blob has no compact data for the locale.
-    fn compact(
-        &self,
-        data: &IntlData,
-        locale: &str,
-        long: bool,
-    ) -> Option<Rc<CompactDecimalFormatter>> {
+    fn compact(&self, data: &IntlData, locale: &str, long: bool) -> Compact {
         let key = (locale.to_string(), long);
         if let Some(found) = self.compact.borrow().get(&key) {
             return found.clone();
@@ -99,9 +94,9 @@ pub(crate) struct Options {
     pub digits: DigitOptions,
 }
 
-/// ResolvePlural: the category and FormatNumericToString's string. Non-finite
-/// values are `other` with an empty string (they are never equal to a
-/// finite one's, which is all ResolvePluralRange compares).
+/// ResolvePlural: the category and FormatNumericToString's unsigned string.
+/// Non-finite values are `other` with a string no finite value formats to,
+/// which is all ResolvePluralRange compares.
 pub(crate) fn resolve(
     cache: &Cache,
     data: &IntlData,
