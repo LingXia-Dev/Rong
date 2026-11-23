@@ -110,7 +110,7 @@ fn replace_value_aliases(tag: &str) -> String {
         };
         let mut key: Option<&str> = None;
         let mut value: Vec<&str> = Vec::new();
-        let mut flush = |out: &mut String, key: Option<&str>, value: &mut Vec<&str>| {
+        let flush = |out: &mut String, key: Option<&str>, value: &mut Vec<&str>| {
             if let Some(key) = key {
                 out.push('-');
                 out.push_str(key);
