@@ -261,6 +261,15 @@ function Run-AllCoreTests([string]$EngineName, [string[]]$CoreTests) {
         Record-SuiteResult -Name "quickjs-intl feature" -ExitCode $LASTEXITCODE
     }
 
+    # The examples in `rong::function` include the closures that must not compile.
+    Log-Info "Running rong doc tests ($EngineName)"
+    $docArgs = @("-p", "rong", "--no-default-features", "--features=$featureSet", "--doc", "--quiet")
+    if (-not $script:FailFast) {
+        $docArgs += "--no-fail-fast"
+    }
+    & cargo test @docArgs
+    Record-SuiteResult -Name "rong doc tests on $EngineName" -ExitCode $LASTEXITCODE
+
     Log-Info "Running rong_core unit tests ($EngineName)"
     $unitArgs = @("-p", "rong_core", "--lib", "--quiet")
     if (-not $script:FailFast) {

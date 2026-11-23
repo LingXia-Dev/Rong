@@ -28,6 +28,11 @@ pub use rong_rt::{
 // Re-export selected JS invoke queue APIs (module remains internal to core)
 pub use rong_core::{JsInvokePriority, enqueue_js_invoke};
 
+// The examples name the engine-typed aliases, so they exist with an engine.
+#[cfg_attr(
+    any(feature = "quickjs", feature = "jscore", feature = "arkjs"),
+    doc = include_str!("host_functions.md")
+)]
 pub mod function {
     pub use rong_core::function::{
         Constructor, FromParams, IntoJSCallable, IntoOnceJSCallable, JSParameterType, KAsyncFnMut,
