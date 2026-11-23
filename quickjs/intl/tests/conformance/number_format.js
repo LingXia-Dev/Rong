@@ -721,8 +721,16 @@ const NF_TABLE = [
   ["pt-PT", {style: "percent", signDisplay: "exceptZero", maximumFractionDigits: 1},
     ["0%","0%","+100%","-100%","+123 456,8%","-123 456 789,1%","0%","+100 000 000 000 000 000 000 000%","0%","NaN%","+∞%","-∞%"]],
 ];
+// CLDR 46 made latn the default for ar and set minimumGroupingDigits 2 for
+// it and sl; an older ICU (JavaScriptCore on Linux has ICU 74) differs.
+const OLD_DATA = {
+  ar: () => new NF('ar').format(0) !== '0',
+  it: () => new NF('it').format(1234) !== '1234',
+  sl: () => new NF('sl').format(1234) !== '1234',
+};
 for (const [locale, options, want] of NF_TABLE) {
-  test('sec-formatnumber', locale + ' ' + JSON.stringify(options), () => {
+  const stale = ENGINE === 'reference' && OLD_DATA[locale] !== undefined && OLD_DATA[locale]();
+  unlessOldData(stale, 'the reference\'s ICU predates CLDR 46 for ' + locale, 'sec-formatnumber', locale + ' ' + JSON.stringify(options), () => {
     const nf = new NF(locale, options);
     const got = NF_VALUES.map((v) => nf.format(v));
     for (let i = 0; i < got.length; i++) assert.sameValue(got[i], want[i], show(NF_VALUES[i]));

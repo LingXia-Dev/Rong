@@ -26,6 +26,13 @@ function only(engine, reason, section, name, fn) {
   else __results.push([section, name + ' [skipped: ' + reason + ']', 'skip']);
 }
 
+// A case the reference skips when its own data says it predates the
+// CLDR the expectation comes from; rong always runs it.
+function unlessOldData(stale, reason, section, name, fn) {
+  if (ENGINE === 'reference' && stale) __results.push([section, name + ' [skipped: ' + reason + ']', 'skip']);
+  else test(section, name, fn);
+}
+
 function show(v) {
   if (typeof v === 'string') return JSON.stringify(v);
   if (typeof v === 'bigint') return String(v) + 'n';

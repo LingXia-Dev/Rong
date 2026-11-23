@@ -40,7 +40,6 @@ const CANONICAL = [
   ['in', 'id'],
   ['ji', 'yi'],
   ['sgn-GR', 'gss'],
-  ['cmn', 'zh'],
   ['en-u-ca-gregory', 'en-u-ca-gregory'],
   ['en-U-CA-GREGORY', 'en-u-ca-gregory'],
   ['en-u-kn-true', 'en-u-kn'],
@@ -56,6 +55,10 @@ const CANONICAL = [
   ['und', 'und'],
   ['und-latn', 'und-Latn'],
 ];
+only('rong', 'an alias the reference\'s ICU does not apply', 'sec-canonicalizelocalelist', 'canonical form of cmn', () => {
+  assert.deepEqual(Intl.getCanonicalLocales('cmn'), ['zh']);
+});
+
 for (const [input, want] of CANONICAL) {
   test('sec-canonicalizelocalelist', 'canonical form of ' + input, () => {
     assert.deepEqual(Intl.getCanonicalLocales(input), [want]);
