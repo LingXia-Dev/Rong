@@ -72,6 +72,15 @@ pub trait JSValueImpl: Clone + PartialEq + Hash {
     fn raw_value_for_api(&self) -> Self::RawValue {
         *self.as_raw_value()
     }
+
+    /// Runs `f` in a scope that frees the raw handles `f` creates: none of them
+    /// may outlive the call. Engines without scoped handles just call `f`.
+    fn in_handle_scope<R>(
+        _ctx: <Self::Context as JSContextImpl>::RawContext,
+        f: impl FnOnce() -> R,
+    ) -> R {
+        f()
+    }
     fn as_raw_context(&self) -> &<Self::Context as JSContextImpl>::RawContext;
 
     /// Create JavaScript null value
@@ -276,28 +285,30 @@ macro_rules! impl_js_converter {
         {
             type Error = RongJSError;
             fn try_into(self) -> Result<$out_type, Self::Error> {
-                let mut result: $out_type = Default::default();
-                if unsafe {
-                    $to_fn(
-                        *self.as_raw_context(),
-                        self.raw_value_for_api(),
-                        &mut result,
-                    )
-                } < 0
-                {
-                    Err($crate::HostError::new(
-                        $crate::error::E_TYPE,
-                        format!(
-                            "Expected JSValue to be type {}, but got {:?}",
-                            std::any::type_name::<$out_type>(),
-                            self.type_of()
-                        ),
-                    )
-                    .with_name("TypeError")
-                    .into())
-                } else {
-                    Ok(result)
-                }
+                <Self as JSValueImpl>::in_handle_scope(*self.as_raw_context(), || {
+                    let mut result: $out_type = Default::default();
+                    if unsafe {
+                        $to_fn(
+                            *self.as_raw_context(),
+                            self.raw_value_for_api(),
+                            &mut result,
+                        )
+                    } < 0
+                    {
+                        Err($crate::HostError::new(
+                            $crate::error::E_TYPE,
+                            format!(
+                                "Expected JSValue to be type {}, but got {:?}",
+                                std::any::type_name::<$out_type>(),
+                                self.type_of()
+                            ),
+                        )
+                        .with_name("TypeError")
+                        .into())
+                    } else {
+                        Ok(result)
+                    }
+                })
             }
         }
 
@@ -307,9 +318,11 @@ macro_rules! impl_js_converter {
             $target: JSValueImpl<Context = T>,
         {
             fn from(t: (&T, $in_type)) -> Self {
-                let ctx = t.0.as_raw();
-                let raw = unsafe { $create_fn(*ctx, t.1) };
-                Self::from_owned_raw(*ctx, raw)
+                let ctx = *t.0.as_raw();
+                <Self as JSValueImpl>::in_handle_scope(ctx, || {
+                    let raw = unsafe { $create_fn(ctx, t.1) };
+                    Self::from_owned_raw(ctx, raw)
+                })
             }
         }
     };
