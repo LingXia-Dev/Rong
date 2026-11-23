@@ -233,9 +233,10 @@ fn load(
                     format!("the data blob has no percent patterns for {locale} or its fallbacks")
                 })?;
             let percent = response.payload.get();
-            // The pattern is the locale's own system's; its percent sign
-            // becomes the requested system's.
-            let in_pattern = cldr_values(data, &parsed, &locale_system).percent_sign;
+            // ICU4X makes the percent data from the locale's latn symbols
+            // whatever its own system; the pattern's percent sign becomes the
+            // requested system's.
+            let in_pattern = cldr_values(data, &parsed, "latn").percent_sign;
             let percent_sign = cldr.percent_sign;
             let literal = |text: &str, out: &mut Vec<Piece>| {
                 let mut rest = text;
@@ -250,11 +251,10 @@ fn load(
                     out.push(Piece::Literal(rest.to_string()));
                 }
             };
-            // The percent data is the locale's own system's: its signs hold
-            // only there (ar-EG's arab minus carries a bidi mark latn's has
-            // not); another system takes the signs resolved above.
+            // Its signs are latn's too; another system takes the signs
+            // resolved above (ar-EG's arab minus is not its latn one).
             let sign = |own: &str, prefix: &str, suffix: &str| {
-                if numbering_system == locale_system {
+                if numbering_system == "latn" {
                     own.to_string()
                 } else {
                     format!("{prefix}{suffix}")
@@ -630,6 +630,11 @@ mod tests {
             sign_of(latn(SignDisplay::Always, "0.25"), "plusSign:"),
             sign_of(decimal(SignDisplay::Always, "1"), "plusSign:"),
         );
+        // ar-EG's own arab system takes arab's signs and percent sign, not
+        // the latn ones the percent data holds.
+        let own = parts_of("ar-EG", "arab", Style::Percent, SignDisplay::Auto, "-0.25");
+        assert!(own.starts_with(r"minusSign:\u{61c}-"), "{own}");
+        assert!(own.ends_with(r"percentSign:\u{66a}\u{61c}"), "{own}");
         // en with arab takes root's arab signs in both styles.
         let arab = parts_of("en", "arab", Style::Percent, SignDisplay::Auto, "-0.25");
         assert!(arab.starts_with(r"minusSign:\u{61c}-"), "{arab}");
