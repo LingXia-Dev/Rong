@@ -79,14 +79,16 @@ fn mut_self_reentry_reports_invalid_state_with_class_name() -> JSResult<()> {
 
     let mut_into_mut: String = ctx.eval(Source::from_bytes(
         r#"
-        const e = new Emitter();
-        let err;
-        try {
-            e.emit_mut(() => e.inc());
-        } catch (ex) {
-            err = ex.code + '|' + ex.message;
-        }
-        err + '|after:' + e.inc();
+        (() => {
+            const e = new Emitter();
+            let err;
+            try {
+                e.emit_mut(() => e.inc());
+            } catch (ex) {
+                err = ex.code + '|' + ex.message;
+            }
+            return err + '|after:' + e.inc();
+        })()
         "#,
     ))?;
     assert!(
@@ -108,14 +110,16 @@ fn mut_self_reentry_reports_invalid_state_with_class_name() -> JSResult<()> {
 
     let mut_into_ref: String = ctx.eval(Source::from_bytes(
         r#"
-        const e = new Emitter();
-        let err;
-        try {
-            e.emit_mut(() => e.count());
-        } catch (ex) {
-            err = ex.code + '|' + ex.message;
-        }
-        err + '|after:' + e.count();
+        (() => {
+            const e = new Emitter();
+            let err;
+            try {
+                e.emit_mut(() => e.count());
+            } catch (ex) {
+                err = ex.code + '|' + ex.message;
+            }
+            return err + '|after:' + e.count();
+        })()
         "#,
     ))?;
     assert!(
@@ -146,23 +150,27 @@ fn ref_self_reentry_allows_ref_and_rejects_mut_with_invalid_state() -> JSResult<
 
     let ref_into_ref: i32 = ctx.eval(Source::from_bytes(
         r#"
-        const e = new Emitter();
-        e.inc();
-        e.emit_ref(() => e.count());
+        (() => {
+            const e = new Emitter();
+            e.inc();
+            return e.emit_ref(() => e.count());
+        })()
         "#,
     ))?;
     assert_eq!(ref_into_ref, 1);
 
     let ref_into_mut: String = ctx.eval(Source::from_bytes(
         r#"
-        const e = new Emitter();
-        let err;
-        try {
-            e.emit_ref(() => e.inc());
-        } catch (ex) {
-            err = ex.code + '|' + ex.message;
-        }
-        err;
+        (() => {
+            const e = new Emitter();
+            let err;
+            try {
+                e.emit_ref(() => e.inc());
+            } catch (ex) {
+                err = ex.code + '|' + ex.message;
+            }
+            return err;
+        })()
         "#,
     ))?;
     assert!(
