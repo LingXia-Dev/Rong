@@ -162,13 +162,14 @@ const RTF_TABLE = [
   ["he", {style: 'short'}, ["\u05dc\u05e4\u05e0\u05d9 \u05d9\u05d5\u05dd \u05d0\u05d7\u05d3 (1)", "\u05d1\u05e2\u05d5\u05d3 0 \u05d9\u05de\u05d9\u05dd", "\u05d1\u05e2\u05d5\u05d3 \u05d9\u05d5\u05dd \u05d0\u05d7\u05d3 (1)", "\u05d1\u05e2\u05d5\u05d3 \u05d9\u05d5\u05de\u05d9\u05d9\u05dd (2)", "\u05dc\u05e4\u05e0\u05d9 3 \u05e9\u05e2\u05f3", "\u05d1\u05e2\u05d5\u05d3 5 \u05e9\u05e0\u05d9\u05dd", "\u05dc\u05e4\u05e0\u05d9 0 \u05e9\u05e0\u05f3", "\u05d1\u05e2\u05d5\u05d3 1.5 \u05e9\u05d1\u05f3", "\u05dc\u05e4\u05e0\u05d9 \u05e8\u05d1\u05e2\u05f3 \u05d0\u05d7\u05d3 (1)", "\u05d1\u05e2\u05d5\u05d3 21 \u05d7\u05d5\u05d3\u05e9\u05d9\u05dd"]],
   ["he", {style: 'narrow', numeric: 'auto'}, ["\u05d0\u05ea\u05de\u05d5\u05dc", "\u05d4\u05d9\u05d5\u05dd", "\u05de\u05d7\u05e8", "\u05de\u05d7\u05e8\u05ea\u05d9\u05d9\u05dd", "\u05dc\u05e4\u05e0\u05d9 3 \u05e9\u05e2\u05f3", "\u05d1\u05e2\u05d5\u05d3 5 \u05e9\u05e0\u05d9\u05dd", "\u05e2\u05db\u05e9\u05d9\u05d5", "\u05d1\u05e2\u05d5\u05d3 1.5 \u05e9\u05d1\u05f3", "\u05d4\u05e8\u05d1\u05e2\u05d5\u05df \u05d4\u05e7\u05d5\u05d3\u05dd", "\u05d1\u05e2\u05d5\u05d3 21 \u05d7\u05d5\u05f3"]],
 ];
-// CLDR 46 made latn the default for ar and updated he's relative day wording;
-// CLDR 49 updated he short seconds to שני׳.
-const RTF_CLDR46 = { ar: true, he: true };
+// CLDR 46 made latn the default for ar; CLDR 47 updated he's relative day
+// wording; CLDR 49 updated he short seconds to שני׳.
+const RTF_MIN_CLDR = { ar: 46, he: 47 };
 for (const [locale, options, want] of RTF_TABLE) {
   const variants = [];
-  if (RTF_CLDR46[locale]) {
-    variants.push([{ cldrBelow: 46 }, SKIP_DATA, 'the ' + locale + ' row holds CLDR 46+ data']);
+  if (RTF_MIN_CLDR[locale]) {
+    const min = RTF_MIN_CLDR[locale];
+    variants.push([{ cldrBelow: min }, SKIP_DATA, 'the ' + locale + ' row holds CLDR ' + min + '+ data']);
   }
   if (locale === 'he' && options.style === 'short') {
     const cldr49 = want.slice();
@@ -297,7 +298,8 @@ const LF_TABLE = [
   ["he", {style: 'short'}, ["", "A", "A \u05d5-B", "A, B \u05d5-C"]],
 ];
 // CLDR 49 uses U+2011 (non-breaking hyphen) in Hebrew conjunction lists and
-// comma-only in Hebrew unit lists.
+// comma-only in Hebrew unit lists; Apple's ICU wraps LTR items in FSI/PDI
+// isolates for RTL locales and carries different unit list patterns for de/ru/pl.
 for (const [locale, options, want] of LF_TABLE) {
   const variants = [];
   if (locale === 'he' && (options.type === undefined || options.type === 'conjunction')) {
@@ -312,6 +314,20 @@ for (const [locale, options, want] of LF_TABLE) {
       { cldrAtLeast: 49 },
       ['', 'A', 'A, B', 'A, B, C'],
       'CLDR 49 uses comma-only in Hebrew long unit lists',
+    ]);
+  }
+  if (locale === 'ar' || locale === 'he') {
+    variants.push([
+      { vendor: 'apple' },
+      SKIP_DATA,
+      'Apple ICU wraps LTR items in U+2068/U+2069 bidi isolates in RTL lists',
+    ]);
+  }
+  if (options.type === 'unit' && (locale === 'de' || locale === 'ru' || (locale === 'pl' && options.style === 'narrow'))) {
+    variants.push([
+      { vendor: 'apple' },
+      SKIP_DATA,
+      'Apple ICU uses different unit list patterns for ' + locale,
     ]);
   }
   dataTest('sec-formatlist', locale + ' ' + JSON.stringify(options), want, variants, (expected) => {
