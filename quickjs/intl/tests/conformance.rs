@@ -52,7 +52,7 @@ fn install_intl(ctx: &JSContext, locale: Option<&str>) -> Result<bool, String> {
 }
 
 fn eval<T: FromJSValue<JSEngineValue>>(ctx: &JSContext, source: &str) -> Result<T, String> {
-    ctx.eval(Source::from_bytes(source.to_string()))
+    ctx.eval(Source::from_bytes(source))
         .map_err(|e| e.to_string())
 }
 
