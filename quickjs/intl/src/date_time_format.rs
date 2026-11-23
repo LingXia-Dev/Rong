@@ -732,12 +732,49 @@ pub(crate) fn format_range_to_parts(
         end.zone = start.zone;
     }
     let mut sink = Collector::default();
-    range
-        .format(&start, &end)
-        .write_to_parts(&mut sink)
-        .map_err(|_| String::from("formatting failed"))?;
-    let parts = adjust(&format.fixups, sink.parts(), start.time, end.time);
-    Ok(shared_sources(parts))
+    let written = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        range.format(&start, &end).write_to_parts(&mut sink)
+    }));
+    match written {
+        Ok(Ok(())) => {
+            let parts = adjust(&format.fixups, sink.parts(), start.time, end.time);
+            Ok(shared_sources(parts))
+        }
+        Ok(Err(_)) => Err(String::from("formatting failed")),
+        Err(_) => {
+            // ICU4X 2.4's DateRangeFormatter panics with NamesNotLoaded(Era)
+            // when YearStyle::Auto triggers era display on BCE/era-crossing dates.
+            // Fall back to formatting each side with the single-date formatter.
+            let mut left_sink = Collector::default();
+            format
+                .formatter
+                .format(&start)
+                .write_to_parts(&mut left_sink)
+                .map_err(|_| String::from("formatting failed"))?;
+            let left = adjust(&format.fixups, left_sink.parts(), start.time, start.time);
+            let mut right_sink = Collector::default();
+            format
+                .formatter
+                .format(&end)
+                .write_to_parts(&mut right_sink)
+                .map_err(|_| String::from("formatting failed"))?;
+            let right = adjust(&format.fixups, right_sink.parts(), end.time, end.time);
+            if left
+                .iter()
+                .map(|(k, v, _)| (*k, v.as_str()))
+                .eq(right.iter().map(|(k, v, _)| (*k, v.as_str())))
+            {
+                return Ok(left.into_iter().map(|(k, v, _)| (k, v, "shared")).collect());
+            }
+            let mut parts: Vec<Part> = left
+                .into_iter()
+                .map(|(k, v, _)| (k, v, "startRange"))
+                .collect();
+            parts.push(("literal", String::from(" \u{2013} "), "shared"));
+            parts.extend(right.into_iter().map(|(k, v, _)| (k, v, "endRange")));
+            Ok(parts)
+        }
+    }
 }
 
 /// ICU4X's range spans take in the fields written once and the separator;
