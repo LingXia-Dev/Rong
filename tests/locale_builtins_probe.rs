@@ -29,6 +29,18 @@ const PROBE: &str = r#"
   item('Intl.DateTimeFormat().resolvedOptions().timeZone', () => Intl.DateTimeFormat().resolvedOptions().timeZone);
   item('Intl.DateTimeFormat().resolvedOptions()', () => JSON.stringify(Intl.DateTimeFormat().resolvedOptions()));
   item('Intl.NumberFormat().resolvedOptions()', () => JSON.stringify(Intl.NumberFormat().resolvedOptions()));
+  // How the requested hour width meets each locale's own pattern.
+  for (const loc of ['es', 'de', 'en-GB', 'en-US', 'he', 'ja']) {
+    for (const hour of ['numeric', '2-digit']) {
+      const opts = { hour, minute: '2-digit', timeZone: 'UTC' };
+      item(`DateTimeFormat ${loc} hour:${hour} minute:2-digit 08:05`, () => {
+        const f = new Intl.DateTimeFormat(loc, opts);
+        return JSON.stringify(f.format(Date.UTC(2026, 10, 22, 8, 5))) + ' ' + f.resolvedOptions().hour;
+      });
+    }
+    item(`DateTimeFormat ${loc} day:2-digit month:short hour:numeric`, () =>
+      JSON.stringify(new Intl.DateTimeFormat(loc, { day: '2-digit', month: 'short', hour: 'numeric', minute: '2-digit', timeZone: 'UTC' }).format(Date.UTC(2025, 8, 5, 21, 7))));
+  }
   item('new Date().getTimezoneOffset()', () => new Date().getTimezoneOffset());
   item('new Date(0).toString()', () => new Date(0).toString());
   item("new Date(0).toLocaleString('he-IL')", () => new Date(0).toLocaleString('he-IL'));
