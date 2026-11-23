@@ -428,4 +428,51 @@ mod tests {
             ]
         );
     }
+
+    struct Calendars;
+
+    impl LocaleData for Calendars {
+        fn values(&self, locale: &str, key: &str) -> Vec<String> {
+            match (locale, key) {
+                ("th", "ca") => vec!["buddhist".into(), "gregory".into()],
+                (_, "ca") => vec!["gregory".into(), "buddhist".into()],
+                (_, "kn") => vec!["false".into(), "true".into()],
+                _ => Vec::new(),
+            }
+        }
+    }
+
+    #[test]
+    fn resolve_locale_takes_supported_keywords_and_options() {
+        let data = crate::IntlData::try_from_static_blob(include_bytes!(
+            "../tests/data/locale-services.postcard"
+        ))
+        .unwrap();
+        let c = data.canonicalizer();
+        let available = set(&["en", "th", "he"]);
+        let keys = ["ca", "kn"];
+        let resolve = |requested: &[&str], options: &[(&str, Option<String>)]| {
+            let requested: Vec<String> = requested.iter().map(|s| s.to_string()).collect();
+            resolve_locale(c, &available, &requested, options, &keys, &Calendars, "en")
+        };
+        // A supported keyword stays in the locale; an unsupported one is dropped.
+        let r = resolve(&["th-TH-u-ca-gregory-nu-thai"], &[]);
+        assert_eq!(r.locale, "th-u-ca-gregory");
+        assert_eq!(r.data_locale, "th");
+        assert_eq!(r.values[0], ("ca".to_string(), Some("gregory".to_string())));
+        // A bare key means true.
+        let r = resolve(&["en-u-kn"], &[]);
+        assert_eq!(r.locale, "en-u-kn");
+        assert_eq!(r.values[1], ("kn".to_string(), Some("true".to_string())));
+        // An option that differs overrides the keyword and drops it from the locale.
+        let r = resolve(&["th-u-ca-gregory"], &[("ca", Some("buddhist".into()))]);
+        assert_eq!(r.locale, "th");
+        assert_eq!(r.values[0].1.as_deref(), Some("buddhist"));
+        // Nothing available falls back to the default locale and its defaults.
+        let r = resolve(&["fr"], &[]);
+        assert_eq!(
+            (r.locale.as_str(), r.values[0].1.as_deref()),
+            ("en", Some("gregory"))
+        );
+    }
 }
