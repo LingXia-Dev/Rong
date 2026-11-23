@@ -56,6 +56,45 @@ struct IntlState {
     data: IntlData,
     settings: settings::SettingsRecord,
     plurals: plural::Cache,
+    /// Services whose default already reported a host locale missing from
+    /// the blob.
+    reported_defaults: std::cell::RefCell<std::collections::HashSet<String>>,
+}
+
+impl IntlState {
+    /// DefaultLocale for `service`: a locale the blob supports for it. The
+    /// host's locale goes through the same lookup as a requested one; when
+    /// nothing matches, the blob's declared fallback, then the first locale
+    /// the blob holds for the service. `und` only for a blob with no data
+    /// for the service at all, whose answers do come from the root.
+    fn default_locale(&self, service: &str) -> String {
+        let available = |tag: &str| available(&self.data, service, tag);
+        let host = self.settings.default_locale(self.data.canonicalizer());
+        if let Some(found) = locale::best_available_locale(&available, &host) {
+            return found;
+        }
+        let chosen = self
+            .data
+            .fallback_locale()
+            .and_then(|tag| locale::best_available_locale(&available, tag))
+            .or_else(|| {
+                service_locales(&self.data, service)
+                    .into_iter()
+                    .find(|tag| available(tag))
+            })
+            .unwrap_or_else(|| String::from("und"));
+        if self
+            .reported_defaults
+            .borrow_mut()
+            .insert(service.to_string())
+        {
+            report(&format!(
+                "rong_quickjs_intl: the data blob has no {service} data for the host locale \
+                 {host}; {service} defaults to {chosen}"
+            ));
+        }
+        chosen
+    }
 }
 
 impl JSContextService for IntlState {}
@@ -67,6 +106,7 @@ pub fn configure<C: JSContextImpl>(ctx: &JSContext<C>, data: IntlData, settings:
         data,
         settings: settings::SettingsRecord::new(settings),
         plurals: plural::Cache::default(),
+        reported_defaults: Default::default(),
     });
 }
 
@@ -109,10 +149,8 @@ where
     let own = ctx.clone();
     natives.set(
         "defaultLocale",
-        JSFunc::<E::Value>::new(ctx, move || -> String {
-            own.get_service::<IntlState>()
-                .map(|state| state.settings.default_locale(state.data.canonicalizer()))
-                .unwrap_or_else(|| String::from(settings::FALLBACK_LOCALE))
+        JSFunc::<E::Value>::new(ctx, move |service: String| -> JSResult<String> {
+            Ok(state(&own)?.default_locale(&service))
         })?,
     )?;
     let own = ctx.clone();
@@ -131,7 +169,7 @@ where
             move |service: String, requested: Vec<String>| -> JSResult<String> {
                 let state = state(&own)?;
                 let available = |tag: &str| available(&state.data, &service, tag);
-                let default = state.settings.default_locale(state.data.canonicalizer());
+                let default = state.default_locale(&service);
                 let resolved = locale::resolve_locale(
                     state.data.canonicalizer(),
                     &available,
@@ -248,6 +286,14 @@ fn available(data: &IntlData, service: &str, tag: &str) -> bool {
     match service {
         "PluralRules" => data.has_locale::<icu::plurals::provider::PluralsCardinalV1>(&locale),
         _ => false,
+    }
+}
+
+/// The locales the blob holds for a service's data, sorted.
+fn service_locales(data: &IntlData, service: &str) -> Vec<String> {
+    match service {
+        "PluralRules" => data.locales::<icu::plurals::provider::PluralsCardinalV1>(),
+        _ => Vec::new(),
     }
 }
 

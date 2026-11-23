@@ -1,5 +1,6 @@
 use icu::locale::LocaleCanonicalizer;
 use icu::locale::fallback::LocaleFallbacker;
+use icu_provider::IterableDynamicDataProvider;
 use icu_provider::buf::{AsDeserializingBufferProvider, DeserializingBufferProvider};
 use icu_provider::prelude::*;
 use icu_provider_blob::BlobDataProvider;
@@ -15,6 +16,7 @@ struct Inner {
     blob: BlobDataProvider,
     canonicalizer: LocaleCanonicalizer,
     fallbacker: LocaleFallbacker,
+    fallback_locale: std::cell::OnceCell<String>,
 }
 
 impl IntlData {
@@ -41,7 +43,46 @@ impl IntlData {
             blob,
             canonicalizer,
             fallbacker,
+            fallback_locale: std::cell::OnceCell::new(),
         })))
+    }
+
+    /// Declares the locale the app's blob falls back to when the host's
+    /// locale is not in it, such as the app's source language; a service
+    /// uses it when the blob holds data for it. Without it, a service falls
+    /// back to the first locale the blob holds for it. Set once.
+    pub fn with_fallback_locale(self, tag: &str) -> JSResult<Self> {
+        let canonical = crate::locale::canonicalize(self.canonicalizer(), tag)
+            .ok_or_else(|| invalid(format!("{tag} is not a locale")))?;
+        match self.0.fallback_locale.get() {
+            Some(set) if *set != canonical => {
+                return Err(invalid(format!("its fallback locale is already {set}")));
+            }
+            Some(_) => {}
+            None => {
+                let _ = self.0.fallback_locale.set(canonical);
+            }
+        }
+        Ok(self)
+    }
+
+    pub(crate) fn fallback_locale(&self) -> Option<&str> {
+        self.0.fallback_locale.get().map(String::as_str)
+    }
+
+    /// The locales the blob holds for `M` itself, short of the root, in the
+    /// blob's (sorted) order.
+    pub(crate) fn locales<M: DataMarker>(&self) -> Vec<String> {
+        self.0
+            .blob
+            .iter_ids_for_marker(M::INFO)
+            .map(|ids| {
+                ids.into_iter()
+                    .filter(|id| id.marker_attributes.is_empty() && !id.locale.is_unknown())
+                    .map(|id| id.locale.to_string())
+                    .collect()
+            })
+            .unwrap_or_default()
     }
 
     pub(crate) fn canonicalizer(&self) -> &LocaleCanonicalizer {
