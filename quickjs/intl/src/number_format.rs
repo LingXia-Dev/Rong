@@ -873,6 +873,8 @@ fn scale_and_round(
     let scaled = |exponent: i16| {
         let mut value = x.clone();
         value.multiply_pow10(-exponent);
+        // Scaling keeps the leading zeros of a small value as integer digits.
+        value.trim_start();
         number::format_numeric_to_string(&options.digits, negative, &value)
     };
     if x.is_zero() {
