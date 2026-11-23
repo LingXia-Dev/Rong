@@ -8,7 +8,7 @@
     pluralResolve, pluralResolveRange, pluralCategories,
     resolveNumberFormat, numberFormatParts, currencyDigits,
     resolveDateTimeFormat, primaryTimeZone, systemTimeZone, dateTimeFormatFields,
-    dateTimeFormatParts, dateTimeFormatRangeParts,
+    dateTimeFormatParts, dateTimeFormatRangeParts, transformCase,
   } = natives;
   const $Object = Object;
   const $String = String;
@@ -40,6 +40,15 @@
   const $dateNow = Date.now;
   const $abs = Math.abs;
   const $trunc = Math.trunc;
+  const $reflectGet = Reflect.get;
+  const $numberValueOf = Number.prototype.valueOf;
+  const $bigIntValueOf = BigInt.prototype.valueOf;
+  const $dateGetTime = Date.prototype.getTime;
+  const $toUpperCase = String.prototype.toUpperCase;
+  const $toLowerCase = String.prototype.toLowerCase;
+  const TypedArrayPrototype = Object.getPrototypeOf(Int8Array.prototype);
+  const $typedArrayEntries = TypedArrayPrototype.entries;
+  const $typedArrayLength = Object.getOwnPropertyDescriptor(TypedArrayPrototype, 'length').get;
   // No spreading or iteration anywhere here: a script may have replaced
   // the array iterator.
   const call = (f, self, ...args) => $apply(f, self, args);
@@ -996,6 +1005,110 @@
   $defineProperty(DateTimeFormatPrototype, $toStringTag, {
     __proto__: null, value: 'Intl.DateTimeFormat', writable: false, enumerable: false, configurable: true,
   });
+
+  // ECMA-402's locale-sensitive functions of ECMA-262 (Locale Sensitive
+  // Functions of the ECMAScript Language Specification).
+  // ToString: a template literal throws for a Symbol, as String() does not.
+  function ToString(v) {
+    return `${v}`;
+  }
+
+  function RequireObjectCoercible(v) {
+    if (v === undefined || v === null) throw new $TypeError('Cannot convert undefined or null to object');
+    return v;
+  }
+
+  // TransformCase: tailored languages through ICU4X, the rest by the
+  // engine's Unicode default case conversion.
+  function TransformCase(string, locales, upper) {
+    const requested = CanonicalizeLocaleList(locales);
+    const mapped = transformCase(string, requested.length > 0 ? requested[0] : undefined, upper);
+    if (mapped !== undefined && mapped !== null) return mapped;
+    return call(upper ? $toUpperCase : $toLowerCase, string);
+  }
+
+  // JoinIndexedProperties with toLocaleString invoked with the arguments.
+  // Tracks active objects so cyclic arrays return '' instead of overflowing.
+  const activeArrays = [];
+  function JoinIndexedProperties(o, length, locales, options) {
+    if (call($includes, activeArrays, o)) return '';
+    call($push, activeArrays, o);
+    try {
+      let r = '';
+      for (let k = 0; k < length; k++) {
+        if (k > 0) r += ',';
+        const next = o[$String(k)];
+        if (next !== undefined && next !== null) {
+          // Invoke: GetV, then Call with the element itself as this.
+          const method = $reflectGet(ToObject(next), 'toLocaleString', next);
+          r += ToString(call(method, next, locales, options));
+        }
+      }
+      return r;
+    } finally {
+      activeArrays.length--;
+    }
+  }
+
+  // Date's toLocale*String with CreateDateTimeFormat's required and defaults.
+  function dateToLocale(date, locales, options, required, defaults) {
+    const x = call($dateGetTime, date);
+    if (x !== x) return 'Invalid Date';
+    const dtf = CreateDateTimeFormat(DateTimeFormat, locales, options, required, defaults);
+    return FormatDateTimeParts(call($weakGet, dateTimeFormatSlots, dtf), x, false);
+  }
+
+  const localeSensitive = {
+    stringToLocaleUpperCase() {
+      const string = ToString(RequireObjectCoercible(this));
+      return TransformCase(string, arguments[0], true);
+    },
+    stringToLocaleLowerCase() {
+      const string = ToString(RequireObjectCoercible(this));
+      return TransformCase(string, arguments[0], false);
+    },
+    numberToLocaleString() {
+      const x = call($numberValueOf, this);
+      const nf = new NumberFormat(arguments[0], arguments[1]);
+      return FormatParts(call($weakGet, numberFormatSlots, nf), x, false);
+    },
+    bigIntToLocaleString() {
+      const x = call($bigIntValueOf, this);
+      const nf = new NumberFormat(arguments[0], arguments[1]);
+      return FormatParts(call($weakGet, numberFormatSlots, nf), x, false);
+    },
+    dateToLocaleString() {
+      return dateToLocale(this, arguments[0], arguments[1], 'any', 'all');
+    },
+    dateToLocaleDateString() {
+      return dateToLocale(this, arguments[0], arguments[1], 'date', 'date');
+    },
+    dateToLocaleTimeString() {
+      return dateToLocale(this, arguments[0], arguments[1], 'time', 'time');
+    },
+    arrayToLocaleString() {
+      const array = ToObject(this);
+      return JoinIndexedProperties(array, ToLength(array.length), arguments[0], arguments[1]);
+    },
+    typedArrayToLocaleString() {
+      call($typedArrayEntries, this); // ValidateTypedArray
+      return JoinIndexedProperties(this, call($typedArrayLength, this), arguments[0], arguments[1]);
+    },
+  };
+  const installMethod = (target, name, key) => {
+    const method = localeSensitive[key];
+    $defineProperty(method, 'name', { __proto__: null, value: name });
+    define(target, name, method, false, true);
+  };
+  installMethod(String.prototype, 'toLocaleUpperCase', 'stringToLocaleUpperCase');
+  installMethod(String.prototype, 'toLocaleLowerCase', 'stringToLocaleLowerCase');
+  installMethod(Number.prototype, 'toLocaleString', 'numberToLocaleString');
+  installMethod(BigInt.prototype, 'toLocaleString', 'bigIntToLocaleString');
+  installMethod(Date.prototype, 'toLocaleString', 'dateToLocaleString');
+  installMethod(Date.prototype, 'toLocaleDateString', 'dateToLocaleDateString');
+  installMethod(Date.prototype, 'toLocaleTimeString', 'dateToLocaleTimeString');
+  installMethod(Array.prototype, 'toLocaleString', 'arrayToLocaleString');
+  installMethod(TypedArrayPrototype, 'toLocaleString', 'typedArrayToLocaleString');
 
   const Intl = {};
   $defineProperty(Intl, Symbol.toStringTag, {

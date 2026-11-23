@@ -1,6 +1,8 @@
 `intl-test.postcard`: ICU4X 2.4.0 data for the tests: the locale services
-(aliases, likely subtags, parents) and plural, decimal, compact-decimal, percent, currency-fraction, date, time,
-time-zone and calendar data for 45 locales. Made with icu4x-datagen 2.4.0 (installed with
+(aliases, likely subtags, parents) and plural, decimal, compact-decimal, percent, currency, unit,
+date, time, time-zone, calendar, relative-time, list, collation, case-mapping, display-name and
+segmentation data for 45 locales (the word dictionaries and LSTM models are left out, so Thai,
+Japanese and Chinese words break by rule). Made with icu4x-datagen 2.4.0 (installed with
 `--features unstable`):
 
     icu4x-datagen --format blob --out intl-test.postcard \
@@ -12,10 +14,15 @@ time-zone and calendar data for 45 locales. Made with icu4x-datagen 2.4.0 (insta
         <every icu_datetime 2.4 data marker: Datetime*V1, Timezone*V1 names> \
         TimezoneIdentifiersIanaCoreV1 TimezoneIdentifiersIanaExtendedV1 TimezonePeriodsV1 \
         CalendarJapaneseModernV1 CalendarPreferredV1 CalendarWeekV1 \
+        CaseMapV1 <Collation*V1> <NormalizerNfd*V1, NormalizerNfkd*V1> ListAndV1 ListOrV1 ListUnitV1 \
+        <DatetimeRelative*V1> <Currency*V1> <Units*V1> <LocaleNames*V1> LocaleScriptDirectionV1 \
+        SegmenterBreakGraphemeClusterV1 SegmenterBreakWordV1 SegmenterBreakWordOverrideV1 \
+        SegmenterBreakSentenceV1 SegmenterBreakSentenceOverrideV1 \
+        PropertyBinaryRegionalIndicatorV1 PropertyBinarySegmentStarterV1 \
       --locales en en-US en-GB fr de es it pt ru pl uk cs ar he ja zh ko hi cy sl lt ga br mt ro fa gv zh-Hant en-IN pt-PT \
         de-AT ar-EG sv tr th zh-CN sr sr-Thai si ln pl-PL
 
-1,721,707 bytes. sha256 39fd6ee7e574cd1e43cd1bc102858fbd53f7add3758697bdadfaa91a6fc27a67.
+9,397,979 bytes (1,715,976 gzipped). sha256 0e53077190bc8946d18caf74f05aa80b78a2f801bde769e8d038189cc09aa49c.
 
 `locale-services.postcard`: the locale services only, no locale-specific
 data; `data_errors.rs` uses it as a blob that lacks what a constructor needs.
