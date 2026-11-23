@@ -1,0 +1,117 @@
+name: Spike Intl on ICU4X
+
+on:
+  push:
+    branches: [spike/intl-icu4x]
+
+permissions:
+  contents: read
+
+env:
+  CARGO_INCREMENTAL: "0"
+  CARGO_TERM_COLOR: never
+  SPIKE: spike/intl-icu4x
+
+jobs:
+  size-linux-android:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8
+        with:
+          toolchain: stable
+          targets: aarch64-linux-android
+      - name: Build baseline and ICU4X probe
+        working-directory: ${{ env.SPIKE }}
+        run: |
+          set -eu
+          ndk="$ANDROID_NDK_LATEST_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          export CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER="$ndk/aarch64-linux-android24-clang"
+          export CC_aarch64_linux_android="$ndk/aarch64-linux-android24-clang"
+          export AR_aarch64_linux_android="$ndk/llvm-ar"
+          for t in x86_64-unknown-linux-gnu aarch64-linux-android; do
+            cargo build --release --lib --target "$t" --target-dir "base"
+            cargo build --release --lib --target "$t" --target-dir "icu" --features blob
+            b=$(stat -c %s "base/$t/release/libintl_icu4x_spike.so")
+            i=$(stat -c %s "icu/$t/release/libintl_icu4x_spike.so")
+            bz=$(gzip -9c "base/$t/release/libintl_icu4x_spike.so" | wc -c)
+            iz=$(gzip -9c "icu/$t/release/libintl_icu4x_spike.so" | wc -c)
+            echo "SIZE $t baseline $b bytes (gzip $bz); with ICU4X $i bytes (gzip $iz); added $((i-b)) bytes (gzip $((iz-bz)))"
+          done
+
+  size-apple:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8
+        with:
+          toolchain: stable
+          targets: aarch64-apple-ios
+      - name: Build baseline and ICU4X probe
+        working-directory: ${{ env.SPIKE }}
+        run: |
+          set -eu
+          for t in aarch64-apple-darwin aarch64-apple-ios; do
+            cargo build --release --lib --target "$t" --target-dir "base"
+            cargo build --release --lib --target "$t" --target-dir "icu" --features blob
+            b=$(stat -f %z "base/$t/release/libintl_icu4x_spike.dylib")
+            i=$(stat -f %z "icu/$t/release/libintl_icu4x_spike.dylib")
+            echo "SIZE $t baseline $b bytes; with ICU4X $i bytes; added $((i-b)) bytes"
+          done
+
+  data:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8
+        with:
+          toolchain: stable
+      - name: Install icu4x-datagen
+        run: cargo install icu4x-datagen --version =2.4.0 --locked --features unstable
+      - name: Build the probe (markers are read from it)
+        working-directory: ${{ env.SPIKE }}
+        run: cargo build --release --lib --features blob
+      - name: Blob per locale for the probe's markers
+        working-directory: ${{ env.SPIKE }}
+        run: |
+          set -eu
+          lib=target/release/libintl_icu4x_spike.so
+          mkdir -p blobs
+          gen() {
+            name=$1; shift
+            icu4x-datagen --markers-for-bin "$lib" --format blob --out "blobs/$name.postcard" --locales "$@" >/dev/null 2>"blobs/$name.log" || { echo "DATAGEN $name failed"; tail -5 "blobs/$name.log"; return 0; }
+            s=$(stat -c %s "blobs/$name.postcard"); z=$(gzip -9c "blobs/$name.postcard" | wc -c)
+            echo "BLOB $name $s bytes (gzip $z)"
+          }
+          gen none none
+          for l in en zh-Hans he es ar ja; do gen "$l" "$l"; done
+          gen en-he-es en he es
+          gen modern modern
+          icu4x-datagen --markers-for-bin "$lib" --format blob --out blobs/markers.postcard --locales none -v 2>&1 | grep -iE "marker" | head -60 || true
+      - name: Load a per-locale blob at run time
+        working-directory: ${{ env.SPIKE }}
+        run: |
+          set -eu
+          cat > load.py <<'EOF'
+          import ctypes, sys
+          lib = ctypes.CDLL(sys.argv[1])
+          lib.intl_probe.argtypes = [ctypes.c_char_p, ctypes.c_size_t, ctypes.c_char_p, ctypes.c_size_t, ctypes.c_char_p, ctypes.c_size_t]
+          lib.intl_probe.restype = ctypes.c_size_t
+          for name, loc in [("en", "en-US"), ("he", "he"), ("es", "es"), ("zh-Hans", "zh-Hans"), ("ar", "ar"), ("ja", "ja"), ("en-he-es", "he")]:
+              blob = open(f"blobs/{name}.postcard", "rb").read()
+              out = ctypes.create_string_buffer(4096)
+              n = lib.intl_probe(blob, len(blob), loc.encode(), len(loc.encode()), out, 4096)
+              print("LOAD", name, loc, out.raw[:n].decode("utf-8", "replace"))
+          EOF
+          python3 load.py target/release/libintl_icu4x_spike.so
+
+  parity:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8
+        with:
+          toolchain: stable
+      - name: ICU4X against the CLDR 48 / ICU 78.2 table
+        working-directory: ${{ env.SPIKE }}
+        run: cargo run --release --features parity --bin parity -- cases-cldr48.json
