@@ -234,7 +234,7 @@ pub trait PromiseResolver<V: JSValueImpl> {
 
 fn drain_microtasks<V>(ctx: &JSContext<V::Context>)
 where
-    V: JSValueImpl,
+    V: JSObjectOps,
     <V::Context as crate::JSContextImpl>::Runtime: 'static,
 {
     crate::runtime::microtask_checkpoint(ctx);

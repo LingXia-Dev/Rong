@@ -1,4 +1,5 @@
 use self::thrown_store::{ThrownValueHandle, ThrownValueStore};
+use crate::rejection::{ContextTracker, RejectionEvent, RejectionEvents, Tracker};
 use crate::{
     ClassSetup, FromJSValue, HostError, JSClass, JSObject, JSObjectOps, JSResult, JSRuntimeImpl,
     JSTypeOf, JSValue, JSValueImpl, Promise, RongJSError,
@@ -146,6 +147,22 @@ pub trait JSContextImpl {
     /// # Returns
     /// The result of executing the bytecode as a JavaScript value
     fn run_bytecode(&self, bytes: &[u8]) -> Self::Value;
+
+    /// The promise rejection events this engine can report. An engine that
+    /// reports any must implement [`JSContextImpl::install_rejection_hook`].
+    fn rejection_events(&self) -> RejectionEvents {
+        RejectionEvents::NONE
+    }
+
+    /// Makes the engine pass the rejections it sees in `ctx` to
+    /// [`crate::rejection::record`]. Called when a context's first tracker is
+    /// registered, and again on a later registration if it failed.
+    fn install_rejection_hook(_ctx: &JSContext<Self>) -> JSResult<()>
+    where
+        Self: Sized,
+    {
+        Ok(())
+    }
 }
 
 pub trait JSRawContext {
@@ -532,6 +549,21 @@ impl<C: JSContextImpl> JSContext<C> {
         value.into()
     }
 
+    /// As [`JSContext::from_borrowed_raw_ptr`], but `None` for a context that
+    /// is closing or gone, for engine hooks that may fire during teardown.
+    #[doc(hidden)]
+    pub fn try_from_borrowed_raw_ptr(ptr: &C::RawContext) -> Option<Self> {
+        let data = Self::_get_opaque(ptr);
+        if data.is_null() {
+            return None;
+        }
+        let rc = unsafe { &(*data).ctx_inner }.upgrade()?;
+        Some(Self {
+            rc,
+            owns_lifecycle: false,
+        })
+    }
+
     /// Creates a JSContext from an FFI context pointer.
     ///
     /// This is used in callback scenarios where the JS engine provides a context pointer.
@@ -774,6 +806,122 @@ impl<C: JSContextImpl> JSContext<C> {
         store
             .take(serial, handle)
             .map(|v| JSValue::from_raw(self, v))
+    }
+
+    /// The promise rejection events this context's engine can report; see
+    /// [`JSContext::set_rejection_tracker`].
+    pub fn supports_rejection_tracking(&self) -> RejectionEvents {
+        self.as_ref().rejection_events()
+    }
+
+    /// Calls `tracker` for the promise rejections of this context that nothing
+    /// handled, and, if asked, for those handled later, once the job queue has
+    /// drained. A rejection handled before the drain ends is not reported.
+    /// Events arrive in the order they happened, `promise` and `reason` as
+    /// they are; the reason may come from another context of the runtime.
+    ///
+    /// The tracker may run script. If it fails, the error is logged and the
+    /// remaining events are still delivered. Rejections it causes are reported
+    /// after the next drain. A promise rejected before a tracker was
+    /// registered may be reported as handled later without having been
+    /// reported as unhandled.
+    ///
+    /// Replaces the context's tracker. Asking for an event the engine cannot
+    /// report (see [`JSContext::supports_rejection_tracking`]) is
+    /// `E_NOT_SUPPORTED`; if the engine's hook cannot be installed, that error
+    /// is returned and no tracker is set. The tracker is given the context it reports for; it
+    /// should not hold an owning handle to this context, which would keep it
+    /// open.
+    pub fn set_rejection_tracker<F>(&self, events: RejectionEvents, tracker: F) -> JSResult<()>
+    where
+        F: Fn(&JSContext<C>, RejectionEvent<C::Value>) -> JSResult<()> + 'static,
+    {
+        let supported = self.supports_rejection_tracking();
+        if !supported.covers(events) {
+            return Err(HostError::new(
+                crate::error::E_NOT_SUPPORTED,
+                format!(
+                    "this engine cannot report promise rejections {events:?}; it reports {supported:?}"
+                ),
+            )
+            .with_data(crate::err_data!({ feature: "rejection_tracking" }))
+            .into());
+        }
+        if events == RejectionEvents::NONE {
+            self.clear_rejection_tracker();
+            return Ok(());
+        }
+        let data = self.get_opaque();
+        if data.is_null() {
+            return Err(HostError::new(crate::error::E_INVALID_STATE, "context is closed").into());
+        }
+        let data = unsafe { &*data };
+        if !data.rejection_hook.get() {
+            C::install_rejection_hook(self)?;
+            data.rejection_hook.set(true);
+        }
+        let tracker = ContextTracker {
+            events,
+            tracker: Rc::new(tracker),
+        };
+        let previous = data.rejection_tracker.borrow_mut().replace(tracker);
+        if previous.is_none() {
+            crate::rejection::tracker_added();
+        }
+        drop(previous);
+        Ok(())
+    }
+
+    /// Stops reporting this context's promise rejections.
+    pub fn clear_rejection_tracker(&self) {
+        let data = self.get_opaque();
+        if data.is_null() {
+            return;
+        }
+        let previous = unsafe { (*data).rejection_tracker.borrow_mut().take() };
+        if previous.is_some() {
+            crate::rejection::tracker_removed();
+        }
+    }
+
+    pub(crate) fn has_rejection_tracker(&self) -> bool {
+        let data = self.get_opaque();
+        !data.is_null() && unsafe { (*data).rejection_tracker.borrow().is_some() }
+    }
+
+    pub(crate) fn rejection_tracker(&self) -> Option<(RejectionEvents, Tracker<C>)> {
+        let data = self.get_opaque();
+        if data.is_null() {
+            return None;
+        }
+        let tracker = unsafe { (*data).rejection_tracker.borrow() };
+        tracker.as_ref().map(|t| (t.events, t.tracker.clone()))
+    }
+
+    /// Serial of this context, never reused; 0 once it is closed.
+    pub(crate) fn serial(&self) -> u64 {
+        let data = self.get_opaque();
+        if data.is_null() {
+            0
+        } else {
+            unsafe { (*data).serial }
+        }
+    }
+
+    /// A non-owning handle to the open context with `serial` in `runtime`.
+    pub(crate) fn of_runtime(runtime: &JSRuntime<C::Runtime>, serial: u64) -> Option<Self> {
+        let runtime = runtime_identity(runtime);
+        let data = CTX_OPAQUE
+            .read()
+            .unwrap()
+            .values()
+            .find(|entry| entry.serial == serial && entry.runtime == runtime)
+            .map(|entry| entry.opaque as *mut ContextOpaque<C::Value>)?;
+        let rc = unsafe { &(*data).ctx_inner }.upgrade()?;
+        Some(Self {
+            rc,
+            owns_lifecycle: false,
+        })
     }
 
     /// The data of the context that captured `handle`, if it is still open and
@@ -1086,6 +1234,8 @@ struct ContextOpaque<V: JSValueImpl> {
     ctx_inner: Weak<JSContextInner<V::Context>>,
     thrown: RefCell<ThrownValueStore<V>>,
     serial: u64,
+    rejection_tracker: RefCell<Option<ContextTracker<V::Context>>>,
+    rejection_hook: Cell<bool>,
     /// `None` until the context is set up, and if its built-ins are missing.
     thrown_reader: RefCell<Option<thrown_text::ThrownReader<V>>>,
 }
@@ -1099,6 +1249,8 @@ impl<V: JSValueImpl> ContextOpaque<V> {
             ctx_inner,
             thrown: RefCell::new(ThrownValueStore::new()),
             serial,
+            rejection_tracker: RefCell::new(None),
+            rejection_hook: Cell::new(false),
             thrown_reader: RefCell::new(None),
         })
     }
@@ -1226,6 +1378,9 @@ impl<C: JSContextImpl> Drop for JSContext<C> {
             // must start when the last lifecycle owner is released so those
             // futures can be canceled instead of retaining the context forever.
             self.rc.services.shutdown();
+
+            self.clear_rejection_tracker();
+            self.rc.runtime.rejections.forget_context(self.serial());
 
             let raw_ctx = self.rc.inner.as_raw();
             let key = C::context_id(raw_ctx);

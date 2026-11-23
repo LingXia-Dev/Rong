@@ -25,6 +25,16 @@ unsafe extern "C" {
     pub fn JSContextGroupClearExecutionTimeLimit(group: JSContextGroupRef);
 }
 
+// Unhandled-rejection callback from JSContextRefPrivate.h. Private on the
+// system framework, so only the source backend uses it.
+unsafe extern "C" {
+    pub fn JSGlobalContextSetUnhandledRejectionCallback(
+        ctx: JSGlobalContextRef,
+        function: JSObjectRef,
+        exception: *mut JSValueRef,
+    );
+}
+
 // JavaScriptCore's full one-time global initialization (WTF, option parsing,
 // Gigacage, the executable allocator, signal handlers, Structure tables). The
 // system framework runs this from the dylib's static initializers before

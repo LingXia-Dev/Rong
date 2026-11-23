@@ -2,6 +2,7 @@
 
 use crate::function::RustFunc;
 use crate::interrupt::InterruptHandle;
+use crate::rejection::RejectionQueue;
 use crate::value::JSBytesData;
 use crate::{
     JSArrayOps, JSContext, JSContextImpl, JSErrorFactory, JSExceptionThrower, JSObjectOps,
@@ -43,9 +44,13 @@ impl Drop for NativeCallFrame {
 /// has returned and no JavaScript is left on the stack, like a browser's
 /// microtask checkpoint after a callback. Calls made from inside a native
 /// function leave the jobs to the outermost one.
-pub(crate) fn microtask_checkpoint<C: JSContextImpl>(ctx: &JSContext<C>) {
+pub(crate) fn microtask_checkpoint<C: JSContextImpl>(ctx: &JSContext<C>)
+where
+    C::Value: JSObjectOps,
+{
     if NATIVE_CALL_DEPTH.with(Cell::get) == 0 {
         ctx.runtime().inner.run_pending_jobs();
+        crate::rejection::deliver::<C>(ctx.runtime());
     }
 }
 
@@ -128,6 +133,7 @@ pub trait JSRuntimeImpl {
 
 pub struct JSRuntime<R: JSRuntimeImpl> {
     pub(crate) inner: Rc<R>,
+    pub(crate) rejections: Rc<RejectionQueue<<R::Context as JSContextImpl>::Value>>,
     services: ServiceContainer,
     pub(crate) engine: &'static str,
     pub(crate) interrupt: InterruptHandle,
@@ -137,6 +143,7 @@ impl<R: JSRuntimeImpl> Clone for JSRuntime<R> {
     fn clone(&self) -> Self {
         Self {
             inner: self.inner.clone(),
+            rejections: self.rejections.clone(),
             services: self.services.clone(),
             engine: self.engine,
             interrupt: self.interrupt.clone(),
@@ -187,8 +194,16 @@ impl<R: JSRuntimeImpl + 'static> JSRuntime<R> {
     /// # Warning
     /// testing purposes only and don't use it in production code.
     #[doc(hidden)]
-    pub fn run_pending_jobs(&self) -> i32 {
-        self.inner.run_pending_jobs()
+    pub fn run_pending_jobs(&self) -> i32
+    where
+        R::Context: JSContextImpl<Runtime = R>,
+        <R::Context as JSContextImpl>::Value: JSObjectOps,
+    {
+        let status = self.inner.run_pending_jobs();
+        if NATIVE_CALL_DEPTH.with(Cell::get) == 0 {
+            crate::rejection::deliver::<R::Context>(self);
+        }
+        status
     }
 
     /// Runs garbage collection on the JavaScript runtime.
@@ -235,6 +250,7 @@ impl<R: JSRuntimeImpl + 'static> JSRuntime<R> {
 impl<R: JSRuntimeImpl> Drop for JSRuntime<R> {
     fn drop(&mut self) {
         if Rc::strong_count(&self.inner) == 1 {
+            self.rejections.clear();
             // Drain services while the engine is still alive. ServiceContainer's
             // subsequent drop then observes an empty map and cannot run hooks twice.
             self.services.shutdown();
@@ -291,6 +307,7 @@ pub trait JSEngine: Sized {
         handle.bind_engine(preemption);
         JSRuntime {
             inner: runtime,
+            rejections: Rc::default(),
             services: ServiceContainer::new(),
             engine: Self::name(),
             interrupt: handle,

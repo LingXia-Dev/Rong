@@ -9,8 +9,9 @@ pub use rong_core::{
     JSRuntime as CoreJSRuntime, JSRuntimeService, JSSymbol as CoreJSSymbol,
     JSTypedArray as CoreJSTypedArray, JSTypedArrayKind, JSValue as CoreJSValue, JSValueType,
     JsonToJSValue, Promise as CorePromise, PropertyDescriptor as CorePropertyDescriptor,
-    RongJSError, Source, SourceKind, TaskScope, Uint8Clamped, error, illegal_constructor,
-    install_async_iterator_symbol, install_iterator_symbol,
+    RejectionEvent as CoreRejectionEvent, RejectionEvents, RongJSError, Source, SourceKind,
+    TaskScope, Uint8Clamped, error, illegal_constructor, install_async_iterator_symbol,
+    install_iterator_symbol,
 };
 // Re-export selected runtime API from rong_core::rong so downstream crates use `rong::...`
 pub use rong_core::rong::{
@@ -64,6 +65,7 @@ macro_rules! engine_api {
         pub type JSDate = $crate::CoreJSDate<JSEngineValue>;
         pub type Class = $crate::CoreClass<JSEngineValue>;
         pub type Promise = $crate::CorePromise<JSEngineValue>;
+        pub type RejectionEvent = $crate::CoreRejectionEvent<JSEngineValue>;
         pub type JSException = $crate::CoreJSException<JSEngineValue>;
         pub type JSArray = $crate::CoreJSArray<JSEngineValue>;
         pub type JSArrayBuffer = $crate::CoreJSArrayBuffer<JSEngineValue>;
@@ -158,7 +160,7 @@ use default_primary as primary;
 pub use primary::{
     AnyJSTypedArray, Class, JSArray, JSArrayBuffer, JSBytes, JSContext, JSDate, JSEngineContext,
     JSEngineValue, JSException, JSFunc, JSObject, JSProxy, JSRuntime, JSSymbol, JSTypedArray,
-    JSValue, Promise, PropertyDescriptor, RongJS,
+    JSValue, Promise, PropertyDescriptor, RejectionEvent, RongJS,
 };
 
 // re-export macro public symbols to rong

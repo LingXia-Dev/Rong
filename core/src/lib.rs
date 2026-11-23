@@ -7,6 +7,7 @@ mod invoke;
 mod iterator;
 mod pinned;
 mod promise;
+pub mod rejection;
 pub mod rong;
 mod runtime;
 mod shared;
@@ -43,6 +44,7 @@ pub use iterator::{
 };
 pub use pinned::*;
 pub use promise::{Promise, PromiseResolver};
+pub use rejection::{RejectionEvent, RejectionEvents};
 pub use runtime::{JSEngine, JSRuntime};
 pub use source::{Source, SourceKind};
 pub use value::{
