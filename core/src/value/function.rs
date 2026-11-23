@@ -69,14 +69,20 @@ impl<V: JSObjectOps> JSFunc<V> {
 
     /// Create a new JavaScript function from a Rust function or closure
     ///
+    /// The function is shared: script may call it again while a call of it
+    /// is still running, from the function itself or from a callback it
+    /// invoked. So `f` is an `Fn`. A closure that changes what it captures
+    /// does not compile; keep such state in a `Cell` or `RefCell`, and end a
+    /// `RefCell` borrow before calling into script.
+    ///
     /// # Arguments
     /// * `ctx` - The JavaScript context to create the function in
     /// * `f` - The Rust function or closure to wrap
     ///
     /// # Type Parameters
-    /// * `F` - The function type implementing `IntoJSCallable`
+    /// * `F` - An `Fn` returning a value or a future, implementing `IntoJSCallable`
     /// * `P` - The parameter type implementing `FromParams`
-    /// * `K` - The function kind (SyncFunc or AsyncFunc)
+    /// * `K` - The function kind (sync or async)
     ///
     /// # Returns
     /// Returns `JSResult<Self>` containing the new JS function if successful
@@ -101,6 +107,10 @@ impl<V: JSObjectOps> JSFunc<V> {
         RustFunc::new(f).into_js(ctx)
     }
 
+    /// Create a JavaScript function that can be called once, from an `FnOnce`.
+    ///
+    /// A second call, nested in the first or after it, throws
+    /// `OnceFn had been called`.
     pub fn new_once<F, P, K>(ctx: &JSContext<V::Context>, f: F) -> JSResult<Self>
     where
         F: IntoOnceJSCallable<V, P, K>,

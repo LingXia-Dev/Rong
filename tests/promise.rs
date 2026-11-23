@@ -366,13 +366,13 @@ fn test_promise_resolve_error_object() {
 fn test_rust_promise_with_mut_state() {
     run(|ctx| {
         let ctx_clone = ctx.clone();
-        let mut counter = 0;
+        let counter = Cell::new(0);
 
-        // Register a function that captures mutable state
+        // Register a function that changes captured state
         let counter_fn = JSFunc::new(ctx, move || {
             let (promise, resolve, _) = ctx_clone.promise().unwrap();
-            counter += 1;
-            resolve.call::<_, ()>(None, (counter,)).unwrap();
+            counter.set(counter.get() + 1);
+            resolve.call::<_, ()>(None, (counter.get(),)).unwrap();
             promise
         })?;
 
@@ -403,11 +403,11 @@ fn test_rust_promise_with_mut_state() {
 fn test_rust_async_with_mut_state() {
     async_run!(|ctx: JSContext| async move {
         let ctx2 = ctx.clone();
-        let mut counter = 0;
+        let counter = Cell::new(0);
 
         let async_fn = JSFunc::new(&ctx, move || {
-            counter += 1;
-            let count = counter;
+            counter.set(counter.get() + 1);
+            let count = counter.get();
 
             let future = async move {
                 tokio::time::sleep(Duration::from_millis(50)).await;

@@ -1,8 +1,9 @@
 use crate::{
     HostError, IntoJSValue, JSClass, JSObjectOps, JSResult, JSValueImpl, Promise, PromiseResolver,
 };
-use std::cell::RefCell;
+use std::cell::Cell;
 use std::future::Future;
+use std::rc::Rc;
 
 mod parameter;
 pub use parameter::{
@@ -33,16 +34,33 @@ pub(crate) struct RustFunc<V: JSValueImpl> {
     required_params: u32,
 }
 
-/// Type alias for FnMut closure type
-type FnMutClosure<V> = dyn FnMut(&mut ParamsAccessor<V>) -> JSResult<V>;
+/// Type alias for Fn closure type
+type FnClosure<V> = dyn Fn(&mut ParamsAccessor<V>) -> JSResult<V>;
 
 /// Type alias for FnOnce closure type
 type FnOnceClosure<V> = dyn FnOnce(&mut ParamsAccessor<V>) -> JSResult<V>;
 
-// since Fn depends on FnMut, FuMut discriminant is for both Fn and FnMut
+/// A multi-call function is `Fn` and shared, so script can call it again while
+/// a call of it is still running; a once-function is taken out by its call.
 pub enum JSCallable<V: JSValueImpl> {
-    FnMut(RefCell<Box<FnMutClosure<V>>>),
-    FnOnce(RefCell<Option<Box<FnOnceClosure<V>>>>),
+    Fn(Rc<FnClosure<V>>),
+    FnOnce(Cell<Option<Box<FnOnceClosure<V>>>>),
+}
+
+/// What one call runs. It owns its closure, so the function object is not
+/// borrowed while the closure runs and may even be freed by then.
+pub(crate) enum Invocation<V: JSValueImpl> {
+    Fn(Rc<FnClosure<V>>),
+    FnOnce(Box<FnOnceClosure<V>>),
+}
+
+impl<V: JSValueImpl> Invocation<V> {
+    pub(crate) fn run(self, accessor: &mut ParamsAccessor<V>) -> JSResult<V> {
+        match self {
+            Self::Fn(f) => f(accessor),
+            Self::FnOnce(f) => f(accessor),
+        }
+    }
 }
 
 /// Trait for converting Rust functions into JavaScript callable functions.
@@ -61,15 +79,14 @@ pub trait IntoOnceJSCallable<V: JSValueImpl, P, K> {
     fn into_js_callable(self) -> JSCallable<V>;
 }
 
-/// Marker type to let rustc happy to avoid it complain confliction implementation
-/// since Fn depends on FnMut, and FnMut depends on FnOnce, when P is the same, rustc
-/// consider confliction implementation for Fn,FnMut etc.
+/// Marker types that keep the sync and async implementations apart: for the
+/// same `P`, rustc would otherwise see two conflicting implementations.
 #[doc(hidden)]
-pub struct KFnMut;
+pub struct KFn;
 #[doc(hidden)]
 pub struct KFnOnce;
 #[doc(hidden)]
-pub struct KAsyncFnMut;
+pub struct KAsyncFn;
 #[doc(hidden)]
 pub struct KAsyncFnOnce;
 
@@ -100,16 +117,24 @@ impl<V: JSValueImpl> RustFunc<V> {
     }
 
     /// Calls the function with provided parameter accessor, returning JS result
-    pub(crate) fn call(&mut self, accessor: &mut ParamsAccessor<V>) -> JSResult<V> {
-        // Validate the number of arguments
+    pub(crate) fn call(&self, accessor: &mut ParamsAccessor<V>) -> JSResult<V> {
+        self.invocation(accessor)?.run(accessor)
+    }
+
+    /// Checks the argument count and takes out what one call runs, so the
+    /// caller can stop borrowing the function before it runs.
+    pub(crate) fn invocation(&self, accessor: &ParamsAccessor<V>) -> JSResult<Invocation<V>> {
         let num_args = accessor.args_len() as u32;
         if num_args < self.required_params {
             return Err(HostError::invalid_arg_count(self.required_params, num_args).into());
         }
 
         match &self.func {
-            JSCallable::FnMut(f) => f.borrow_mut()(accessor),
-            JSCallable::FnOnce(f) => f.take().ok_or_else(HostError::once_fn_called)?(accessor),
+            JSCallable::Fn(f) => Ok(Invocation::Fn(f.clone())),
+            JSCallable::FnOnce(f) => f
+                .take()
+                .map(Invocation::FnOnce)
+                .ok_or_else(|| HostError::once_fn_called().into()),
         }
     }
 
@@ -142,7 +167,7 @@ impl<V: JSValueImpl> Constructor<V> {
     }
 
     /// Calls the constructor with provided parameter accessor, returning JS result
-    pub fn call(&mut self, accessor: &mut ParamsAccessor<V>) -> JSResult<V> {
+    pub fn call(&self, accessor: &mut ParamsAccessor<V>) -> JSResult<V> {
         self.0.call(accessor)
     }
 }
@@ -174,16 +199,16 @@ where
 
 macro_rules! impl_js_callable_func {
     ($($t:ident),* $(,)?) => {
-        // Sync FnMut function/closure implementation
-        impl<V, R, Fun $(,$t)*> IntoJSCallable<V, ($($t,)*), KFnMut> for Fun
+        // Sync Fn function/closure implementation
+        impl<V, R, Fun $(,$t)*> IntoJSCallable<V, ($($t,)*), KFn> for Fun
         where
-            Fun: FnMut($($t),*) -> R + 'static,
+            Fun: Fn($($t),*) -> R + 'static,
             V: JSValueImpl,
             ($($t,)*): FromParams<V>,
             R: IntoJSValue<V>
         {
             fn into_js_callable(self) -> JSCallable<V> {
-                let mut f = self;
+                let f = self;
                 let closure = move |accessor: &mut ParamsAccessor<V>| {
                     let params = <($($t,)*)>::from_params(accessor)?;
                     #[allow(non_snake_case)]
@@ -191,22 +216,22 @@ macro_rules! impl_js_callable_func {
                     let result = f($($t),*);
                     Ok(<R as IntoJSValue<V>>::into_js_value(result, accessor.context()).into_value())
                 };
-                JSCallable::FnMut(RefCell::new(Box::new(closure)))
+                JSCallable::Fn(Rc::new(closure))
             }
         }
 
 
-        // Async FnMut implementation
-        impl<V, R, Fut, Fun $(,$t)*> IntoJSCallable<V, ($($t,)*), KAsyncFnMut> for Fun
+        // Async Fn implementation
+        impl<V, R, Fut, Fun $(,$t)*> IntoJSCallable<V, ($($t,)*), KAsyncFn> for Fun
         where
-            Fun: FnMut($($t),*) -> Fut + 'static,
+            Fun: Fn($($t),*) -> Fut + 'static,
             Fut: Future<Output=R> +'static,
             V: JSValueImpl + JSObjectOps + 'static,
             ($($t,)*): FromParams<V> ,
             R: IntoJSValue<V> + PromiseResolver<V> + 'static,
         {
             fn into_js_callable(self) -> JSCallable<V> {
-                let mut f = self;
+                let f = self;
                 let closure = move |accessor: &mut ParamsAccessor<V>| {
                     let params = <($($t,)*)>::from_params(accessor)?;
                     #[allow(non_snake_case)]
@@ -218,7 +243,7 @@ macro_rules! impl_js_callable_func {
                     let promise = Promise::from_future(ctx, Some(this), fut)?;
                     Ok(<Promise<V> as IntoJSValue<V>>::into_js_value(promise, ctx).into_value())
                 };
-                JSCallable::FnMut(RefCell::new(Box::new(closure)))
+                JSCallable::Fn(Rc::new(closure))
             }
         }
     };
@@ -243,11 +268,11 @@ macro_rules! impl_js_oncecallable_func {
                     let result = f($($t),*);
                     Ok(<R as IntoJSValue<V>>::into_js_value(result, accessor.context()).into_value())
                 };
-                JSCallable::FnOnce(RefCell::new(Some(Box::new(closure))))
+                JSCallable::FnOnce(Cell::new(Some(Box::new(closure))))
             }
         }
 
-        // Async Fn implementation
+        // Async FnOnce implementation
         impl<V, R,Fut, Fun $(,$t)*> IntoOnceJSCallable<V, ($($t,)*), KAsyncFnOnce> for Fun
         where
             Fun: FnOnce($($t),*) -> Fut + 'static,
@@ -269,7 +294,7 @@ macro_rules! impl_js_oncecallable_func {
                     let promise = Promise::from_future(ctx, Some(this), fut)?;
                     Ok(<Promise<V> as IntoJSValue<V>>::into_js_value(promise, ctx).into_value())
                 };
-                JSCallable::FnOnce(RefCell::new(Some(Box::new(closure))))
+                JSCallable::FnOnce(Cell::new(Some(Box::new(closure))))
             }
         }
     };

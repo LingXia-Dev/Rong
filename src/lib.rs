@@ -35,8 +35,8 @@ pub use rong_core::{JsInvokePriority, enqueue_js_invoke};
 )]
 pub mod function {
     pub use rong_core::function::{
-        Constructor, FromParams, IntoJSCallable, IntoOnceJSCallable, JSParameterType, KAsyncFnMut,
-        KAsyncFnOnce, KFnMut, KFnOnce, Optional, ParamsAccessor, Rest, This,
+        Constructor, FromParams, IntoJSCallable, IntoOnceJSCallable, JSParameterType, KAsyncFn,
+        KAsyncFnOnce, KFn, KFnOnce, Optional, ParamsAccessor, Rest, This,
     };
 
     #[cfg(any(feature = "quickjs", feature = "jscore", feature = "arkjs"))]
