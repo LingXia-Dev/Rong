@@ -244,6 +244,9 @@ fn closing_a_scope_keeps_its_pending_exception() -> Result<(), String> {
     unsafe {
         let mut scope: sys::JSVM_HandleScope = ptr::null_mut();
         let open = sys::OH_JSVM_OpenHandleScope(env, &mut scope);
+        if open != sys::JSVM_Status_JSVM_OK || scope.is_null() {
+            return Err(format!("open {open} gave no scope to close"));
+        }
         let message = create_string(env, THROWN_TEXT);
         let mut error = ptr::null_mut();
         sys::OH_JSVM_CreateError(env, ptr::null_mut(), message, &mut error);
@@ -268,10 +271,8 @@ fn closing_a_scope_keeps_its_pending_exception() -> Result<(), String> {
              take {take}, message {text:?}"
         );
         log::info!("[arkjs_reference_probe] {report}");
-        let ok = open == sys::JSVM_Status_JSVM_OK
-            && close == sys::JSVM_Status_JSVM_OK
-            && pending
-            && text.as_deref() == Some(THROWN_TEXT);
+        let ok =
+            close == sys::JSVM_Status_JSVM_OK && pending && text.as_deref() == Some(THROWN_TEXT);
         if ok { Ok(()) } else { Err(report) }
     }
 }
