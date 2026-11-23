@@ -71,7 +71,7 @@ fn install_churn(ctx: &JSContext) -> JSResult<()> {
 }
 
 fn churn(ctx: &JSContext) -> JSResult<()> {
-    ctx.eval::<()>(Source::from_bytes(&format!(
+    ctx.eval::<()>(Source::from_bytes(format!(
         "for (let i = 0; i < {CHURN_ROUNDS}; i++) churn(() => () => log.push('B'));"
     )))
 }
