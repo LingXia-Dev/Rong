@@ -374,7 +374,7 @@ fn to_raw_fixed(
 fn split_increment(increment: u16) -> (RoundingIncrement, i16) {
     let mut n = increment.max(1);
     let mut shift = 0;
-    while n % 10 == 0 {
+    while n.is_multiple_of(10) {
         n /= 10;
         shift += 1;
     }

@@ -34,12 +34,13 @@ impl Notation {
 }
 
 type Rules = Rc<PluralRulesWithRanges<PluralRules>>;
+type Compact = Option<Rc<CompactDecimalFormatter>>;
 
 /// ICU4X objects for one context, built on first use per locale.
 #[derive(Default)]
 pub(crate) struct Cache {
     rules: RefCell<HashMap<(String, bool), Rules>>,
-    compact: RefCell<HashMap<(String, bool), Option<Rc<CompactDecimalFormatter>>>>,
+    compact: RefCell<HashMap<(String, bool), Compact>>,
 }
 
 impl Cache {
