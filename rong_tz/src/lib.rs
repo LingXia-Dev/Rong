@@ -335,7 +335,7 @@ fn parse_offset(name: &str) -> Option<i32> {
         _ => return None,
     };
     let (h, m) = match *rest {
-        [h1, h2] => ([h1, h2], [b'0', b'0']),
+        [h1, h2] => ([h1, h2], *b"00"),
         [h1, h2, m1, m2] | [h1, h2, b':', m1, m2] => ([h1, h2], [m1, m2]),
         _ => return None,
     };
