@@ -70,7 +70,13 @@ pub(crate) fn to_intl_mv(input: &str) -> IntlMV {
     }
     // RoundMVResult: a value too large for a Number is an infinity, one too
     // small is a zero.
-    let approx: f64 = format!("{digits}e{exponent}").parse().unwrap_or(f64::NAN);
+    // The string is digits and a decimal exponent, which always parses.
+    let Ok(approx) = format!("{digits}e{exponent}").parse::<f64>() else {
+        return IntlMV::NotANumber;
+    };
+    if approx.is_nan() {
+        return IntlMV::NotANumber;
+    }
     if approx.is_infinite() {
         return if negative {
             IntlMV::NegativeInfinity
@@ -104,8 +110,19 @@ pub(crate) fn to_intl_mv(input: &str) -> IntlMV {
         (digits.to_string(), exponent)
     };
     let mut value = UnsignedDecimal::try_from_str(&digits).unwrap_or_default();
-    // A finite, nonzero Number has a magnitude well inside i16.
-    value.multiply_pow10(i16::try_from(exponent).unwrap_or(0));
+    // A finite, nonzero Number keeps the exponent of at most 201 digits
+    // well inside i16; outside it the value would have been an infinity
+    // or a zero above.
+    let Ok(shift) = i16::try_from(exponent) else {
+        debug_assert!(false, "exponent {exponent} of a finite Number");
+        return match (exponent > 0, negative) {
+            (true, false) => IntlMV::PositiveInfinity,
+            (true, true) => IntlMV::NegativeInfinity,
+            (false, false) => finite(false, UnsignedDecimal::default()),
+            (false, true) => IntlMV::NegativeZero,
+        };
+    };
+    value.multiply_pow10(shift);
     finite(negative, value)
 }
 
@@ -171,6 +188,17 @@ fn non_decimal_integer(text: &str) -> Option<IntlMV> {
     let digits = &text[2..];
     if digits.is_empty() || !digits.chars().all(|c| c.is_digit(radix)) {
         return Some(IntlMV::NotANumber);
+    }
+    // Past these lengths the value is at least 2^1024, an infinity; the
+    // conversion below is quadratic, so it never sees more.
+    let max_digits = match radix {
+        16 => 256,
+        8 => 342,
+        _ => 1024,
+    };
+    let digits = digits.trim_start_matches('0');
+    if digits.len() > max_digits {
+        return Some(IntlMV::PositiveInfinity);
     }
     // Base conversion into little-endian decimal digits.
     let mut decimal: Vec<u8> = vec![0];
@@ -435,6 +463,41 @@ mod tests {
         ] {
             assert_eq!(mv(bad), "NotANumber", "{bad}");
         }
+    }
+
+    #[test]
+    fn long_non_decimal_literals_are_infinite_without_converting() {
+        let started = std::time::Instant::now();
+        let long = format!("0x{}", "f".repeat(1_000_000));
+        assert_eq!(mv(&long), "PositiveInfinity");
+        assert!(started.elapsed() < std::time::Duration::from_secs(1));
+        // At the bound the value may still be finite: 2^1023 is.
+        let top_bit = |radix: &str, first: &str, len: usize| {
+            format!("0{radix}{first}{}", "0".repeat(len - 1))
+        };
+        assert_ne!(mv(&top_bit("x", "8", 256)), "PositiveInfinity");
+        assert_ne!(mv(&top_bit("o", "1", 342)), "PositiveInfinity");
+        assert_ne!(mv(&top_bit("b", "1", 1024)), "PositiveInfinity");
+        assert_eq!(mv(&top_bit("x", "1", 257)), "PositiveInfinity");
+        assert_eq!(mv(&top_bit("o", "1", 343)), "PositiveInfinity");
+        assert_eq!(mv(&top_bit("b", "1", 1025)), "PositiveInfinity");
+        // Leading zeros do not count.
+        assert_eq!(mv(&format!("0x{}1F", "0".repeat(5000))), "31");
+        assert_eq!(mv("0x000"), "0");
+    }
+
+    #[test]
+    fn extreme_finite_values_keep_their_magnitude() {
+        let magnitude = |s: &str| match to_intl_mv(s) {
+            IntlMV::Finite { value, .. } => value.nonzero_magnitude_start(),
+            other => panic!("{s}: {other:?}"),
+        };
+        assert_eq!(magnitude("5e-324"), -324);
+        assert_eq!(magnitude("1.7976931348623157e308"), 308);
+        // 300 digits keep 201 (one sticky), still at the right place.
+        assert_eq!(magnitude(&format!("{}e-600", "9".repeat(300))), -301);
+        assert_eq!(magnitude(&format!("{}e8", "1".repeat(300))), 307);
+        assert_eq!(mv("1e-324"), "0");
     }
 
     fn options(rounding_type: RoundingType) -> DigitOptions {
