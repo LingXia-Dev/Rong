@@ -259,6 +259,36 @@ mod tests {
     }
 
     #[test]
+    fn an_absent_source_is_skipped_without_a_report() {
+        let mut skipped = Vec::new();
+        let _ = crate::system_database(&["/nonexistent/rong-tz/tzdata"], &mut skipped);
+        assert!(
+            !skipped.iter().any(|s| s.contains("rong-tz")),
+            "{skipped:?}"
+        );
+    }
+
+    /// HarmonyOS's zone directory cannot be listed, but its packed file
+    /// opens by full path; opening never lists a parent.
+    #[cfg(unix)]
+    #[test]
+    fn a_source_under_an_unlistable_parent_opens() {
+        use std::os::unix::fs::PermissionsExt;
+        let system = std::path::Path::new("/usr/share/zoneinfo");
+        if !system.join("UTC").exists() {
+            return;
+        }
+        let parent = empty_dir("unlistable");
+        std::os::unix::fs::symlink(system, parent.join("zoneinfo")).unwrap();
+        std::fs::set_permissions(&parent, std::fs::Permissions::from_mode(0o111)).unwrap();
+        let opened = crate::open_path(&parent.join("zoneinfo"));
+        std::fs::set_permissions(&parent, std::fs::Permissions::from_mode(0o755)).unwrap();
+        std::fs::remove_file(parent.join("zoneinfo")).ok();
+        std::fs::remove_dir(&parent).ok();
+        assert!(opened.is_some());
+    }
+
+    #[test]
     fn epoch_milliseconds_at_their_bounds() {
         let min = Timestamp::MIN.as_millisecond();
         let max = Timestamp::MAX.as_millisecond();
