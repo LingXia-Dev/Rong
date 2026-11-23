@@ -278,8 +278,7 @@ impl<V> JSObject<V>
 where
     V: JSValueImpl + JSObjectOps,
 {
-    /// Borrow the underlying data from an instance
-    pub fn borrow<T>(&self) -> JSResult<Ref<'_, T>>
+    fn borrow_cell<T>(&self) -> JSResult<&RefCell<T>>
     where
         T: JSClass<V>,
     {
@@ -294,21 +293,33 @@ where
 
         let ptr = self.as_value().get_opaque() as *mut RefCell<T>;
         if ptr.is_null() {
-            Err(HostError::new(
+            return Err(HostError::new(
                 crate::error::E_INTERNAL,
                 format!("Failed to borrow for type {}", std::any::type_name::<T>()),
             )
-            .into())
-        } else {
-            // SAFETY: ptr was created by Box::into_raw in instance()
-            unsafe { &*ptr }.try_borrow().map_err(|_| {
-                HostError::new(
-                    crate::error::E_INTERNAL,
-                    format!("Failed to borrow for type {}", std::any::type_name::<T>()),
-                )
-                .into()
-            })
+            .into());
         }
+
+        // SAFETY: ptr was created by Box::into_raw in instance()
+        Ok(unsafe { &*ptr })
+    }
+
+    /// Borrow the underlying data from an instance
+    pub fn borrow<T>(&self) -> JSResult<Ref<'_, T>>
+    where
+        T: JSClass<V>,
+    {
+        let cell = self.borrow_cell::<T>()?;
+        cell.try_borrow().map_err(|_| {
+            HostError::new(
+                crate::error::E_INVALID_STATE,
+                format!(
+                    "Cannot borrow {} while a `&mut self` method of this instance is still running",
+                    T::NAME
+                ),
+            )
+            .into()
+        })
     }
 
     /// Mutably borrow the underlying data from an instance
@@ -316,32 +327,21 @@ where
     where
         T: JSClass<V>,
     {
-        if !Class::instance_of::<T>(self) {
-            return Err(HostError::new(
-                crate::error::E_TYPE,
-                format!("Not instance of {}", std::any::type_name::<T>()),
-            )
-            .with_name("TypeError")
-            .into());
-        }
-
-        let ptr = self.as_value().get_opaque() as *mut RefCell<T>;
-        if ptr.is_null() {
-            Err(HostError::new(
-                crate::error::E_INTERNAL,
-                format!("Failed to borrow for type {}", std::any::type_name::<T>()),
-            )
-            .into())
-        } else {
-            // SAFETY: ptr was created by Box::into_raw in instance()
-            unsafe { &*ptr }.try_borrow_mut().map_err(|_| {
-                HostError::new(
-                    crate::error::E_INTERNAL,
-                    format!("Failed to borrow for type {}", std::any::type_name::<T>()),
+        let cell = self.borrow_cell::<T>()?;
+        cell.try_borrow_mut().map_err(|_| {
+            let message = if cell.try_borrow().is_err() {
+                format!(
+                    "Cannot borrow {} while a `&mut self` method of this instance is still running",
+                    T::NAME
                 )
-                .into()
-            })
-        }
+            } else {
+                format!(
+                    "Cannot mutably borrow {} while a `&self` method of this instance is still running",
+                    T::NAME
+                )
+            };
+            HostError::new(crate::error::E_INVALID_STATE, message).into()
+        })
     }
 
     pub fn prototype(&self, proto: JSObject<V>) -> bool {
