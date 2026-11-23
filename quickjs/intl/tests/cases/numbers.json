@@ -46,5 +46,12 @@
   ["new Intl.NumberFormat('en', {numberingSystem: 'a'})", "throws RangeError"],
   ["new Intl.NumberFormat('en', {useGrouping: 'sometimes'})", "throws RangeError"],
   ["Intl.NumberFormat.prototype.formatToParts.call({}, 1)", "throws TypeError"],
-  ["new Intl.NumberFormat('en', {notation: 'compact'}).resolvedOptions().useGrouping", "\"min2\""]
+  ["new Intl.NumberFormat('en', {notation: 'compact'}).resolvedOptions().useGrouping", "\"min2\""],
+  ["new Intl.NumberFormat('en', {signDisplay: 'always'}).format(NaN)", "\"+NaN\""],
+  ["new Intl.NumberFormat('en', {signDisplay: 'exceptZero'}).format(NaN)", "\"NaN\""],
+  ["new Intl.NumberFormat('ar-EG', {style: 'percent', numberingSystem: 'latn', signDisplay: 'always'}).format(0.25)", "\"‎+25‎%‎\""],
+  ["new Intl.NumberFormat('ar-EG', {style: 'percent', numberingSystem: 'latn'}).format(-0.25)", "\"‎-25‎%‎\""],
+  ["new Intl.NumberFormat('ar-EG', {numberingSystem: 'latn'}).format(-25)", "\"‎-25\""],
+  ["new Intl.NumberFormat('ar-EG', {style: 'percent'}).format(-0.25)", "\"؜-٢٥٪؜\""],
+  ["new Intl.NumberFormat('en', {numberingSystem: 'arab', style: 'percent', signDisplay: 'always'}).format(0.25)", "\"؜+٢٥٪؜\""]
 ]
