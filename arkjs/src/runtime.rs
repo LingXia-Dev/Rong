@@ -1,7 +1,8 @@
 #![allow(clippy::missing_const_for_thread_local)]
 
 use crate::{ArkJSContext, ArkJSValue, arkjs};
-use rong_core::{JSEngine, JSRuntimeImpl};
+use rong_core::rejection::{self, RejectionHook};
+use rong_core::{JSEngine, JSRuntimeImpl, JSValueImpl};
 use std::cell::RefCell;
 use std::ffi::CStr;
 use std::ptr;
@@ -112,10 +113,30 @@ pub(crate) fn take_unhandled_rejection(
         .and_then(|entry| delete_unhandled_rejection_entry(env, entry))
 }
 
-fn discard_unhandled_rejection(env: arkjs::JSVM_Env, promise: arkjs::JSVM_Value) {
-    if let Some(entry) = remove_unhandled_rejection_entry(env, promise) {
-        let _ = delete_unhandled_rejection_entry(env, entry);
+/// Passes what the reject handler saw to the embedder's rejection tracker.
+pub(crate) fn report_rejection(
+    env: arkjs::JSVM_Env,
+    hook: RejectionHook,
+    promise: arkjs::JSVM_Value,
+    reason: arkjs::JSVM_Value,
+) {
+    if !rejection::tracking_on_this_thread() || promise.is_null() {
+        return;
     }
+    let Some(ctx) = rong_core::JSContext::<ArkJSContext>::try_from_borrowed_raw_ptr(&env) else {
+        return;
+    };
+    let reason = if reason.is_null() {
+        ArkJSValue::create_undefined(ctx.as_ref())
+    } else {
+        ArkJSValue::from_borrowed_raw(env, reason)
+    };
+    rejection::record(
+        &ctx,
+        hook,
+        ArkJSValue::from_borrowed_raw(env, promise),
+        reason,
+    );
 }
 
 pub(crate) fn clear_unhandled_rejections(env: arkjs::JSVM_Env) {
@@ -212,9 +233,17 @@ unsafe extern "C" fn promise_reject_handler(
                 if !value.is_null() {
                     store_unhandled_rejection(env, promise, value);
                 }
+                report_rejection(env, RejectionHook::Rejected, promise, value);
             }
             arkjs::JSVM_PromiseRejectEvent_JSVM_PROMISE_ADD_HANDLER_AFTER_REJECTED => {
-                discard_unhandled_rejection(env, promise);
+                // This event may carry no value; the one kept at rejection does.
+                let kept = take_unhandled_rejection(env, promise);
+                let reason = if value.is_null() {
+                    kept.unwrap_or(ptr::null_mut())
+                } else {
+                    value
+                };
+                report_rejection(env, RejectionHook::HandlerAdded, promise, reason);
             }
             _ => {}
         }

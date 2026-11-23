@@ -141,6 +141,11 @@ impl JSContextImpl for ArkJSContext {
         &self.raw
     }
 
+    // The VM's reject handler is installed when the runtime is made.
+    fn rejection_events(&self) -> rong_core::RejectionEvents {
+        rong_core::RejectionEvents::ALL
+    }
+
     fn context_id(ctx: &Self::RawContext) -> usize {
         *ctx as *const _ as usize
     }
@@ -353,6 +358,14 @@ impl JSContextImpl for ArkJSContext {
             if let Some(rejection_value) =
                 crate::runtime::take_unhandled_rejection(self.raw, promise_handle)
             {
+                // Handled here rather than through JSVM, which therefore never
+                // reports the handler to the rejection tracker.
+                crate::runtime::report_rejection(
+                    self.raw,
+                    rong_core::rejection::RejectionHook::HandlerAdded,
+                    promise_handle,
+                    rejection_value,
+                );
                 // Directly call the on_rejected callback with the captured value
                 let rejected_handle = on_rejected.resolve_handle();
                 let this = ArkJSValue::create_undefined(self);
