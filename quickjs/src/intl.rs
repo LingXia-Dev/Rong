@@ -25,6 +25,13 @@ pub fn settings(ctx: &JSContext<QJSContext>) -> Option<IntlSettings> {
     rong_quickjs_intl::settings(ctx)
 }
 
+/// Sets where problems with the app's data blob are reported, such as the
+/// host's device log; the `log` crate otherwise. The first call wins;
+/// returns whether this one did.
+pub fn set_reporter(report: impl Fn(&str) + Send + Sync + 'static) -> bool {
+    rong_quickjs_intl::set_reporter(report)
+}
+
 /// Installs `Intl` on `ctx` once [`configure`] gave it data.
 pub fn init(ctx: &JSContext<QJSContext>) -> JSResult<()> {
     rong_quickjs_intl::init::<QuickJS>(ctx)

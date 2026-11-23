@@ -39,27 +39,41 @@ type Compact = Option<Rc<CompactDecimalFormatter>>;
 /// ICU4X objects for one context, built on first use per locale.
 #[derive(Default)]
 pub(crate) struct Cache {
-    rules: RefCell<HashMap<(String, bool), Rules>>,
+    rules: RefCell<HashMap<(String, bool), Option<Rules>>>,
     compact: RefCell<HashMap<(String, bool), Compact>>,
 }
 
 impl Cache {
+    /// The locale is a canonical tag, either one the blob supports or the
+    /// default, and loading falls back through its parents to `und`. So
+    /// `None` means the blob has no plural data for this type at all (an
+    /// app blob built without the plural markers): reported once, and
+    /// selection answers `other`.
     fn rules(&self, data: &IntlData, locale: &str, ordinal: bool) -> Option<Rules> {
         let key = (locale.to_string(), ordinal);
-        if let Some(rules) = self.rules.borrow().get(&key) {
-            return Some(rules.clone());
+        if let Some(found) = self.rules.borrow().get(&key) {
+            return found.clone();
         }
-        let prefs = (&locale.parse::<Locale>().ok()?).into();
-        let provider = data.provider();
-        let rules = if ordinal {
-            PluralRulesWithRanges::try_new_ordinal_unstable(&provider, prefs)
-        } else {
-            PluralRulesWithRanges::try_new_cardinal_unstable(&provider, prefs)
+        let built = locale.parse::<Locale>().ok().and_then(|l| {
+            let prefs = (&l).into();
+            let provider = data.provider();
+            if ordinal {
+                PluralRulesWithRanges::try_new_ordinal_unstable(&provider, prefs)
+            } else {
+                PluralRulesWithRanges::try_new_cardinal_unstable(&provider, prefs)
+            }
+            .ok()
+            .map(Rc::new)
+        });
+        if built.is_none() {
+            crate::report(&format!(
+                "rong_quickjs_intl: the data blob has no {} plural rules or ranges for {locale} \
+                 or its fallbacks; Intl.PluralRules answers \"other\"",
+                if ordinal { "ordinal" } else { "cardinal" }
+            ));
         }
-        .ok()?;
-        let rules = Rc::new(rules);
-        self.rules.borrow_mut().insert(key, rules.clone());
-        Some(rules)
+        self.rules.borrow_mut().insert(key, built.clone());
+        built
     }
 
     /// The compact formatter, which knows where the locale puts its compact
