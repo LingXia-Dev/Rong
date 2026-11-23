@@ -185,6 +185,29 @@ mod tests {
     }
 
     #[test]
+    fn offsets_match_only_the_exact_layouts() {
+        for (name, seconds) in [
+            ("+05", 18_000),
+            ("-05", -18_000),
+            ("+0530", 19_800),
+            ("+05:30", 19_800),
+            ("-23:59", -86_340),
+            ("+23:59", 86_340),
+            ("+00:00", 0),
+            ("-00", 0),
+        ] {
+            assert_eq!(crate::parse_offset(name), Some(seconds), "{name}");
+        }
+        for name in [
+            "+:0530", "+0530:", "+0:530", "+:::05", "+05:", "+:05", "+05::30", "+5", "+530",
+            "+05300", "+05:3", "+05:300", "+24", "+24:00", "+2400", "+99", "+0560", "+05:60",
+            "+٠٥", "+0a", "+05:3a", "05:30", "+", "-",
+        ] {
+            assert_eq!(crate::parse_offset(name), None, "{name}");
+        }
+    }
+
+    #[test]
     fn epoch_milliseconds_at_their_bounds() {
         let min = Timestamp::MIN.as_millisecond();
         let max = Timestamp::MAX.as_millisecond();

@@ -223,25 +223,21 @@ fn system_database() -> Option<Database> {
 /// An offset zone (`+05:30`, `-08`, `+0530`) as ECMA-402 accepts them: sign,
 /// two-digit hours, optional minutes, no seconds.
 fn parse_offset(name: &str) -> Option<i32> {
-    let (sign, rest) = match name.as_bytes().first()? {
-        b'+' => (1, &name[1..]),
-        b'-' => (-1, &name[1..]),
+    let (sign, rest) = match name.as_bytes().split_first()? {
+        (b'+', rest) => (1, rest),
+        (b'-', rest) => (-1, rest),
         _ => return None,
     };
-    let digits: String = rest.chars().filter(|c| *c != ':').collect();
-    let colon = rest.contains(':');
-    if !digits.bytes().all(|b| b.is_ascii_digit())
-        || !(digits.len() == 2 || digits.len() == 4)
-        || (colon && rest.len() != 5)
-    {
-        return None;
-    }
-    let hours: i32 = digits[..2].parse().ok()?;
-    let minutes: i32 = if digits.len() == 4 {
-        digits[2..].parse().ok()?
-    } else {
-        0
+    let (h, m) = match *rest {
+        [h1, h2] => ([h1, h2], [b'0', b'0']),
+        [h1, h2, m1, m2] | [h1, h2, b':', m1, m2] => ([h1, h2], [m1, m2]),
+        _ => return None,
     };
+    let two = |[a, b]: [u8; 2]| {
+        (a.is_ascii_digit() && b.is_ascii_digit())
+            .then(|| i32::from(a - b'0') * 10 + i32::from(b - b'0'))
+    };
+    let (hours, minutes) = (two(h)?, two(m)?);
     (hours <= 23 && minutes <= 59).then_some(sign * (hours * 3600 + minutes * 60))
 }
 
