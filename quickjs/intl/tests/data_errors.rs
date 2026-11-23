@@ -132,3 +132,33 @@ fn constructors_given_no_locale_agree_when_the_blob_holds_the_host_locale() -> R
     assert_eq!(got, "de-AT,de-AT");
     Ok(())
 }
+
+/// A blob without number symbols: NumberFormat constructs (the options are
+/// all script-side), and every format throws a catchable error that says
+/// what is missing, through the reporter too.
+#[test]
+fn missing_number_data_throws_and_is_reported() -> Result<(), String> {
+    let rt = RongJS::runtime();
+    let data =
+        rong_quickjs_intl::IntlData::try_from_static_blob(NO_PLURALS).map_err(|e| e.to_string())?;
+    let Some(ctx) = context(&rt, data, "en-US")? else {
+        return Ok(());
+    };
+    let got = eval(
+        &ctx,
+        "const nf = new Intl.NumberFormat('en', { style: 'percent' }); \
+         const tries = []; \
+         for (let i = 0; i < 3; i++) { \
+           try { nf.format(1); tries.push('returned'); } \
+           catch (e) { tries.push(e instanceof Error && /number symbols/.test(e.message) ? 'threw' : 'other ' + e); } \
+         } \
+         try { nf.formatToParts(1); tries.push('returned'); } catch (e) { tries.push('threw'); } \
+         [nf.resolvedOptions().style, tries.join(' ')].join()",
+    )?;
+    assert_eq!(got, "percent,threw threw threw threw");
+    assert!(!lines_with("number symbols").is_empty());
+    // The context stays usable.
+    let after = eval(&ctx, "Intl.getCanonicalLocales('EN-us')[0]")?;
+    assert_eq!(after, "en-US");
+    Ok(())
+}
