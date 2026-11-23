@@ -350,6 +350,12 @@ run_all_core_tests() {
         else
             record_suite_result "rong_tz zone table" 1 || true
         fi
+        # Release too: integer overflow wraps there instead of panicking.
+        if run_cargo_test -p rong_tz --release --quiet "${extra[@]}"; then
+            record_suite_result "rong_tz zone table (release)" 0
+        else
+            record_suite_result "rong_tz zone table (release)" 1 || true
+        fi
     fi
 }
 
