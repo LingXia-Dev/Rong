@@ -277,16 +277,10 @@ fn each_engine_reports_what_it_can() {
             not(feature = "primary-arkjs")
         )
     ));
-    let arkjs = !jscore
-        && cfg!(any(
-            feature = "primary-arkjs",
-            all(feature = "arkjs", not(feature = "primary-quickjs"))
-        ));
     let expected = if jscore && cfg!(feature = "jscore-source") {
         RejectionEvents::UNHANDLED
-    } else if jscore || arkjs {
-        // JavaScriptCore's system framework has it only as private API; ArkJS
-        // does not route its reject handler here yet.
+    } else if jscore {
+        // Only private API on the system framework.
         RejectionEvents::NONE
     } else {
         RejectionEvents::ALL
