@@ -76,6 +76,14 @@ pub(crate) fn check() -> Result<usize, String> {
         "america/new_york -> America/New_York",
         canonical_zone("america/new_york").as_deref() == Ok("America/New_York"),
     )?;
+    // A source that exists but holds no zones is not a source.
+    expect(
+        "a present source that cannot answer is rejected",
+        std::env::current_exe()
+            .ok()
+            .and_then(|exe| exe.parent().map(crate::open_path))
+            .is_some_and(|db| db.is_none()),
+    )?;
     // Unknown and malformed.
     expect(
         "unknown zone",
@@ -220,6 +228,31 @@ mod tests {
         for name in ["Etc/GMT+5", "Etc/GMT-14", "America/Port-au-Prince", "UTC"] {
             assert!(crate::is_name_syntax(name), "{name}");
         }
+    }
+
+    /// A directory with no zones in it opens without error in jiff.
+    fn empty_dir(name: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("rong_tz-{name}-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn a_source_that_cannot_answer_is_skipped_and_reported() {
+        let dir = empty_dir("skip");
+        let label = dir.to_str().unwrap();
+        assert!(crate::open_path(&dir).is_none());
+
+        let mut skipped = Vec::new();
+        let db = crate::system_database(&[label], &mut skipped);
+        let db = db.unwrap_or_else(crate::bundled_or_none);
+        assert!(!db.source.contains(label), "{}", db.source);
+        let line = crate::report_line(&db, &skipped);
+        assert!(
+            line.contains(label) && line.contains("cannot answer"),
+            "{line}"
+        );
+        std::fs::remove_dir(&dir).ok();
     }
 
     #[test]
