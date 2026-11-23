@@ -1,34 +1,27 @@
 [package]
-name = "rong_intl"
+name = "rong_quickjs_intl"
 version = "0.8.0"
 edition.workspace = true
 
-description = "ECMA-402 Intl for RongJS engines that have none"
+description = "ECMA-402 Intl for RongJS on QuickJS; internal to rong_quickjs, use rong::quickjs::intl"
 license.workspace = true
 repository.workspace = true
 homepage.workspace = true
 rust-version.workspace = true
 keywords.workspace = true
 categories.workspace = true
-documentation = "https://docs.rs/rong_intl"
+documentation = "https://docs.rs/rong"
 readme = "README.md"
 
-[package.metadata.docs.rs]
-features = ["quickjs"]
-
 [dependencies]
-rong = { workspace = true }
+rong_core = { workspace = true }
 icu = { version = "=2.4.0", default-features = false, features = ["serde"] }
 icu_provider = { version = "2.4", default-features = false, features = ["serde"] }
 icu_provider_blob = { version = "2.4", default-features = false, features = ["alloc"] }
 
-[features]
-default = []
-quickjs = ["rong/quickjs"]
-jscore = ["rong/jscore"]
-arkjs = ["rong/arkjs"]
-tls-aws-lc = ["rong/tls-aws-lc"]
-tls-ring = ["rong/tls-ring"]
-
+# Tests pick their engine and TLS backend through `rong`, such as
+# `--features rong/quickjs,rong/tls-ring` (or `rong/jscore`, the reference).
+# The crate itself is engine-generic and has no features.
 [dev-dependencies]
+rong = { workspace = true }
 rong_test = { path = "../../testing/rong_test" }

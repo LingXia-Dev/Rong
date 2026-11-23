@@ -76,7 +76,6 @@ define_modules!(
     ("encoding", "encoding", [], rong_encoding::init),
     ("console", "console", [], rong_console::init),
     ("url", "url", [], rong_url::init),
-    ("intl", "intl", [], rong_intl::init),
     ("buffer", "buffer", [], rong_buffer::init),
     ("stream", "stream", ["abort"], rong_stream::init),
     ("compression", "compression", [], rong_compression::init),

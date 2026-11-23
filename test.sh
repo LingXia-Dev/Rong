@@ -335,6 +335,26 @@ run_all_core_tests() {
         record_suite_result "Core integration tests on $engine" 1 || true
     fi
 
+    if [[ "$engine" == "quickjs" || "$engine" == "jscore" ]]; then
+        # Engine-generic crate: name the engine and TLS backend through `rong`.
+        local intl_features
+        intl_features="$(tr ',' '\n' <<<"$feature_set" | sed '/\//!s/^/rong\//' | paste -sd, -)"
+        log_info "Running Intl tests ($engine)"
+        if run_cargo_test -p rong_quickjs_intl --features="$intl_features" --quiet "${extra[@]}" -- --nocapture; then
+            record_suite_result "Intl tests on $engine" 0
+        else
+            record_suite_result "Intl tests on $engine" 1 || true
+        fi
+    fi
+    if [[ "$engine" == "quickjs" ]]; then
+        log_info "Running the quickjs-intl feature test"
+        if run_cargo_test -p rong --no-default-features --features="$feature_set,quickjs-intl" --test quickjs_intl --quiet "${extra[@]}"; then
+            record_suite_result "quickjs-intl feature" 0
+        else
+            record_suite_result "quickjs-intl feature" 1 || true
+        fi
+    fi
+
     log_info "Running rong_core unit tests ($engine)"
     if run_cargo_test -p rong_core --lib --quiet "${extra[@]}"; then
         record_suite_result "rong_core unit tests on $engine" 0

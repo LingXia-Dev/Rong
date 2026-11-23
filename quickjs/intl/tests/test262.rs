@@ -107,9 +107,7 @@ fn run_one(rt: &JSRuntime, root: &Path, file: &Path) -> Result<(), String> {
         ));
     }
     let ctx = rt.context();
-    let data = rong_intl::IntlData::try_from_static_blob(BLOB).map_err(|e| e.to_string())?;
-    rong_intl::configure(&ctx, data, rong_intl::IntlSettings::default());
-    rong_intl::init(&ctx).map_err(|e| e.to_string())?;
+    install_intl(&ctx)?;
     let mut prelude = String::new();
     for include in ["assert.js", "sta.js"]
         .iter()
@@ -188,4 +186,19 @@ fn intl402() -> Result<(), String> {
         return Err(format!("{failed_total} test262 tests failed"));
     }
     Ok(())
+}
+
+/// QuickJS gets rong's `Intl`; an engine with its own (the reference) is left
+/// as it is.
+fn install_intl(ctx: &JSContext) -> Result<(), String> {
+    let native: bool = ctx
+        .eval(Source::from_bytes("typeof globalThis.Intl !== 'undefined'"))
+        .map_err(|e| e.to_string())?;
+    if native {
+        return Ok(());
+    }
+    let data =
+        rong_quickjs_intl::IntlData::try_from_static_blob(BLOB).map_err(|e| e.to_string())?;
+    rong_quickjs_intl::configure(ctx, data, rong_quickjs_intl::IntlSettings::default());
+    rong_quickjs_intl::init::<RongJS>(ctx).map_err(|e| e.to_string())
 }

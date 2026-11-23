@@ -15,7 +15,13 @@ readme = "README.md"
 [dependencies]
 rong_quickjs_sys = { workspace = true }
 rong_core = { workspace = true }
+rong_quickjs_intl = { workspace = true, optional = true }
 smallvec = { workspace = true }
+
+[features]
+default = []
+# ECMA-402 `Intl` as `rong_quickjs::intl`; off by default. Pulls in ICU4X.
+intl = ["dep:rong_quickjs_intl"]
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
