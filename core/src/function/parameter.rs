@@ -77,7 +77,14 @@ impl<'a, V: JSValueImpl> ParamsAccessor<'a, V> {
 /// ```
 pub struct This<T>(pub T);
 
-/// Represents the `this` context in JavaScript function calls with mutable access
+/// Represents the `this` context in JavaScript function calls with mutable access.
+///
+/// Holding the `RefMut` returned by [`ThisMut::borrow_mut`] (which `#[js_class]`
+/// `&mut self` methods do for the whole call) keeps the instance mutably borrowed:
+/// any re-entrant call into another method of the same instance from JavaScript
+/// will fail with `E_INVALID_STATE`. Methods that call into script and need
+/// re-entrancy on the same instance should drop the `RefMut` before calling
+/// script, or use `&self` with interior mutability.
 pub struct ThisMut<T, V: JSValueImpl>(pub(crate) JSObject<V>, PhantomData<T>);
 
 /// A non-owning handle to a JS class instance.
