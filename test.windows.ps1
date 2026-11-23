@@ -252,6 +252,14 @@ function Run-AllCoreTests([string]$EngineName, [string[]]$CoreTests) {
     }
     & cargo test @unitArgs
     Record-SuiteResult -Name "rong_core unit tests on $EngineName" -ExitCode $LASTEXITCODE
+
+    Log-Info "Running rong_tz shared zone table ($EngineName)"
+    $tzArgs = @("-p", "rong_tz", "--quiet")
+    if (-not $script:FailFast) {
+        $tzArgs += "--no-fail-fast"
+    }
+    & cargo test @tzArgs -- --nocapture
+    Record-SuiteResult -Name "rong_tz zone table on $EngineName" -ExitCode $LASTEXITCODE
 }
 
 function Run-AllModuleTests([string]$EngineName, [string[]]$ModuleTests) {

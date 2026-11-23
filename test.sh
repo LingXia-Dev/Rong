@@ -341,6 +341,13 @@ run_all_core_tests() {
     else
         record_suite_result "rong_core unit tests on $engine" 1 || true
     fi
+
+    log_info "Running rong_tz shared zone table ($engine)"
+    if run_cargo_test -p rong_tz --quiet "${extra[@]}" -- --nocapture; then
+        record_suite_result "rong_tz zone table on $engine" 0
+    else
+        record_suite_result "rong_tz zone table on $engine" 1 || true
+    fi
 }
 
 run_all_module_tests() {
