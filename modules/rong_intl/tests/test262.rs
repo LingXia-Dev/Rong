@@ -41,9 +41,17 @@ fn list(value: &str) -> Vec<String> {
 }
 
 fn parse_meta(source: &str) -> Meta {
-    let mut meta = Meta { includes: Vec::new(), flags: Vec::new(), negative: None };
-    let Some(start) = source.find("/*---") else { return meta };
-    let Some(end) = source[start..].find("---*/") else { return meta };
+    let mut meta = Meta {
+        includes: Vec::new(),
+        flags: Vec::new(),
+        negative: None,
+    };
+    let Some(start) = source.find("/*---") else {
+        return meta;
+    };
+    let Some(end) = source[start..].find("---*/") else {
+        return meta;
+    };
     let mut section = "";
     for line in source[start + 5..start + end].lines() {
         let trimmed = line.trim();
@@ -55,14 +63,18 @@ fn parse_meta(source: &str) -> Meta {
             }
             continue;
         }
-        if !line.starts_with(' ') && let Some((key, value)) = trimmed.split_once(':') {
+        if !line.starts_with(' ')
+            && let Some((key, value)) = trimmed.split_once(':')
+        {
             section = key;
             match key {
                 "includes" => meta.includes.extend(list(value)),
                 "flags" => meta.flags.extend(list(value)),
                 _ => {}
             }
-        } else if section == "negative" && let Some(kind) = trimmed.strip_prefix("type:") {
+        } else if section == "negative"
+            && let Some(kind) = trimmed.strip_prefix("type:")
+        {
             meta.negative = Some(kind.trim().to_string());
         }
     }
@@ -90,14 +102,20 @@ fn run_one(rt: &JSRuntime, root: &Path, file: &Path) -> Result<(), String> {
     let source = std::fs::read_to_string(file).map_err(|e| e.to_string())?;
     let meta = parse_meta(&source);
     if meta.flags.iter().any(|f| f == "async" || f == "module") {
-        return Err(String::from("skipped: async and module tests are not run yet"));
+        return Err(String::from(
+            "skipped: async and module tests are not run yet",
+        ));
     }
     let ctx = rt.context();
     let data = rong_intl::IntlData::try_from_static_blob(BLOB).map_err(|e| e.to_string())?;
     rong_intl::configure(&ctx, data, rong_intl::IntlSettings::default());
     rong_intl::init(&ctx).map_err(|e| e.to_string())?;
     let mut prelude = String::new();
-    for include in ["assert.js", "sta.js"].iter().map(|s| s.to_string()).chain(meta.includes.clone()) {
+    for include in ["assert.js", "sta.js"]
+        .iter()
+        .map(|s| s.to_string())
+        .chain(meta.includes.clone())
+    {
         let text = std::fs::read_to_string(root.join("harness").join(&include))
             .map_err(|e| format!("harness {include}: {e}"))?;
         prelude.push_str(&text);
@@ -107,7 +125,11 @@ fn run_one(rt: &JSRuntime, root: &Path, file: &Path) -> Result<(), String> {
     ctx.eval::<()>(Source::from_bytes(prelude))
         .map_err(|e| format!("harness failed: {e}"))?;
     let strict = meta.flags.iter().any(|f| f == "onlyStrict");
-    let body = if strict { format!("'use strict';\n{source}") } else { source };
+    let body = if strict {
+        format!("'use strict';\n{source}")
+    } else {
+        source
+    };
     let outcome = ctx.eval::<()>(Source::from_bytes(body));
     match (outcome, &meta.negative) {
         (Ok(()), None) => Ok(()),
@@ -117,7 +139,11 @@ fn run_one(rt: &JSRuntime, root: &Path, file: &Path) -> Result<(), String> {
             let text = thrown_error_message(&ctx, &e).unwrap_or_else(|_| e.to_string());
             match (negative, name) {
                 (Some(kind), Some(name)) if *kind == name => Ok(()),
-                _ => Err(format!("{} {}", thrown_object_prop::<String>(&ctx, &e, "name").unwrap_or_default(), text)),
+                _ => Err(format!(
+                    "{} {}",
+                    thrown_object_prop::<String>(&ctx, &e, "name").unwrap_or_default(),
+                    text
+                )),
             }
         }
     }
@@ -138,12 +164,21 @@ fn intl402() -> Result<(), String> {
         let mut failures = Vec::new();
         for file in &files {
             if let Err(reason) = run_one(&rt, &root, file) {
-                let name = file.strip_prefix(&root).unwrap_or(file).display().to_string();
+                let name = file
+                    .strip_prefix(&root)
+                    .unwrap_or(file)
+                    .display()
+                    .to_string();
                 failures.push((name, reason));
             }
         }
         let passed = files.len() - failures.len();
-        let _ = writeln!(out, "[test262] {} | {path}: {passed}/{} passed", RongJS::name(), files.len());
+        let _ = writeln!(
+            out,
+            "[test262] {} | {path}: {passed}/{} passed",
+            RongJS::name(),
+            files.len()
+        );
         for (name, reason) in &failures {
             let _ = writeln!(out, "[test262] FAIL {name}: {reason}");
         }

@@ -77,9 +77,7 @@ pub fn settings(ctx: &JSContext) -> Option<IntlSettings> {
 /// Installs `Intl` when the engine has none and [`configure`] gave it data.
 /// An engine's own `Intl` is never replaced, extended or shadowed.
 pub fn init(ctx: &JSContext) -> JSResult<()> {
-    let has_intl: bool = ctx.eval(Source::from_bytes(
-        "typeof globalThis.Intl !== 'undefined'",
-    ))?;
+    let has_intl: bool = ctx.eval(Source::from_bytes("typeof globalThis.Intl !== 'undefined'"))?;
     if has_intl || ctx.get_service::<IntlState>().is_none() {
         return Ok(());
     }
