@@ -11,6 +11,7 @@ use icu::datetime::fieldbag::field;
 use icu::datetime::fieldsets::builder::{DateFields, FieldSetBuilder, ZoneStyle};
 use icu::datetime::fieldsets::enums::CompositeFieldSet;
 use icu::datetime::options::{Length, SubsecondDigits, TimePrecision};
+use icu::datetime::range::DateRangeFormatter;
 use icu::datetime::{DateTimeFormatter, DateTimeFormatterPreferences};
 use icu::time::zone::iana::IanaParserExtended;
 use icu::time::zone::{IanaParser, UtcOffset};
@@ -19,7 +20,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::fmt;
 use std::rc::Rc;
-use writeable::{Part, PartsWrite, Writeable};
+use writeable::{PartsWrite, Writeable};
 
 /// The calendars ECMA-402 names (AvailableCalendars), sorted.
 pub(crate) const CALENDARS: &[&str] = &[
@@ -58,6 +59,10 @@ pub(crate) struct Request {
 /// A formatter and what its pattern holds.
 pub(crate) struct Format {
     formatter: DateTimeFormatter<CompositeFieldSet>,
+    /// What a range formatter is built from, on first use.
+    prefs: DateTimeFormatterPreferences,
+    field_set: CompositeFieldSet,
+    range: RefCell<Option<Rc<DateRangeFormatter<CompositeFieldSet>>>>,
     /// The pattern's fields as resolvedOptions reports them.
     pub fields: Vec<(&'static str, String)>,
     pub has_hour: bool,
@@ -296,21 +301,23 @@ fn build(data: &IntlData, request: &Request) -> Result<Format, String> {
         extensions.push(("hc", if hour_24 { "h23" } else { hc }));
     }
     let prefs = preferences(&request.data_locale, &extensions)?;
-    let formatter =
-        DateTimeFormatter::try_new_unstable(&data.provider(), prefs, field_set(request)?).map_err(
-            |e| {
-                format!(
-                    "the data blob has no date and time data for {} in the {} calendar: {e}",
-                    request.data_locale, request.calendar
-                )
-            },
-        )?;
+    let field_set = field_set(request)?;
+    let formatter = DateTimeFormatter::try_new_unstable(&data.provider(), prefs, field_set.clone())
+        .map_err(|e| {
+            format!(
+                "the data blob has no date and time data for {} in the {} calendar: {e}",
+                request.data_locale, request.calendar
+            )
+        })?;
     // The pattern does not depend on the instant for these field sets.
     let sample = zoned_utc(Time::try_new(0, 0, 0, 0).map_err(|e| e.to_string())?);
     let pattern = formatter.format(&sample).pattern().to_string();
     let (fields, has_hour) = pattern_fields(&pattern);
     Ok(Format {
         formatter,
+        prefs,
+        field_set,
+        range: RefCell::new(None),
         fields,
         has_hour,
         hour_24,
@@ -414,21 +421,30 @@ fn offset_minutes(zone: &str) -> Option<i32> {
     Some(sign * (hours * 60 + minutes))
 }
 
-/// FormatDateTimePattern for a time value already through TimeClip.
-pub(crate) fn format_to_parts(
+/// A part: ECMA-402's [[Type]], [[Value]] and, for ranges, [[Source]].
+pub(crate) type Part = (&'static str, String, &'static str);
+
+/// ToLocalTime: the ICU4X input for a time value, and its local hour.
+fn local_time(
     data: &IntlData,
-    format: &Format,
     zone: &str,
     epoch_ms: f64,
-) -> Result<Vec<(&'static str, String)>, String> {
+) -> Result<
+    (
+        ZonedDateTime<Iso, icu::time::TimeZoneInfo<icu::time::zone::models::AtTime>>,
+        u8,
+    ),
+    String,
+> {
     let ms = epoch_ms as i64;
     let offset = zone_offset_seconds(zone, ms)?;
     let local = ms + i64::from(offset) * 1000;
     let day = local.div_euclid(86_400_000);
     let in_day = local.rem_euclid(86_400_000);
     let date = Date::from_rata_die(RataDie::new(EPOCH_RATA_DIE + day), Iso);
+    let hour = (in_day / 3_600_000) as u8;
     let time = Time::try_new(
-        (in_day / 3_600_000) as u8,
+        hour,
         (in_day / 60_000 % 60) as u8,
         (in_day / 1000 % 60) as u8,
         (in_day % 1000) as u32 * 1_000_000,
@@ -442,11 +458,41 @@ pub(crate) fn format_to_parts(
     let zone_info = id
         .with_offset(UtcOffset::try_from_seconds(offset).ok())
         .at_date_time(DateTime { date, time });
-    let input = ZonedDateTime {
-        date,
-        time,
-        zone: zone_info,
-    };
+    Ok((
+        ZonedDateTime {
+            date,
+            time,
+            zone: zone_info,
+        },
+        hour,
+    ))
+}
+
+/// h24: hour 0 of the part's own instant reads 24.
+fn apply_hour_24(format: &Format, parts: &mut [Part], start_hour: u8, end_hour: u8) {
+    if !format.hour_24 {
+        return;
+    }
+    for (kind, text, source) in parts {
+        let hour = if *source == "endRange" {
+            end_hour
+        } else {
+            start_hour
+        };
+        if *kind == "hour" && hour == 0 {
+            *text = twenty_four(text);
+        }
+    }
+}
+
+/// FormatDateTimePattern for a time value already through TimeClip.
+pub(crate) fn format_to_parts(
+    data: &IntlData,
+    format: &Format,
+    zone: &str,
+    epoch_ms: f64,
+) -> Result<Vec<Part>, String> {
+    let (input, hour) = local_time(data, zone, epoch_ms)?;
     let mut sink = Collector::default();
     format
         .formatter
@@ -454,13 +500,45 @@ pub(crate) fn format_to_parts(
         .write_to_parts(&mut sink)
         .map_err(|_| String::from("formatting failed"))?;
     let mut parts = sink.parts();
-    if format.hour_24 && time.hour.number() == 0 {
-        for (kind, text) in &mut parts {
-            if *kind == "hour" {
-                *text = twenty_four(text);
+    apply_hour_24(format, &mut parts, hour, hour);
+    Ok(parts)
+}
+
+/// PartitionDateTimeRangePattern for time values already through TimeClip.
+pub(crate) fn format_range_to_parts(
+    data: &IntlData,
+    format: &Format,
+    zone: &str,
+    x: f64,
+    y: f64,
+) -> Result<Vec<Part>, String> {
+    let range = {
+        let mut slot = format.range.borrow_mut();
+        match slot.as_ref() {
+            Some(range) => range.clone(),
+            None => {
+                let built = Rc::new(
+                    DateRangeFormatter::try_new_unstable(
+                        &data.provider(),
+                        format.prefs.clone(),
+                        format.field_set.clone(),
+                    )
+                    .map_err(|e| format!("the data blob has no date range patterns: {e}"))?,
+                );
+                *slot = Some(built.clone());
+                built
             }
         }
-    }
+    };
+    let (start, start_hour) = local_time(data, zone, x)?;
+    let (end, end_hour) = local_time(data, zone, y)?;
+    let mut sink = Collector::default();
+    range
+        .format(&start, &end)
+        .write_to_parts(&mut sink)
+        .map_err(|_| String::from("formatting failed"))?;
+    let mut parts = sink.parts();
+    apply_hour_24(format, &mut parts, start_hour, end_hour);
     Ok(parts)
 }
 
@@ -522,7 +600,7 @@ pub(crate) fn primary_zone(data: &IntlData, name: &str) -> Result<String, String
 struct Collector {
     text: String,
     /// (start, end, part, depth), innermost first.
-    spans: Vec<(usize, usize, Part, usize)>,
+    spans: Vec<(usize, usize, writeable::Part, usize)>,
     depth: usize,
 }
 
@@ -537,7 +615,7 @@ impl PartsWrite for Collector {
     type SubPartsWrite = Self;
     fn with_part(
         &mut self,
-        part: Part,
+        part: writeable::Part,
         mut f: impl FnMut(&mut Self::SubPartsWrite) -> fmt::Result,
     ) -> fmt::Result {
         let start = self.text.len();
@@ -550,61 +628,65 @@ impl PartsWrite for Collector {
 }
 
 impl Collector {
-    fn text_of(&self, part: Part) -> Option<&str> {
+    fn text_of(&self, part: writeable::Part) -> Option<&str> {
         self.spans
             .iter()
             .find(|(_, _, p, _)| *p == part)
             .map(|(s, e, _, _)| &self.text[*s..*e])
     }
 
-    /// ECMA-402 parts: each run takes its outermost date-time part; a second
-    /// with a fraction splits at the decimal separator.
-    fn parts(&self) -> Vec<(&'static str, String)> {
+    /// ECMA-402 parts: each run takes its outermost date-time field part
+    /// (a second with a fraction splits at the decimal separator) and the
+    /// range side it falls in.
+    fn parts(&self) -> Vec<Part> {
         use icu::datetime::parts as dt;
-        let kind_at = |at: usize| -> &'static str {
-            let mut outer: Option<Part> = None;
-            let mut inner: Option<Part> = None;
-            let mut inner_depth = 0;
+        let classify = |at: usize| -> (&'static str, &'static str) {
+            let mut field: Option<(writeable::Part, usize)> = None;
+            let mut inner: Option<(writeable::Part, usize)> = None;
+            let mut source = "shared";
             for (s, e, part, depth) in &self.spans {
-                if *s <= at && at < *e {
-                    if *depth == 0 {
-                        outer = Some(*part);
+                if !(*s <= at && at < *e) {
+                    continue;
+                }
+                if *part == dt::RANGE_START {
+                    source = "startRange";
+                } else if *part == dt::RANGE_END {
+                    source = "endRange";
+                } else if part.category == "datetime" {
+                    if field.is_none_or(|(_, d)| *depth < d) {
+                        field = Some((*part, *depth));
                     }
-                    if inner.is_none() || *depth > inner_depth {
-                        inner = Some(*part);
-                        inner_depth = *depth;
-                    }
+                } else if inner.is_none_or(|(_, d)| *depth > d) {
+                    inner = Some((*part, *depth));
                 }
             }
-            let Some(outer) = outer else {
-                return "literal";
-            };
-            match outer {
-                p if p == dt::ERA => "era",
-                p if p == dt::YEAR || p == dt::EXTENDED_YEAR => "year",
-                p if p == dt::RELATED_YEAR => "relatedYear",
-                p if p == dt::YEAR_NAME => "yearName",
-                p if p == dt::MONTH => "month",
-                p if p == dt::DAY => "day",
-                p if p == dt::WEEKDAY => "weekday",
-                p if p == dt::DAY_PERIOD => "dayPeriod",
-                p if p == dt::HOUR => "hour",
-                p if p == dt::MINUTE => "minute",
-                p if p == dt::SECOND => match inner {
+            let kind = match field.map(|(p, _)| p) {
+                Some(p) if p == dt::ERA => "era",
+                Some(p) if p == dt::YEAR || p == dt::EXTENDED_YEAR => "year",
+                Some(p) if p == dt::RELATED_YEAR => "relatedYear",
+                Some(p) if p == dt::YEAR_NAME => "yearName",
+                Some(p) if p == dt::MONTH => "month",
+                Some(p) if p == dt::DAY => "day",
+                Some(p) if p == dt::WEEKDAY => "weekday",
+                Some(p) if p == dt::DAY_PERIOD => "dayPeriod",
+                Some(p) if p == dt::HOUR => "hour",
+                Some(p) if p == dt::MINUTE => "minute",
+                Some(p) if p == dt::SECOND => match inner.map(|(p, _)| p) {
                     Some(p) if p == icu::decimal::parts::DECIMAL => "literal",
                     Some(p) if p == icu::decimal::parts::FRACTION => "fractionalSecond",
                     _ => "second",
                 },
-                p if p == dt::TIME_ZONE_NAME => "timeZoneName",
+                Some(p) if p == dt::TIME_ZONE_NAME => "timeZoneName",
                 _ => "literal",
-            }
+            };
+            (kind, source)
         };
-        let mut parts: Vec<(&'static str, String)> = Vec::new();
+        let mut parts: Vec<Part> = Vec::new();
         for (at, c) in self.text.char_indices() {
-            let kind = kind_at(at);
+            let (kind, source) = classify(at);
             match parts.last_mut() {
-                Some((k, text)) if *k == kind => text.push(c),
-                _ => parts.push((kind, c.to_string())),
+                Some((k, text, s)) if *k == kind && *s == source => text.push(c),
+                _ => parts.push((kind, c.to_string(), source)),
             }
         }
         parts

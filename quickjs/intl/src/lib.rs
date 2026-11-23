@@ -451,7 +451,33 @@ where
                     .map_err(|e| bad(&e))?;
                 Ok(parts
                     .into_iter()
-                    .map(|(kind, value)| vec![kind.to_string(), value])
+                    .map(|(kind, value, _)| vec![kind.to_string(), value])
+                    .collect())
+            },
+        )?,
+    )?;
+    let own = ctx.clone();
+    natives.set(
+        "dateTimeFormatRangeParts",
+        JSFunc::<E::Value>::new(
+            ctx,
+            move |slots: JSObject<E::Value>, x: f64, y: f64| -> JSResult<Vec<Vec<String>>> {
+                let state = state(&own)?;
+                let request = date_time_request::<E>(&slots)?;
+                let zone: String = slots.get("timeZone")?;
+                let format = state.date_times.get(&state.data, &request).map_err(|e| {
+                    report(&format!("rong_quickjs_intl: {e}"));
+                    bad(&e)
+                })?;
+                let parts =
+                    date_time_format::format_range_to_parts(&state.data, &format, &zone, x, y)
+                        .map_err(|e| {
+                            report(&format!("rong_quickjs_intl: {e}"));
+                            bad(&e)
+                        })?;
+                Ok(parts
+                    .into_iter()
+                    .map(|(kind, value, source)| vec![kind.to_string(), value, source.to_string()])
                     .collect())
             },
         )?,

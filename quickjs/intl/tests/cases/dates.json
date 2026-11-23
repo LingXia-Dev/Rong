@@ -47,5 +47,10 @@
   ["new Intl.DateTimeFormat('en', {timeZone: '+05:30:00'})", "throws RangeError"],
   ["new Intl.DateTimeFormat('en', {dateStyle: 'full', year: 'numeric'})", "throws TypeError"],
   ["new Intl.DateTimeFormat('en').format(NaN)", "throws RangeError"],
-  ["new Intl.DateTimeFormat('en').format(8.64e15 + 1)", "throws RangeError"]
+  ["new Intl.DateTimeFormat('en').format(8.64e15 + 1)", "throws RangeError"],
+  ["new Intl.DateTimeFormat('en', {timeZone: 'UTC'}).formatRange(Date.UTC(2026, 0, 5, 13), Date.UTC(2026, 0, 7, 9))", "\"1/5/2026 – 1/7/2026\""],
+  ["new Intl.DateTimeFormat('en', {dateStyle: 'medium', timeZone: 'UTC'}).formatRange(Date.UTC(2026, 0, 5, 13), Date.UTC(2026, 0, 7, 9))", "\"Jan 5 – 7, 2026\""],
+  ["new Intl.DateTimeFormat('en', {timeZone: 'UTC'}).formatRange(Date.UTC(2026, 0, 5, 13), Date.UTC(2026, 0, 5, 18))", "\"1/5/2026\""],
+  ["new Intl.DateTimeFormat('en', {month: 'short', day: 'numeric', timeZone: 'UTC'}).formatRangeToParts(Date.UTC(2026, 0, 5, 13), Date.UTC(2026, 0, 7, 9))", "[{\"type\":\"month\",\"value\":\"Jan\",\"source\":\"shared\"},{\"type\":\"literal\",\"value\":\" \",\"source\":\"shared\"},{\"type\":\"day\",\"value\":\"5\",\"source\":\"startRange\"},{\"type\":\"literal\",\"value\":\" – \",\"source\":\"shared\"},{\"type\":\"day\",\"value\":\"7\",\"source\":\"endRange\"}]"],
+  ["new Intl.DateTimeFormat('en').formatRange(Date.UTC(2026, 0, 5, 13))", "throws TypeError"]
 ]

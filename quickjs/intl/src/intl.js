@@ -8,7 +8,7 @@
     pluralResolve, pluralResolveRange, pluralCategories,
     resolveNumberFormat, numberFormatParts, currencyDigits,
     resolveDateTimeFormat, primaryTimeZone, systemTimeZone, dateTimeFormatFields,
-    dateTimeFormatParts,
+    dateTimeFormatParts, dateTimeFormatRangeParts,
   } = natives;
   const $Object = Object;
   const $String = String;
@@ -874,10 +874,7 @@
   // FormatDateTime (a string) or FormatDateTimeToParts (an array of parts),
   // after ToNumber of the date as the callers do it.
   function FormatDateTimeParts(slots, x, asParts) {
-    // TimeClip
-    if (!$isFinite(x) || $abs(x) > 8.64e15) throw new $RangeError('Invalid time value');
-    x = $trunc(x) + 0;
-    const parts = dateTimeFormatParts(slots, x);
+    const parts = dateTimeFormatParts(slots, timeClip(x));
     if (!asParts) {
       let out = '';
       for (let i = 0; i < parts.length; i++) out += parts[i][1];
@@ -891,6 +888,45 @@
       define(result, $String(i), part, true, true);
     }
     return result;
+  }
+
+  // TimeClip, with the RangeError FormatDateTime and the range forms throw.
+  function timeClip(x) {
+    if (!$isFinite(x) || $abs(x) > 8.64e15) throw new $RangeError('Invalid time value');
+    return $trunc(x) + 0;
+  }
+
+  // FormatDateTimeRange (a string) or FormatDateTimeRangeToParts.
+  function FormatDateTimeRangeParts(slots, x, y, asParts) {
+    const parts = dateTimeFormatRangeParts(slots, timeClip(x), timeClip(y));
+    if (!asParts) {
+      let out = '';
+      for (let i = 0; i < parts.length; i++) out += parts[i][1];
+      return out;
+    }
+    const result = [];
+    for (let i = 0; i < parts.length; i++) {
+      const part = {};
+      define(part, 'type', parts[i][0], true, true);
+      define(part, 'value', parts[i][1], true, true);
+      define(part, 'source', parts[i][2], true, true);
+      define(result, $String(i), part, true, true);
+    }
+    return result;
+  }
+
+  function rangeOf(dtf, method, startDate, endDate, asParts) {
+    const slots = isObject(dtf) ? call($weakGet, dateTimeFormatSlots, dtf) : undefined;
+    if (slots === undefined) {
+      throw new $TypeError('Intl.DateTimeFormat.prototype.' + method +
+        ' called on an incompatible receiver');
+    }
+    if (startDate === undefined || endDate === undefined) {
+      throw new $TypeError(method + ' needs a start and an end date');
+    }
+    const x = +startDate;
+    const y = +endDate;
+    return FormatDateTimeRangeParts(slots, x, y, asParts);
   }
 
   function dateValue(date) {
@@ -917,6 +953,12 @@
         throw new $TypeError('Intl.DateTimeFormat.prototype.formatToParts called on an incompatible receiver');
       }
       return FormatDateTimeParts(slots, dateValue(date), true);
+    },
+    formatRange(startDate, endDate) {
+      return rangeOf(this, 'formatRange', startDate, endDate, false);
+    },
+    formatRangeToParts(startDate, endDate) {
+      return rangeOf(this, 'formatRangeToParts', startDate, endDate, true);
     },
     resolvedOptions() {
       const s = dateTimeFormatOf(this, 'resolvedOptions');
@@ -947,6 +989,9 @@
     set: undefined, enumerable: false, configurable: true,
   });
   define(DateTimeFormatPrototype, 'formatToParts', dateTimeFormatMethods.formatToParts, false, true);
+  define(DateTimeFormatPrototype, 'formatRange', dateTimeFormatMethods.formatRange, false, true);
+  define(DateTimeFormatPrototype, 'formatRangeToParts', dateTimeFormatMethods.formatRangeToParts,
+    false, true);
   define(DateTimeFormatPrototype, 'resolvedOptions', dateTimeFormatMethods.resolvedOptions, false, true);
   $defineProperty(DateTimeFormatPrototype, $toStringTag, {
     __proto__: null, value: 'Intl.DateTimeFormat', writable: false, enumerable: false, configurable: true,
