@@ -182,7 +182,6 @@ def generate():
         f'pub(crate) const CLDR_VERSION: &str = "{CLDR_VERSION}";',
         "",
         "/// One locale's values, by name so a change of order cannot swap them.",
-        "#[allow(dead_code, reason = \"scientific notation and formatRange read the rest\")]",
         "pub(crate) struct Values {",
         *[f"    pub {f}: &'static str," for f in FIELDS],
         "}",

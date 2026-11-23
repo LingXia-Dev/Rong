@@ -5,7 +5,6 @@
 pub(crate) const CLDR_VERSION: &str = "49.0.0";
 
 /// One locale's values, by name so a change of order cannot swap them.
-#[allow(dead_code, reason = "scientific notation and formatRange read the rest")]
 pub(crate) struct Values {
     pub exponential: &'static str,
     pub nan: &'static str,

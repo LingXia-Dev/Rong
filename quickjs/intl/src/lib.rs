@@ -14,6 +14,7 @@
 
 mod cldr_dates;
 mod cldr_numbers;
+mod cldr_units;
 mod data;
 mod date_time_format;
 mod locale;
@@ -27,6 +28,7 @@ use rong_core::{
     HostError, JSContext, JSContextImpl, JSContextService, JSEngine, JSFunc, JSObject, JSResult,
     Source,
 };
+use std::rc::Rc;
 
 pub use data::IntlData;
 
@@ -311,24 +313,54 @@ where
             move |slots: JSObject<E::Value>, value: String| -> JSResult<Vec<Vec<String>>> {
                 let state = state(&own)?;
                 let options = number_format_options::<E>(&slots)?;
-                let format = state
-                    .numbers
-                    .get(
-                        &state.data,
-                        &options.locale,
-                        &options.numbering_system,
-                        options.style,
-                    )
-                    .map_err(|e| {
-                        report(&format!("rong_quickjs_intl: {e}"));
-                        bad(&e)
-                    })?;
-                let parts =
-                    number_format::format_to_parts(&format, &options, &number::to_intl_mv(&value));
+                let (format, compact, measure) = number_format_data(state, &options)?;
+                let parts = number_format::format_to_parts(
+                    &format,
+                    &options,
+                    compact.as_deref(),
+                    measure.as_deref(),
+                    &number::to_intl_mv(&value),
+                );
                 Ok(parts
                     .into_iter()
                     .map(|(kind, value)| vec![kind.to_string(), value])
                     .collect())
+            },
+        )?,
+    )?;
+    let own = ctx.clone();
+    natives.set(
+        "numberFormatRangeParts",
+        JSFunc::<E::Value>::new(
+            ctx,
+            move |slots: JSObject<E::Value>,
+                  start: String,
+                  end: String|
+                  -> JSResult<Option<Vec<Vec<String>>>> {
+                let state = state(&own)?;
+                let (x, y) = (number::to_intl_mv(&start), number::to_intl_mv(&end));
+                // A NaN end is a RangeError, thrown by the caller.
+                if x == number::IntlMV::NotANumber || y == number::IntlMV::NotANumber {
+                    return Ok(None);
+                }
+                let options = number_format_options::<E>(&slots)?;
+                let (format, compact, measure) = number_format_data(state, &options)?;
+                let parts = number_format::format_range_to_parts(
+                    &format,
+                    &options,
+                    compact.as_deref(),
+                    measure.as_deref(),
+                    &x,
+                    &y,
+                );
+                Ok(Some(
+                    parts
+                        .into_iter()
+                        .map(|(kind, value, source)| {
+                            vec![kind.to_string(), value, source.to_string()]
+                        })
+                        .collect(),
+                ))
             },
         )?,
     )?;
@@ -726,6 +758,56 @@ fn service_locales(data: &IntlData, service: &str) -> Vec<String> {
     }
 }
 
+/// The data a NumberFormat's options need: the locale format, compact
+/// patterns and the currency's or unit's affixes.
+type NumberFormatData = (
+    Rc<number_format::LocaleFormat>,
+    Option<Rc<number_format::Compact>>,
+    Option<Rc<number_format::Affixes>>,
+);
+
+fn number_format_data(
+    state: &IntlState,
+    options: &number_format::Options,
+) -> JSResult<NumberFormatData> {
+    let failed = |e: String| {
+        report(&format!("rong_quickjs_intl: {e}"));
+        bad(&e)
+    };
+    let format = state
+        .numbers
+        .get(
+            &state.data,
+            &options.locale,
+            &options.numbering_system,
+            options.style,
+        )
+        .map_err(failed)?;
+    let compact = match options.notation {
+        plural::Notation::CompactShort | plural::Notation::CompactLong => Some(
+            state
+                .numbers
+                .compact(
+                    &state.data,
+                    &options.locale,
+                    options.notation == plural::Notation::CompactLong,
+                )
+                .map_err(failed)?,
+        ),
+        _ => None,
+    };
+    let measure = match &options.measure {
+        Some(measure) => Some(
+            state
+                .numbers
+                .measure(&state.data, &format, options, measure)
+                .map_err(failed)?,
+        ),
+        None => None,
+    };
+    Ok((format, compact, measure))
+}
+
 /// The slots SetNumberFormatDigitOptions fills, as the bootstrap keeps them.
 fn digit_options<E: JSEngine>(slots: &JSObject<E::Value>) -> JSResult<number::DigitOptions> {
     let text = |key: &str| -> JSResult<String> { slots.get::<_, String>(key) };
@@ -768,18 +850,44 @@ fn plural_options<E: JSEngine>(slots: &JSObject<E::Value>) -> JSResult<plural::O
 fn number_format_options<E: JSEngine>(
     slots: &JSObject<E::Value>,
 ) -> JSResult<number_format::Options> {
-    use number_format::{Grouping, SignDisplay, Style};
+    use number_format::{CurrencyDisplay, Grouping, Measure, SignDisplay, Style, UnitDisplay};
     let text = |key: &str| -> JSResult<String> { slots.get::<_, String>(key) };
-    let style = match text("style")?.as_str() {
-        "decimal" => Style::Decimal,
-        "percent" => Style::Percent,
-        _ => return Err(bad("this style is not supported yet")),
+    let (style, measure) = match text("style")?.as_str() {
+        "percent" => (Style::Percent, None),
+        "currency" => (
+            Style::Decimal,
+            Some(Measure::Currency {
+                code: text("currency")?,
+                display: match text("currencyDisplay")?.as_str() {
+                    "code" => CurrencyDisplay::Code,
+                    "narrowSymbol" => CurrencyDisplay::NarrowSymbol,
+                    "name" => CurrencyDisplay::Name,
+                    _ => CurrencyDisplay::Symbol,
+                },
+                accounting: text("currencySign")? == "accounting",
+            }),
+        ),
+        "unit" => (
+            Style::Decimal,
+            Some(Measure::Unit {
+                unit: text("unit")?,
+                display: match text("unitDisplay")?.as_str() {
+                    "long" => UnitDisplay::Long,
+                    "narrow" => UnitDisplay::Narrow,
+                    _ => UnitDisplay::Short,
+                },
+            }),
+        ),
+        _ => (Style::Decimal, None),
     };
-    // Formatting compact, scientific or engineering as standard would be a
-    // wrong answer, not a fallback.
-    if text("notation")? != "standard" {
-        return Err(bad("this notation is not supported yet"));
-    }
+    let compact_display: Option<String> = slots
+        .get_opt::<_, Option<String>>("compactDisplay")?
+        .flatten();
+    let notation = plural::Notation::parse(
+        &text("notation")?,
+        compact_display.as_deref().unwrap_or("short"),
+    )
+    .ok_or_else(|| bad("unknown notation"))?;
     // [[UseGrouping]] is a string or false.
     let grouping: Option<String> = slots.get_opt::<_, String>("useGrouping").ok().flatten();
     let grouping = match grouping.as_deref() {
@@ -800,6 +908,8 @@ fn number_format_options<E: JSEngine>(
         locale: text("dataLocale")?,
         numbering_system: text("numberingSystem")?,
         style,
+        measure,
+        notation,
         digits: digit_options::<E>(slots)?,
         grouping,
         sign,
