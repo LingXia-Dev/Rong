@@ -54,5 +54,5 @@ jobs:
             echo "$line"
           done
         env:
-          INTL_BRANCH: feat/intl-plural-rules
+          INTL_BRANCH: feat/intl-number-format
 
