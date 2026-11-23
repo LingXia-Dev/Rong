@@ -30,6 +30,22 @@ pub use data::IntlData;
 pub const ICU4X_VERSION: &str = "2.4.0";
 pub use settings::{HourCycle, IntlSettings};
 
+static REPORTER: std::sync::OnceLock<Box<dyn Fn(&str) + Send + Sync>> = std::sync::OnceLock::new();
+
+/// Sets where problems with the app's data blob are reported, such as the
+/// host's device log; the `log` crate otherwise. The first call wins;
+/// returns whether this one did.
+pub fn set_reporter(report: impl Fn(&str) + Send + Sync + 'static) -> bool {
+    REPORTER.set(Box::new(report)).is_ok()
+}
+
+pub(crate) fn report(line: &str) {
+    match REPORTER.get() {
+        Some(report) => report(line),
+        None => log::warn!("{line}"),
+    }
+}
+
 /// The ECMA-402 abstract operations whose coercion order is observable, and
 /// the `Intl` namespace. Evaluates to a function that takes the natives.
 const BOOTSTRAP: &str = include_str!("intl.js");

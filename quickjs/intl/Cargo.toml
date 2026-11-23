@@ -23,6 +23,7 @@ icu_decimal = { version = "=2.4.0", default-features = false, features = ["alloc
 # For `PluralRulesWithRanges` (selectRange).
 icu_plurals = { version = "=2.4.0", default-features = false, features = ["serde", "unstable"] }
 fixed_decimal = { version = "0.7.3", default-features = false }
+log = "0.4"
 
 # Tests pick their engine and TLS backend through `rong`, such as
 # `--features rong/quickjs,rong/tls-ring` (or `rong/jscore`, the reference).
