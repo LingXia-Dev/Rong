@@ -104,6 +104,17 @@ pub(crate) fn check() -> Result<usize, String> {
 #[cfg(test)]
 mod tests {
     #[test]
+    fn a_second_configure_is_an_error() {
+        // The first call may race the table test's first lookup.
+        let first = crate::configure(crate::Source::System);
+        assert!(matches!(
+            first,
+            Ok(()) | Err(crate::ConfigureError::AlreadyInUse)
+        ));
+        assert!(crate::configure(crate::Source::Bundled).is_err());
+    }
+
+    #[test]
     fn shared_table_passes_on_this_host() {
         let passed = super::check().unwrap();
         eprintln!("[rong_tz] {passed} cases passed on {}", crate::source());

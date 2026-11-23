@@ -18,9 +18,10 @@
 //! | Windows | bundled (Windows has no IANA rules) |
 //!
 //! When no system database is found, the bundled copy is used (Android,
-//! HarmonyOS and Windows carry one) and one log line says so. [`configure`]
-//! lets an embedder name a path or ask for the bundled copy before first use.
-//! [`source`] reports which was chosen.
+//! HarmonyOS and Windows carry one). The choice is reported once, through
+//! the reporter set with [`set_reporter`] (the `log` crate otherwise), so it
+//! is visible on devices. [`configure`] lets an embedder name a path or ask
+//! for the bundled copy; [`source`] reports which database is in use.
 
 use jiff::Timestamp;
 use jiff::civil::DateTime;
@@ -81,15 +82,55 @@ struct Database {
 
 static CONFIGURED: RwLock<Option<Source>> = RwLock::new(None);
 static DATABASE: OnceLock<Database> = OnceLock::new();
+type Reporter = Box<dyn Fn(&str) + Send + Sync>;
+static REPORTER: OnceLock<Reporter> = OnceLock::new();
 
-/// Chooses the database. Takes effect only before the first lookup; returns
-/// whether it did.
-pub fn configure(source: Source) -> bool {
-    if DATABASE.get().is_some() {
-        return false;
+/// Why [`configure`] refused.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ConfigureError {
+    /// `configure` was already called; the first call stands.
+    AlreadyConfigured,
+    /// A lookup already opened the database; it cannot change afterwards.
+    AlreadyInUse,
+}
+
+impl std::fmt::Display for ConfigureError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::AlreadyConfigured => "the time zone database was already configured",
+            Self::AlreadyInUse => "the time zone database is already in use",
+        })
     }
-    *CONFIGURED.write().unwrap_or_else(|e| e.into_inner()) = Some(source);
-    true
+}
+
+impl std::error::Error for ConfigureError {}
+
+/// Chooses the database. Call it at most once, before the first lookup of
+/// any kind (including [`source`]); a second call, or a call after a lookup,
+/// returns an error and changes nothing.
+pub fn configure(source: Source) -> Result<(), ConfigureError> {
+    let mut configured = CONFIGURED.write().unwrap_or_else(|e| e.into_inner());
+    if DATABASE.get().is_some() {
+        return Err(ConfigureError::AlreadyInUse);
+    }
+    if configured.is_some() {
+        return Err(ConfigureError::AlreadyConfigured);
+    }
+    *configured = Some(source);
+    Ok(())
+}
+
+/// Sets where rong_tz's one report (which database it chose) goes, such as
+/// the host's device log. The first call wins; returns whether this one did.
+pub fn set_reporter(report: impl Fn(&str) + Send + Sync + 'static) -> bool {
+    REPORTER.set(Box::new(report)).is_ok()
+}
+
+fn report(line: &str) {
+    match REPORTER.get() {
+        Some(report) => report(line),
+        None => log::info!("{line}"),
+    }
 }
 
 /// Which database is in use, such as `"system zoneinfo /usr/share/zoneinfo"`
@@ -119,7 +160,7 @@ fn database() -> &'static Database {
             };
             Database { db, source }
         });
-        log::info!("rong_tz: time zone database: {}", database.source);
+        report(&format!("rong_tz: time zone database: {}", database.source));
         database
     })
 }
