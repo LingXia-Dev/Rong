@@ -49,8 +49,12 @@ impl IntlData {
 
     /// Declares the locale the app's blob falls back to when the host's
     /// locale is not in it, such as the app's source language; a service
-    /// uses it when the blob holds data for it. Without it, a service falls
-    /// back to the first locale the blob holds for it. Set once.
+    /// uses it when the blob holds data for it. Set once.
+    ///
+    /// Required for a blob that may lack the host's locale: without it each
+    /// constructor falls back to the first locale the blob holds for it, so
+    /// `Intl.NumberFormat` and `Intl.PluralRules` given no locale can resolve
+    /// to different ones. With the host's locale in the blob they agree.
     pub fn with_fallback_locale(self, tag: &str) -> JSResult<Self> {
         let canonical = crate::locale::canonicalize(self.canonicalizer(), tag)
             .ok_or_else(|| invalid(format!("{tag} is not a locale")))?;

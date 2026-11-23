@@ -56,7 +56,9 @@ How the tag list maps to what is exported:
 The default locale is one the blob holds: the host's locale (`IntlSettings`)
 if the blob supports it, through the same lookup as a requested locale;
 otherwise the fallback the app declares with `IntlData::with_fallback_locale`;
-otherwise the first locale the blob holds for that constructor. Each such
+otherwise the first locale the blob holds for that constructor. Declare the
+fallback whenever the blob may lack the host's locale: without it, two
+constructors given no locale can resolve to different locales. Each such
 fallback is reported once through `set_reporter`.
 
 ## Data from outside the blob
