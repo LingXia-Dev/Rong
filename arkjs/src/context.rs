@@ -452,7 +452,6 @@ impl JSContextImpl for ArkJSContext {
     }
 
     fn run_bytecode(&self, bytes: &[u8]) -> Self::Value {
-        let _scope = crate::scope::OpScope::enter(self.raw);
         if bytes.len() < 4 {
             return ArkJSValue::create_undefined(self);
         }
@@ -464,6 +463,7 @@ impl JSContextImpl for ArkJSContext {
         }
         let source_bytes = &bytes[4..4 + source_len];
         let cache_bytes = &bytes[4 + source_len..];
+        let _scope = crate::scope::OpScope::enter(self.raw);
 
         unsafe {
             let code_cstr = match CString::new(source_bytes) {

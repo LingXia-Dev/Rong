@@ -36,7 +36,6 @@ impl JSArrayBufferOps for ArkJSValue {
 
     /// Create an ArrayBuffer from an existing Vec without copying (zero-copy)
     fn from_vec(ctx: &Self::Context, vec: Vec<u8>) -> Self {
-        let _scope = crate::scope::OpScope::enter(ctx.to_raw());
         // ArkJS doesn't provide a direct zero-copy API like JavaScriptCore
         // For now, we'll copy the data using the standard API
         // In a real implementation, we might need to use external backing store
