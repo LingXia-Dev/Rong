@@ -625,6 +625,17 @@ impl ThrownValue {
             .unwrap_or("JavaScript threw a value")
     }
 
+    /// Stands in for the value where it cannot be reached: it was thrown in
+    /// another runtime, its context has closed, or it was already rethrown.
+    fn unreachable(&self) -> HostError {
+        HostError::new(E_JS_THROWN, self.describe())
+            .with_reason("thrown_value_unreachable")
+            .with_detail(
+                "the value was thrown in another runtime or in a context that has closed, \
+                 or was already rethrown; only its text is kept",
+            )
+    }
+
     /// The text of a thrown `Error` (`name: message`) or primitive, read
     /// without running script; see `ThrownReader`.
     fn summarize<V: JSObjectOps>(value: &JSValue<V>) -> Option<String> {
@@ -756,6 +767,7 @@ impl RongJSError {
             RongJSErrorKind::Host(host) => Self(RongJSErrorKind::Host(host)),
             RongJSErrorKind::Thrown(thrown) => {
                 let handle = thrown.handle;
+                let summary = thrown.summary;
                 let thrown = ctx.resolve_thrown(handle);
 
                 let mut data = BTreeMap::<String, ErrorData>::new();
@@ -785,6 +797,7 @@ impl RongJSError {
                             .and_then(|o| o.get::<_, String>("message").ok())
                     })
                     .or_else(|| thrown.and_then(|v| v.to_string_coerced().ok()))
+                    .or(summary)
                     .unwrap_or_else(|| "JavaScript threw a value".to_string());
 
                 let mut host = HostError::new(E_JS_THROWN, message);
@@ -809,9 +822,8 @@ impl RongJSError {
             RongJSErrorKind::Thrown(thrown) => {
                 let handle = thrown.handle;
                 let Some(value) = ctx.take_thrown(handle) else {
-                    let raw =
-                        ctx.create_error("Error", "Invalid thrown value handle", Some(E_INTERNAL));
-                    return ctx.as_ref().throw(raw);
+                    let obj = Self::host_error_object::<V>(&thrown.unreachable(), ctx);
+                    return ctx.as_ref().throw(obj.into_value());
                 };
                 ctx.throw(value).into_value()
             }
@@ -840,9 +852,8 @@ impl RongJSError {
             RongJSErrorKind::Thrown(thrown) => {
                 let handle = thrown.handle;
                 let Some(value) = ctx.take_thrown(handle) else {
-                    let raw =
-                        ctx.create_error("Error", "Invalid thrown value handle", Some(E_INTERNAL));
-                    return JSValue::from_raw(ctx, raw);
+                    return Self::host_error_object::<V>(&thrown.unreachable(), ctx)
+                        .into_js_value();
                 };
                 value
             }
