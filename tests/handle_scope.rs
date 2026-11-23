@@ -239,17 +239,101 @@ fn reentrant_rust_driven_calls() -> Result<(), String> {
 #[test]
 fn reentrant_rust_driven_calls_across_contexts() -> Result<(), String> {
     let rt = RongJS::runtime();
-    let a = rt.context();
-    let b = rt.context();
+    alternate(&rt.context(), &rt.context())
+}
+
+/// As above with each context in its own runtime, so on engines with one VM
+/// per runtime each level's call crosses into the other VM.
+#[test]
+fn reentrant_rust_driven_calls_across_runtimes() -> Result<(), String> {
+    let rt_a = RongJS::runtime();
+    let rt_b = RongJS::runtime();
+    alternate(&rt_a.context(), &rt_b.context())
+}
+
+fn alternate(a: &JSContext, b: &JSContext) -> Result<(), String> {
     let next_from_a: Next = Rc::default();
     let next_from_b: Next = Rc::default();
-    let step_a = install_step(&a, next_from_a.clone()).map_err(|e| describe(&a, &e))?;
-    let step_b = install_step(&b, next_from_b.clone()).map_err(|e| describe(&b, &e))?;
+    let step_a = install_step(a, next_from_a.clone()).map_err(|e| describe(a, &e))?;
+    let step_b = install_step(b, next_from_b.clone()).map_err(|e| describe(b, &e))?;
     *next_from_a.borrow_mut() = Some((step_b, b.clone()));
     *next_from_b.borrow_mut() = Some((step_a.clone(), a.clone()));
-    let result = drive(&a, &step_a);
+    let result = drive(a, &step_a);
     // Break the cycle between the two contexts' functions.
     next_from_a.borrow_mut().take();
     next_from_b.borrow_mut().take();
     result
+}
+
+const BATCH: usize = 20_000;
+const BATCH_PAYLOAD: usize = 1024;
+
+/// Used heap after collecting, from inside a native call.
+fn collected_heap(ctx: &JSContext) -> Option<usize> {
+    ctx.runtime().run_gc();
+    used_heap(ctx)
+}
+
+/// One native call, driven from Rust, makes `BATCH` objects of about 1 KB in a
+/// Rust loop, keeping none. Every operation in it is nested in the call's
+/// operation, so without a scope of its own each object's handle stays until
+/// the call returns; `JSContext::handle_scope` around each step frees it.
+#[test]
+fn handles_of_a_batch_in_one_native_call_stay_unless_scoped() -> Result<(), String> {
+    let rt = RongJS::runtime();
+    let ctx = rt.context();
+    let own = ctx.clone();
+    ctx.global()
+        .set(
+            "batch",
+            JSFunc::new(&ctx, move |scoped: bool| -> JSResult<String> {
+                let filler = "b".repeat(BATCH_PAYLOAD - 16);
+                let before = collected_heap(&own);
+                for i in 0..BATCH {
+                    let step = || -> JSResult<()> {
+                        let item = JSObject::new(&own);
+                        item.set("text", format!("{filler}{i:016}"))?;
+                        Ok(())
+                    };
+                    if scoped {
+                        own.handle_scope(step)?
+                    } else {
+                        step()?
+                    }
+                }
+                let after = collected_heap(&own);
+                Ok(match (before, after) {
+                    (Some(b), Some(a)) => a.saturating_sub(b).to_string(),
+                    _ => String::from("unknown"),
+                })
+            })
+            .map_err(|e| describe(&ctx, &e))?,
+        )
+        .map_err(|e| describe(&ctx, &e))?;
+    let growth = |scoped: bool| -> Result<Option<usize>, String> {
+        let text: String = ctx
+            .eval(Source::from_bytes(format!("batch({scoped})")))
+            .map_err(|e| describe(&ctx, &e))?;
+        Ok(text.parse().ok())
+    };
+    let unscoped = growth(false)?;
+    let scoped = growth(true)?;
+    log_line(&format!(
+        "{BATCH} objects of {BATCH_PAYLOAD} bytes in one native call: heap kept {unscoped:?} \
+         bytes unscoped, {scoped:?} with a scope per step"
+    ));
+    // Engines with handle scopes report heap sizes; the others answer None.
+    let (Some(unscoped), Some(scoped)) = (unscoped, scoped) else {
+        return Ok(());
+    };
+    if unscoped < BATCH * BATCH_PAYLOAD / 2 {
+        return Err(format!(
+            "unscoped batch kept only {unscoped} bytes: handles no longer stay until the \
+             native call returns, so this test and the docs saying they do need updating"
+        ));
+    }
+    if scoped > RETAINED_LIMIT {
+        return Err(format!("scoped batch kept {scoped} bytes"));
+    }
+    Ok(())
 }
