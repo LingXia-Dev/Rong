@@ -420,18 +420,12 @@ fn offset_minutes(zone: &str) -> Option<i32> {
 /// A part: ECMA-402's [[Type]], [[Value]] and, for ranges, [[Source]].
 pub(crate) type Part = (&'static str, String, &'static str);
 
-/// ToLocalTime: the ICU4X input for a time value, and its local hour.
-fn local_time(
-    data: &IntlData,
-    zone: &str,
-    epoch_ms: f64,
-) -> Result<
-    (
-        ZonedDateTime<Iso, icu::time::TimeZoneInfo<icu::time::zone::models::AtTime>>,
-        u8,
-    ),
-    String,
-> {
+/// The ICU4X input for one instant.
+type Input = ZonedDateTime<Iso, icu::time::TimeZoneInfo<icu::time::zone::models::AtTime>>;
+
+/// ToLocalTime: the ICU4X input for a time value, its local hour and its
+/// offset in seconds.
+fn local_time(data: &IntlData, zone: &str, epoch_ms: f64) -> Result<(Input, u8, i32), String> {
     let ms = epoch_ms as i64;
     let offset = zone_offset_seconds(zone, ms)?;
     let local = ms + i64::from(offset) * 1000;
@@ -461,6 +455,7 @@ fn local_time(
             zone: zone_info,
         },
         hour,
+        offset,
     ))
 }
 
@@ -488,7 +483,7 @@ pub(crate) fn format_to_parts(
     zone: &str,
     epoch_ms: f64,
 ) -> Result<Vec<Part>, String> {
-    let (input, hour) = local_time(data, zone, epoch_ms)?;
+    let (input, hour, _) = local_time(data, zone, epoch_ms)?;
     let mut sink = Collector::default();
     format
         .formatter
@@ -526,8 +521,14 @@ pub(crate) fn format_range_to_parts(
             }
         }
     };
-    let (start, start_hour) = local_time(data, zone, x)?;
-    let (end, end_hour) = local_time(data, zone, y)?;
+    let (start, start_hour, start_offset) = local_time(data, zone, x)?;
+    let (mut end, end_hour, end_offset) = local_time(data, zone, y)?;
+    // ICU4X compares the zone with its name timestamp, so two instants in
+    // one zone never share a range pattern; at the same offset the names are
+    // the same.
+    if start_offset == end_offset {
+        end.zone = start.zone;
+    }
     let mut sink = Collector::default();
     range
         .format(&start, &end)
@@ -680,6 +681,13 @@ impl Collector {
         let mut parts: Vec<Part> = Vec::new();
         for (at, c) in self.text.char_indices() {
             let (kind, source) = classify(at);
+            // CLDR's narrow no-break and thin spaces read as plain spaces,
+            // as JavaScriptCore and V8 write them for web compatibility.
+            let c = if c == '\u{202f}' || c == '\u{2009}' {
+                ' '
+            } else {
+                c
+            };
             match parts.last_mut() {
                 Some((k, text, s)) if *k == kind && *s == source => text.push(c),
                 _ => parts.push((kind, c.to_string(), source)),
