@@ -245,7 +245,9 @@ mod tests {
 
         let mut skipped = Vec::new();
         let db = crate::system_database(&[label], &mut skipped);
-        let db = db.unwrap_or_else(crate::bundled_or_none);
+        let db = db
+            .or_else(crate::bundled)
+            .unwrap_or_else(crate::none_database);
         assert!(!db.source.contains(label), "{}", db.source);
         let line = crate::report_line(&db, &skipped);
         assert!(
@@ -275,7 +277,7 @@ mod tests {
     use std::time::Duration;
 
     /// Opens instantly when configured, slowly for the default.
-    fn slow_default(source: Source, _: &mut Vec<String>) -> Database {
+    fn slow_default(source: Source, _: &mut Vec<String>) -> Result<Database, ConfigureError> {
         let label = match source {
             Source::System => {
                 std::thread::sleep(Duration::from_millis(300));
@@ -283,10 +285,37 @@ mod tests {
             }
             _ => "configured",
         };
-        Database {
+        Ok(Database {
             db: jiff::tz::TimeZoneDatabase::none(),
             source: label.into(),
+        })
+    }
+
+    /// A source that cannot answer fails at `configure`, and leaves the
+    /// choice open.
+    #[test]
+    fn configure_rejects_a_source_that_cannot_answer() {
+        let registry = Registry::new(crate::open_source);
+        let dir = empty_dir("configure");
+        for source in [Source::Path(dir.clone()), Source::Path(dir.join("missing"))] {
+            assert!(
+                matches!(
+                    registry.configure(source.clone()),
+                    Err(ConfigureError::Unavailable(_))
+                ),
+                "{source:?}"
+            );
         }
+        let bundled = registry.configure(Source::Bundled);
+        if cfg!(any(windows, target_os = "android", target_env = "ohos")) {
+            assert_eq!(bundled, Ok(()));
+            assert_eq!(registry.database().source, "bundled");
+        } else {
+            assert!(matches!(bundled, Err(ConfigureError::Unavailable(_))));
+            assert_eq!(registry.configure(Source::System), Ok(()));
+            assert!(crate::answers(&registry.database().db));
+        }
+        std::fs::remove_dir(&dir).ok();
     }
 
     #[test]
