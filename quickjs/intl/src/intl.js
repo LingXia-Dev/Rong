@@ -1028,18 +1028,26 @@
   }
 
   // JoinIndexedProperties with toLocaleString invoked with the arguments.
+  // Tracks active objects so cyclic arrays return '' instead of overflowing.
+  const activeArrays = [];
   function JoinIndexedProperties(o, length, locales, options) {
-    let r = '';
-    for (let k = 0; k < length; k++) {
-      if (k > 0) r += ',';
-      const next = o[$String(k)];
-      if (next !== undefined && next !== null) {
-        // Invoke: GetV, then Call with the element itself as this.
-        const method = $reflectGet(ToObject(next), 'toLocaleString', next);
-        r += ToString(call(method, next, locales, options));
+    if (call($includes, activeArrays, o)) return '';
+    call($push, activeArrays, o);
+    try {
+      let r = '';
+      for (let k = 0; k < length; k++) {
+        if (k > 0) r += ',';
+        const next = o[$String(k)];
+        if (next !== undefined && next !== null) {
+          // Invoke: GetV, then Call with the element itself as this.
+          const method = $reflectGet(ToObject(next), 'toLocaleString', next);
+          r += ToString(call(method, next, locales, options));
+        }
       }
+      return r;
+    } finally {
+      activeArrays.length--;
     }
-    return r;
   }
 
   // Date's toLocale*String with CreateDateTimeFormat's required and defaults.

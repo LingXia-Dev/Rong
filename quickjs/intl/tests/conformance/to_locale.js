@@ -26,17 +26,21 @@ const VALUES = [
   ['sup-date.prototype.tolocalestring', () => new Date(AT).toLocaleString('en', UTC), '1/5/2026, 1:04:05 PM'],
   ['sup-date.prototype.tolocaledatestring', () => new Date(AT).toLocaleDateString('en', UTC), '1/5/2026'],
   ['sup-date.prototype.tolocaletimestring', () => new Date(AT).toLocaleTimeString('en', UTC), '1:04:05 PM'],
-  ['sup-date.prototype.tolocalestring', () => new Date(AT).toLocaleString('de', UTC), '5.1.2026, 13:04:05'],
-  ['sup-date.prototype.tolocaledatestring', () => new Date(AT).toLocaleDateString('ja', UTC), '2026/1/5'],
+  ['sup-date.prototype.tolocalestring', () => new Date(AT).toLocaleString('de', UTC), '5.1.2026, 13:04:05',
+    [[{ source: 'icu4x' }, '05.01.2026, 13:04:05', 'ICU4X YMD short pattern for de zero-pads day and month']]],
+  ['sup-date.prototype.tolocaledatestring', () => new Date(AT).toLocaleDateString('ja', UTC), '2026/1/5',
+    [[{ source: 'icu4x' }, '2026/01/05', 'ICU4X YMD short pattern for ja zero-pads month and day']]],
   ['sup-date.prototype.tolocaletimestring', () => new Date(AT).toLocaleTimeString('ko', UTC), '\uc624\ud6c4 1:04:05'],
   ['sup-date.prototype.tolocaledatestring', () => new Date(AT).toLocaleDateString('en', { timeZone: 'UTC', hour: 'numeric' }), '1/5/2026, 1 PM'],
-  ['sup-date.prototype.tolocaletimestring', () => new Date(AT).toLocaleTimeString('en', { timeZone: 'UTC', year: 'numeric' }), '2026, 1:04:05 PM'],
+  ['sup-date.prototype.tolocaletimestring', () => new Date(AT).toLocaleTimeString('en', { timeZone: 'UTC', year: 'numeric' }), '2026, 1:04:05 PM',
+    [[{ source: 'icu4x' }, 'Jan 5, 2026, 1:04:05 PM', 'ICU4X promotes year+time without month/day to YMD+time']]],
   ['sup-number.prototype.tolocalestring', () => (1234.5).toLocaleString('de'), '1.234,5'],
   ['sup-number.prototype.tolocalestring', () => (-0).toLocaleString('en'), '-0'],
   ['sup-number.prototype.tolocalestring', () => (0.256).toLocaleString('en', { style: 'percent' }), '26%'],
   ['sup-bigint.prototype.tolocalestring', () => (12345678901234567890n).toLocaleString('en'), '12,345,678,901,234,567,890'],
   ['sup-bigint.prototype.tolocalestring', () => (-(10n ** 30n)).toLocaleString('en', { useGrouping: false }), '-1' + '0'.repeat(30)],
-  ['sup-array.prototype.tolocalestring', () => [1234, new Date(AT), null, undefined, 5n].toLocaleString('de', UTC), '1.234,5.1.2026, 13:04:05,,,5'],
+  ['sup-array.prototype.tolocalestring', () => [1234, new Date(AT), null, undefined, 5n].toLocaleString('de', UTC), '1.234,5.1.2026, 13:04:05,,,5',
+    [[{ source: 'icu4x' }, '1.234,05.01.2026, 13:04:05,,,5', 'ICU4X YMD short pattern for de zero-pads day and month']]],
   ['sup-array.prototype.tolocalestring', () => new Float64Array([1234.5, -0]).toLocaleString('fr'), '1\u202f234,5,-0'],
   ['sup-string.prototype.tolocalelowercase', () => 'I'.toLocaleLowerCase('tr'), '\u0131'],
   ['sup-string.prototype.tolocaleuppercase', () => 'i'.toLocaleUpperCase('tr'), '\u0130'],
@@ -46,10 +50,10 @@ const VALUES = [
   ['sup-string.prototype.tolocaleuppercase', () => 'i'.toLocaleUpperCase(['en', 'tr']), 'I'],
   ['sup-string.prototype.tolocalelowercase', () => 'I'.toLocaleLowerCase('tr-u-co-search'), '\u0131'],
 ];
-VALUES.forEach(([section, run, want], i) => {
-  test(section, 'value ' + i + ': ' + String(run).replace(/^\(\) => /, ''), () => {
+VALUES.forEach(([section, run, want, variants], i) => {
+  dataTest(section, 'value ' + i + ': ' + String(run).replace(/^\(\) => /, ''), want, variants, (expected) => {
     // V8 and JavaScriptCore write a space where CLDR has U+202F before AM/PM.
-    assert.sameValue(section.startsWith('sup-date') ? run().replace(/\u202f/g, ' ') : run(), want);
+    assert.sameValue(section.startsWith('sup-date') ? run().replace(/\u202f/g, ' ') : run(), expected);
   });
 });
 
