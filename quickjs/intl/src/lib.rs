@@ -514,7 +514,7 @@ fn available(data: &IntlData, service: &str, tag: &str) -> bool {
 /// The locales with Gregorian date patterns, the base every calendar's
 /// formatting needs.
 fn date_time_locales(data: &IntlData) -> Vec<String> {
-    data.locales_any::<icu::datetime::provider::DatetimePatternsDateGregorianV1>()
+    data.locales_any::<icu::datetime::provider::semantic_skeletons::DatetimePatternsDateGregorianV1>()
 }
 
 /// [[LocaleData]] for `ca`, `nu` and `hc`.
@@ -550,7 +550,8 @@ impl locale::LocaleData for DateTimeLocaleData<'_> {
 /// The locale's preferred calendar as ECMA-402 names it; gregory without
 /// the blob's calendar preferences.
 fn default_calendar(data: &IntlData, locale: &str) -> String {
-    use icu::calendar::{AnyCalendarKind, CalendarPreferences};
+    use icu::calendar::AnyCalendarKind;
+    use icu::calendar::preferences::CalendarPreferences;
     let Ok(parsed) = locale.parse::<icu::locale::Locale>() else {
         return String::from("gregory");
     };

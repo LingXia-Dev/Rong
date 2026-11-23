@@ -10,7 +10,7 @@ use icu::datetime::fieldbag::DateTimeFieldBag;
 use icu::datetime::fieldbag::field;
 use icu::datetime::fieldsets::builder::{DateFields, FieldSetBuilder, ZoneStyle};
 use icu::datetime::fieldsets::enums::CompositeFieldSet;
-use icu::datetime::options::{Length, SubsecondDigits, TimePrecision};
+use icu::datetime::options::{Length, TimePrecision};
 use icu::datetime::range::DateRangeFormatter;
 use icu::datetime::{DateTimeFormatter, DateTimeFormatterPreferences};
 use icu::time::zone::iana::IanaParserExtended;
@@ -199,7 +199,9 @@ fn field_set(request: &Request) -> Result<CompositeFieldSet, String> {
             });
         }
         if let Some(style) = request.time_style.as_deref() {
-            builder.length.get_or_insert(length(style));
+            if builder.length.is_none() {
+                builder.length = Some(length(style));
+            }
             builder.time_precision = Some(if style == "short" {
                 TimePrecision::Minute
             } else {
@@ -302,7 +304,7 @@ fn build(data: &IntlData, request: &Request) -> Result<Format, String> {
     }
     let prefs = preferences(&request.data_locale, &extensions)?;
     let field_set = field_set(request)?;
-    let formatter = DateTimeFormatter::try_new_unstable(&data.provider(), prefs, field_set.clone())
+    let formatter = DateTimeFormatter::try_new_unstable(&data.provider(), prefs.clone(), field_set)
         .map_err(|e| {
             format!(
                 "the data blob has no date and time data for {} in the {} calendar: {e}",
@@ -521,7 +523,7 @@ pub(crate) fn format_range_to_parts(
                     DateRangeFormatter::try_new_unstable(
                         &data.provider(),
                         format.prefs.clone(),
-                        format.field_set.clone(),
+                        format.field_set,
                     )
                     .map_err(|e| format!("the data blob has no date range patterns: {e}"))?,
                 );
@@ -564,7 +566,7 @@ fn zone_id(data: &IntlData, zone: &str) -> TimeZone {
 /// UTC's aliases.
 pub(crate) fn primary_zone(data: &IntlData, name: &str) -> Result<String, String> {
     let spelled = rong_quickjs_tz::canonical_zone(name).map_err(|e| e.to_string())?;
-    let canonical = IanaParserExtended::try_new_unstable(&data.provider())
+    let canonical = IanaParserExtended::<IanaParser>::try_new_unstable(&data.provider())
         .ok()
         .map(|parser| parser.as_borrowed().parse(&spelled).canonical.to_string())
         .filter(|c| c != "Etc/Unknown")
