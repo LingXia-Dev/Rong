@@ -1,5 +1,7 @@
 use icu::locale::LocaleCanonicalizer;
-use icu_provider::buf::AsDeserializingBufferProvider;
+use icu::locale::fallback::LocaleFallbacker;
+use icu_provider::buf::{AsDeserializingBufferProvider, DeserializingBufferProvider};
+use icu_provider::prelude::*;
 use icu_provider_blob::BlobDataProvider;
 use rong_core::{HostError, JSResult, RongJSError};
 use std::rc::Rc;
@@ -10,8 +12,9 @@ use std::rc::Rc;
 pub struct IntlData(Rc<Inner>);
 
 struct Inner {
-    provider: BlobDataProvider,
+    blob: BlobDataProvider,
     canonicalizer: LocaleCanonicalizer,
+    fallbacker: LocaleFallbacker,
 }
 
 impl IntlData {
@@ -28,13 +31,16 @@ impl IntlData {
         Self::new(provider)
     }
 
-    fn new(provider: BlobDataProvider) -> JSResult<Self> {
+    fn new(blob: BlobDataProvider) -> JSResult<Self> {
         let canonicalizer =
-            LocaleCanonicalizer::try_new_extended_unstable(&provider.as_deserializing())
+            LocaleCanonicalizer::try_new_extended_unstable(&blob.as_deserializing())
                 .map_err(invalid)?;
+        let fallbacker =
+            LocaleFallbacker::try_new_unstable(&blob.as_deserializing()).map_err(invalid)?;
         Ok(Self(Rc::new(Inner {
-            provider,
+            blob,
             canonicalizer,
+            fallbacker,
         })))
     }
 
@@ -42,9 +48,71 @@ impl IntlData {
         &self.0.canonicalizer
     }
 
-    #[allow(dead_code)] // Read by the constructors from phase 1 on.
-    pub(crate) fn provider(&self) -> &BlobDataProvider {
-        &self.0.provider
+    /// The blob with locale fallback, for the ICU4X constructors.
+    pub(crate) fn provider(&self) -> Provider<'_> {
+        Provider {
+            blob: &self.0.blob,
+            fallbacker: &self.0.fallbacker,
+        }
+    }
+
+    /// Whether `M` has data for `locale` itself or a locale it falls back to
+    /// short of the root: the [[AvailableLocales]] test for a service.
+    pub(crate) fn has_locale<M: DataMarker>(&self, locale: &icu::locale::Locale) -> bool
+    where
+        for<'a> DeserializingBufferProvider<'a, BlobDataProvider>: DataProvider<M>,
+    {
+        let locale = DataLocale::from(locale);
+        let request = DataRequest {
+            id: DataIdentifierBorrowed::for_locale(&locale),
+            ..Default::default()
+        };
+        DataProvider::<M>::load(&self.provider(), request)
+            .is_ok_and(|res| res.metadata.locale.is_some_and(|l| !l.is_unknown()))
+    }
+}
+
+/// The blob behind locale fallback: a request for `en-GB` is answered from
+/// `en` when the blob holds no `en-GB` of its own. The response's metadata
+/// names the locale that answered.
+pub(crate) struct Provider<'a> {
+    blob: &'a BlobDataProvider,
+    fallbacker: &'a LocaleFallbacker,
+}
+
+impl<M: DataMarker> DataProvider<M> for Provider<'_>
+where
+    for<'a> DeserializingBufferProvider<'a, BlobDataProvider>: DataProvider<M>,
+{
+    fn load(&self, req: DataRequest) -> Result<DataResponse<M>, DataError> {
+        let blob = self.blob.as_deserializing();
+        if M::INFO.is_singleton {
+            return DataProvider::<M>::load(&blob, req);
+        }
+        let mut chain = self
+            .fallbacker
+            .for_config(M::INFO.fallback_config)
+            .fallback_for(*req.id.locale);
+        loop {
+            let id = DataIdentifierBorrowed::for_marker_attributes_and_locale(
+                req.id.marker_attributes,
+                chain.get(),
+            );
+            let mut metadata = req.metadata;
+            metadata.silent = true;
+            match DataProvider::<M>::load(&blob, DataRequest { id, metadata }) {
+                Ok(mut response) => {
+                    response.metadata.locale = Some(*chain.get());
+                    return Ok(response);
+                }
+                Err(e) if e.kind == DataErrorKind::IdentifierNotFound => {}
+                Err(e) => return Err(e.with_req(M::INFO, req)),
+            }
+            if chain.get().is_unknown() {
+                return Err(DataErrorKind::IdentifierNotFound.with_req(M::INFO, req));
+            }
+            chain.step();
+        }
     }
 }
 

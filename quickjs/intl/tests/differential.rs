@@ -7,7 +7,7 @@
 use rong_test::*;
 use std::io::Write;
 
-const BLOB: &[u8] = include_bytes!("data/locale-services.postcard");
+const BLOB: &[u8] = include_bytes!("data/intl-test.postcard");
 
 const RUN: &str = r#"
 (cases) => cases.map(([expr, expect, note]) => {
@@ -41,20 +41,26 @@ fn locale_cases_match_on_every_engine() -> Result<(), String> {
         )
     });
 
-    let cases: JSArray = JSArray::from_object(
-        JSObject::from_json_string(&ctx, include_str!("cases/locales.json"))
-            .map_err(|e| e.to_string())?,
-    )
-    .ok_or("cases are not an array")?;
     let run: JSFunc = ctx
         .eval(Source::from_bytes(RUN))
         .map_err(|e| e.to_string())?;
-    let results: Vec<Vec<String>> = run.call(None, (cases,)).map_err(|e| e.to_string())?;
+    let mut results: Vec<Vec<String>> = Vec::new();
+    for table in [
+        include_str!("cases/locales.json"),
+        include_str!("cases/plurals.json"),
+    ] {
+        let cases: JSArray = JSArray::from_object(
+            JSObject::from_json_string(&ctx, table).map_err(|e| e.to_string())?,
+        )
+        .ok_or("cases are not an array")?;
+        let rows: Vec<Vec<String>> = run.call(None, (cases,)).map_err(|e| e.to_string())?;
+        results.extend(rows);
+    }
     let mut failed = 0;
     for row in &results {
         let (expr, got, expect, note) = (&row[0], &row[1], &row[2], &row[3]);
-        // A case marked as data-dependent is reported, not failed: its answer
-        // follows the engine's CLDR version.
+        // A case with a note is reported, not failed: its answer follows the
+        // engine's CLDR version, or a feature newer than the reference engine.
         let verdict = if got == expect {
             "ok"
         } else if !note.is_empty() {

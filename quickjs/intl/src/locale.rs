@@ -285,6 +285,15 @@ pub(crate) trait LocaleData {
     fn values(&self, locale: &str, key: &str) -> Vec<String>;
 }
 
+/// The locale data of a service without relevant extension keys.
+pub(crate) struct NoKeys;
+
+impl LocaleData for NoKeys {
+    fn values(&self, _locale: &str, _key: &str) -> Vec<String> {
+        Vec::new()
+    }
+}
+
 /// ECMA-402 ResolveLocale's result: the locale with the keywords that took
 /// effect, and the value of each relevant key.
 #[derive(Debug, PartialEq, Eq)]
@@ -547,7 +556,7 @@ mod tests {
     #[test]
     fn resolve_locale_takes_supported_keywords_and_options() {
         let data = crate::IntlData::try_from_static_blob(include_bytes!(
-            "../tests/data/locale-services.postcard"
+            "../tests/data/intl-test.postcard"
         ))
         .unwrap();
         let c = data.canonicalizer();

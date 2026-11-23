@@ -6,7 +6,7 @@ use rong::JSEngine;
 use rong::Source;
 use rong::quickjs::{RongJS, intl};
 
-const BLOB: &[u8] = include_bytes!("../quickjs/intl/tests/data/locale-services.postcard");
+const BLOB: &[u8] = include_bytes!("../quickjs/intl/tests/data/intl-test.postcard");
 
 #[test]
 fn quickjs_gets_intl_only_once_configured() {
