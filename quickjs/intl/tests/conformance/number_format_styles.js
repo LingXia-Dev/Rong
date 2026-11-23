@@ -75,8 +75,13 @@ test('sec-partitionnumberpattern', 'notations at the edges', () => {
   assert.sameValue(f({ notation: 'compact' }, -0.5), '-0.5');
   assert.sameValue(f({ notation: 'scientific' }, 5e-324), '5E-324', 'Number::toString gives the digits');
   assert.sameValue(f({ notation: 'scientific' }, 10n ** 400n), '1E400', 'a BigInt beyond the Number range');
-  assert.sameValue(f({ notation: 'scientific' }, '1.5e-400'), '0E0', 'RoundMVResult');
 });
+
+only('rong', 'the reference keeps a string\'s exact value past the Number range', 'sec-tointlmathematicalvalue',
+  'RoundMVResult under scientific notation', () => {
+    assert.sameValue(new NFS('en', { notation: 'scientific' }).format('1.5e-400'), '0E0');
+    assert.sameValue(new NFS('en', { notation: 'scientific' }).format('1.5e400'), '\u221e');
+  });
 
 const NF_STYLES = [
   ["en", {style: 'currency', currency: 'EUR'}, ["-\u20ac1,234.50", "\u20ac0.00", "\u20ac1.00", "\u20ac2.00", "\u20ac1,500,000.00"]],
