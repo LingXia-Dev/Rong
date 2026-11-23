@@ -18,6 +18,7 @@ QuickJS and none of this code or data.
 | `quickjs-intl` | `Intl` on QuickJS; the rows below are what each part adds | | | | | |
 | (base) | locale services: canonicalization, fallback, `getCanonicalLocales`, the data blob reader | 116 KB (54 KB gzip) | 97 / 80 KB (48 / 47 KB gzip) | 106 KB (52 KB gzip) | not measured | 104 KB (52 KB gzip) |
 | (`PluralRules`) | plural rules and ranges, ECMA-402 rounding on exact decimals, compact exponents | 124 KB (66 KB gzip) | 97 / 112 KB (62 / 61 KB gzip) | 114 KB (65 KB gzip) | not measured | 117 KB (63 KB gzip) |
+| (`NumberFormat`, decimal and percent) | the formatting layer, `icu_experimental` percent data, the CLDR number table (about 21 KB of this, from its layout: 389 entries, 68 value rows) | 120 KB (42 KB gzip) | 81 / 96 KB (36 / 35 KB gzip) | 112 KB (38 KB gzip) | not measured | 97 KB (39 KB gzip) |
 | (part of `quickjs-intl`, from `DateTimeFormat` on) | time zone code; bundled zone data only where the platform may lack a system database | 256 KB | 484 / 480 KB | 511 KB, incl. 207 KB data | not measured; about Android | 581 KB, incl. 207 KB data |
 | `quickjs-intl-collator` (planned, with `Collator`) | `Collator` code; its data is a separate optional blob (about 585 KB at root) | to be measured | | | | |
 
