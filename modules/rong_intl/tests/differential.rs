@@ -30,24 +30,37 @@ fn locale_cases_match_on_every_engine() -> Result<(), String> {
     rong_intl::configure(&ctx, data, rong_intl::IntlSettings::default());
     rong_intl::init(&ctx).map_err(|e| e.to_string())?;
     let native: bool = ctx
-        .eval(Source::from_bytes("typeof Intl.DateTimeFormat === 'function'"))
+        .eval(Source::from_bytes(
+            "typeof Intl.DateTimeFormat === 'function'",
+        ))
         .map_err(|e| e.to_string())?;
     log(&if native {
         String::from("answers from the engine's own Intl")
     } else {
-        format!("answers from rong_intl on ICU4X {}", rong_intl::ICU4X_VERSION)
+        format!(
+            "answers from rong_intl on ICU4X {}",
+            rong_intl::ICU4X_VERSION
+        )
     });
 
     let cases: JSArray = JSArray::from_object(
-        JSObject::from_json_string(&ctx, include_str!("cases/locales.json")).map_err(|e| e.to_string())?,
+        JSObject::from_json_string(&ctx, include_str!("cases/locales.json"))
+            .map_err(|e| e.to_string())?,
     )
     .ok_or("cases are not an array")?;
-    let run: JSFunc = ctx.eval(Source::from_bytes(RUN)).map_err(|e| e.to_string())?;
+    let run: JSFunc = ctx
+        .eval(Source::from_bytes(RUN))
+        .map_err(|e| e.to_string())?;
     let results: Vec<Vec<String>> = run.call(None, (cases,)).map_err(|e| e.to_string())?;
     let mut failed = 0;
     for row in &results {
         let (expr, got, expect) = (&row[0], &row[1], &row[2]);
-        let verdict = if got == expect { "ok" } else { failed += 1; "DIFF" };
+        let verdict = if got == expect {
+            "ok"
+        } else {
+            failed += 1;
+            "DIFF"
+        };
         log(&format!("{verdict} | {expr} | got {got} | want {expect}"));
     }
     if failed > 0 {

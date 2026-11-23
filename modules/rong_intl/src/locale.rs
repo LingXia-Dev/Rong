@@ -251,7 +251,11 @@ pub(crate) fn resolve_locale(
             }
         }
         if let Some((_, Some(option))) = options.iter().find(|(k, _)| *k == key) {
-            let option = if option.is_empty() { "true" } else { option.as_str() };
+            let option = if option.is_empty() {
+                "true"
+            } else {
+                option.as_str()
+            };
             if value.as_deref() != Some(option) && key_data.iter().any(|v| v == option) {
                 value = Some(option.to_string());
                 supported_keyword = None;
@@ -300,7 +304,12 @@ fn insert_unicode_extension(
         .into_iter()
         .find(|(s, _, _)| *s == b'x')
         .map_or(locale.len(), |(_, start, _)| start);
-    let tag = format!("{}{}{}", &locale[..insert_at], extension, &locale[insert_at..]);
+    let tag = format!(
+        "{}{}{}",
+        &locale[..insert_at],
+        extension,
+        &locale[insert_at..]
+    );
     canonicalize(canonicalizer, &tag).unwrap_or(tag)
 }
 
@@ -314,12 +323,27 @@ mod tests {
 
     #[test]
     fn structural_validity() {
-        for tag in ["en", "en-US", "de-1996", "sl-rozaj-biske", "en-u-ca-gregory", "und-x-private"] {
+        for tag in [
+            "en",
+            "en-US",
+            "de-1996",
+            "sl-rozaj-biske",
+            "en-u-ca-gregory",
+            "und-x-private",
+        ] {
             assert!(is_structurally_valid(tag), "{tag}");
         }
         for tag in [
-            "", "en_US", "root", "Latn-DE", "i-klingon", "x-private", "de-gregory-gregory",
-            "de-u-ca-gregory-u-nu-latn", "en-a-bar-a-baz", "é",
+            "",
+            "en_US",
+            "root",
+            "Latn-DE",
+            "i-klingon",
+            "x-private",
+            "de-gregory-gregory",
+            "de-u-ca-gregory-u-nu-latn",
+            "en-a-bar-a-baz",
+            "é",
         ] {
             assert!(!is_structurally_valid(tag), "{tag}");
         }
@@ -329,9 +353,18 @@ mod tests {
 
     #[test]
     fn extensions_split_at_singletons() {
-        assert_eq!(remove_unicode_extension("de-u-co-phonebk-x-private"), "de-x-private");
-        assert_eq!(remove_unicode_extension("en-a-foo-u-ca-gregory-z-bar"), "en-a-foo-z-bar");
-        assert_eq!(unicode_extension("en-a-foo-u-ca-gregory-z-bar"), Some("-u-ca-gregory"));
+        assert_eq!(
+            remove_unicode_extension("de-u-co-phonebk-x-private"),
+            "de-x-private"
+        );
+        assert_eq!(
+            remove_unicode_extension("en-a-foo-u-ca-gregory-z-bar"),
+            "en-a-foo-z-bar"
+        );
+        assert_eq!(
+            unicode_extension("en-a-foo-u-ca-gregory-z-bar"),
+            Some("-u-ca-gregory")
+        );
         assert_eq!(unicode_extension("en-x-u-ca"), None);
         assert_eq!(remove_unicode_extension("en-US"), "en-US");
     }
@@ -339,18 +372,31 @@ mod tests {
     #[test]
     fn best_available_drops_subtags_from_the_end() {
         let available = set(&["zh", "de-CH"]);
-        assert_eq!(best_available_locale(&available, "zh-Hant-TW"), Some("zh".into()));
-        assert_eq!(best_available_locale(&available, "de-CH-1996"), Some("de-CH".into()));
+        assert_eq!(
+            best_available_locale(&available, "zh-Hant-TW"),
+            Some("zh".into())
+        );
+        assert_eq!(
+            best_available_locale(&available, "de-CH-1996"),
+            Some("de-CH".into())
+        );
         assert_eq!(best_available_locale(&available, "fr-FR"), None);
         // A singleton is dropped with the subtag after it.
         let available = set(&["en"]);
-        assert_eq!(best_available_locale(&available, "en-a-foo"), Some("en".into()));
+        assert_eq!(
+            best_available_locale(&available, "en-a-foo"),
+            Some("en".into())
+        );
     }
 
     #[test]
     fn lookup_keeps_the_extension_of_the_request_it_matched() {
         let available = set(&["en", "he"]);
-        let requested = vec!["fr".to_string(), "he-IL-u-nu-hebr".to_string(), "en".to_string()];
+        let requested = vec![
+            "fr".to_string(),
+            "he-IL-u-nu-hebr".to_string(),
+            "en".to_string(),
+        ];
         assert_eq!(
             lookup_matcher(&available, &requested, "en"),
             Matched {
@@ -358,7 +404,10 @@ mod tests {
                 extension: Some("-u-nu-hebr".into())
             }
         );
-        assert_eq!(lookup_matcher(&available, &["fr".into()], "en").locale, "en");
+        assert_eq!(
+            lookup_matcher(&available, &["fr".into()], "en").locale,
+            "en"
+        );
         assert_eq!(
             supported_locales(&available, &requested),
             vec!["he-IL-u-nu-hebr".to_string(), "en".to_string()]
@@ -367,7 +416,8 @@ mod tests {
 
     #[test]
     fn extension_components_keep_the_first_of_a_key() {
-        let (attributes, keywords) = unicode_extension_components("-u-attr-ca-gregory-kn-ca-buddhist-co");
+        let (attributes, keywords) =
+            unicode_extension_components("-u-attr-ca-gregory-kn-ca-buddhist-co");
         assert_eq!(attributes, vec!["attr".to_string()]);
         assert_eq!(
             keywords,
