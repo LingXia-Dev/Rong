@@ -65,7 +65,6 @@ pub(crate) struct Format {
     range: RefCell<Option<Rc<DateRangeFormatter<CompositeFieldSet>>>>,
     /// The pattern's fields as resolvedOptions reports them.
     pub fields: Vec<(&'static str, String)>,
-    pub has_hour: bool,
     /// ICU4X has no h24: the pattern is h23's and hour 0 reads 24.
     hour_24: bool,
 }
@@ -304,7 +303,7 @@ fn build(data: &IntlData, request: &Request) -> Result<Format, String> {
     }
     let prefs = preferences(&request.data_locale, &extensions)?;
     let field_set = field_set(request)?;
-    let formatter = DateTimeFormatter::try_new_unstable(&data.provider(), prefs.clone(), field_set)
+    let formatter = DateTimeFormatter::try_new_unstable(&data.provider(), prefs, field_set)
         .map_err(|e| {
             format!(
                 "the data blob has no date and time data for {} in the {} calendar: {e}",
@@ -314,22 +313,20 @@ fn build(data: &IntlData, request: &Request) -> Result<Format, String> {
     // The pattern does not depend on the instant for these field sets.
     let sample = zoned_utc(Time::try_new(0, 0, 0, 0).map_err(|e| e.to_string())?);
     let pattern = formatter.format(&sample).pattern().to_string();
-    let (fields, has_hour) = pattern_fields(&pattern);
+    let fields = pattern_fields(&pattern);
     Ok(Format {
         formatter,
         prefs,
         field_set,
         range: RefCell::new(None),
         fields,
-        has_hour,
         hour_24,
     })
 }
 
 /// The ECMA-402 component values of a UTS 35 pattern's fields.
-fn pattern_fields(pattern: &str) -> (Vec<(&'static str, String)>, bool) {
+fn pattern_fields(pattern: &str) -> Vec<(&'static str, String)> {
     let mut fields = Vec::new();
-    let mut has_hour = false;
     let mut chars = pattern.chars().peekable();
     let mut quoted = false;
     while let Some(c) = chars.next() {
@@ -369,10 +366,7 @@ fn pattern_fields(pattern: &str) -> (Vec<(&'static str, String)>, bool) {
             'E' => ("weekday", text(n).into()),
             'c' | 'e' if n >= 3 => ("weekday", text(n).into()),
             'B' => ("dayPeriod", text(n).into()),
-            'h' | 'H' | 'K' | 'k' => {
-                has_hour = true;
-                ("hour", digits(n).into())
-            }
+            'h' | 'H' | 'K' | 'k' => ("hour", digits(n).into()),
             'm' => ("minute", digits(n).into()),
             's' => ("second", digits(n).into()),
             'S' => ("fractionalSecondDigits", n.min(3).to_string()),
@@ -396,7 +390,7 @@ fn pattern_fields(pattern: &str) -> (Vec<(&'static str, String)>, bool) {
             fields.push((key, value));
         }
     }
-    (fields, has_hour)
+    fields
 }
 
 /// A time zone as the bootstrap resolved it: an IANA name, or an offset
@@ -522,7 +516,7 @@ pub(crate) fn format_range_to_parts(
                 let built = Rc::new(
                     DateRangeFormatter::try_new_unstable(
                         &data.provider(),
-                        format.prefs.clone(),
+                        format.prefs,
                         format.field_set,
                     )
                     .map_err(|e| format!("the data blob has no date range patterns: {e}"))?,
@@ -701,8 +695,7 @@ mod tests {
 
     #[test]
     fn pattern_fields_read_ecma_402_values() {
-        let (fields, hour) = pattern_fields("EEEE, MMMM d, y 'at' h:mm:ss a zzzz");
-        assert!(hour);
+        let fields = pattern_fields("EEEE, MMMM d, y 'at' h:mm:ss a zzzz");
         let get = |k| {
             fields
                 .iter()
@@ -715,6 +708,7 @@ mod tests {
         assert_eq!(get("year"), Some("numeric"));
         assert_eq!(get("minute"), Some("2-digit"));
         assert_eq!(get("timeZoneName"), Some("long"));
+        assert_eq!(get("hour"), Some("numeric"));
         assert_eq!(get("dayPeriod"), None);
     }
 
