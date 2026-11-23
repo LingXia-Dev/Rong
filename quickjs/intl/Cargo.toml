@@ -20,6 +20,8 @@ icu_provider = { version = "2.4", default-features = false, features = ["serde"]
 icu_provider_blob = { version = "2.4", default-features = false, features = ["alloc"] }
 # For `CompactDecimalFormatter`, which knows where a locale's compact exponents fall.
 icu_decimal = { version = "=2.4.0", default-features = false, features = ["alloc", "serde", "unstable"] }
+# For `PluralRulesWithRanges` (selectRange).
+icu_plurals = { version = "=2.4.0", default-features = false, features = ["serde", "unstable"] }
 fixed_decimal = { version = "0.7.3", default-features = false }
 
 # Tests pick their engine and TLS backend through `rong`, such as
