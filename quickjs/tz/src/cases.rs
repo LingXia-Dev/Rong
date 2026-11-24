@@ -238,6 +238,90 @@ mod tests {
         dir
     }
 
+    /// With no database a named zone is an error naming the cause, never an
+    /// offset; UTC and offset zones need none.
+    #[test]
+    fn no_database_is_an_error_not_an_offset() {
+        let none = crate::none_database();
+        assert!(!crate::answers(&none.zones));
+        let err = none.zones.get("America/New_York").unwrap_err();
+        assert_eq!(err, TzError::NoDatabase("America/New_York".into()));
+        assert!(err.to_string().contains("no time zone database"), "{err}");
+        assert!(matches!(
+            none.zones.get("Etc/UTC"),
+            Err(TzError::NoDatabase(_))
+        ));
+    }
+
+    /// The bundled copy Android and HarmonyOS read, checked on every host
+    /// against fixed instants (and against this host's own database where
+    /// it has one).
+    #[test]
+    fn the_bundled_copy_answers_the_zone_table() {
+        use jiff::tz::TimeZoneDatabase;
+        let zones = crate::Zones::Embedded(crate::embedded::Embedded::default());
+        assert!(crate::answers(&zones));
+        let at = |name: &str, ms: i64| {
+            zones
+                .get(name)
+                .unwrap()
+                .to_offset(Timestamp::from_millisecond(ms).unwrap())
+                .seconds()
+        };
+        assert_eq!(at("America/New_York", 1_705_276_800_000), -18_000);
+        assert_eq!(at("America/New_York", 1_721_001_600_000), -14_400);
+        assert_eq!(at("Australia/Sydney", 1_705_276_800_000), 39_600);
+        assert_eq!(at("Australia/Sydney", 1_721_001_600_000), 36_000);
+        assert_eq!(at("Asia/Kolkata", 1_717_243_200_000), 19_800);
+        assert_eq!(at("Asia/Kathmandu", 1_717_243_200_000), 20_700);
+        assert_eq!(at("Pacific/Chatham", 1_721_001_600_000), 45_900);
+        // Before standard time, New York kept local mean time, -4:56:02.
+        assert_eq!(at("America/New_York", -3_000_000_000_000), -17_762);
+        // The gap and the overlap of 2024 in New York, as compatible resolves them.
+        let ny = zones.get("america/new_york").unwrap();
+        assert_eq!(ny.iana_name(), Some("America/New_York"));
+        let wall = |h: i8, d: i8, m: i8| jiff::civil::date(2024, m, d).at(h, 30, 0, 0);
+        let gap = ny
+            .to_ambiguous_timestamp(wall(2, 10, 3))
+            .compatible()
+            .unwrap();
+        assert_eq!(gap.as_millisecond(), 1_710_055_800_000);
+        let overlap = ny
+            .to_ambiguous_timestamp(wall(1, 3, 11))
+            .compatible()
+            .unwrap();
+        assert_eq!(overlap.as_millisecond(), 1_730_611_800_000);
+        // Links keep their own name; unknown names are unknown.
+        assert_eq!(
+            zones.get("Asia/Calcutta").unwrap().iana_name(),
+            Some("Asia/Calcutta")
+        );
+        assert!(matches!(
+            zones.get("Mars/Olympus_Mons"),
+            Err(TzError::UnknownZone(_))
+        ));
+        // Where this host has its own database, both give the same offsets.
+        let system = TimeZoneDatabase::from_env();
+        for name in [
+            "America/New_York",
+            "Europe/London",
+            "Asia/Shanghai",
+            "Australia/Lord_Howe",
+        ] {
+            let Ok(theirs) = system.get(name) else {
+                continue;
+            };
+            for ms in [0, 1_000_000_000_000, 1_705_276_800_000, 1_721_001_600_000] {
+                let t = Timestamp::from_millisecond(ms).unwrap();
+                assert_eq!(
+                    zones.get(name).unwrap().to_offset(t),
+                    theirs.to_offset(t),
+                    "{name} at {ms}"
+                );
+            }
+        }
+    }
+
     #[test]
     fn a_source_that_cannot_answer_is_skipped_and_reported() {
         let dir = empty_dir("skip");
@@ -325,7 +409,7 @@ mod tests {
             _ => "configured",
         };
         Ok(Database {
-            db: jiff::tz::TimeZoneDatabase::none(),
+            zones: crate::Zones::None,
             source: label.into(),
         })
     }
@@ -346,13 +430,20 @@ mod tests {
             );
         }
         let bundled = registry.configure(Source::Bundled);
-        if cfg!(any(windows, target_os = "android", target_env = "ohos")) {
+        let carries = cfg!(any(
+            windows,
+            all(
+                feature = "bundled",
+                any(target_os = "android", target_env = "ohos")
+            )
+        ));
+        if carries {
             assert_eq!(bundled, Ok(()));
             assert_eq!(registry.database().source, "bundled");
         } else {
             assert!(matches!(bundled, Err(ConfigureError::Unavailable(_))));
             assert_eq!(registry.configure(Source::System), Ok(()));
-            assert!(crate::answers(&registry.database().db));
+            assert!(crate::answers(&registry.database().zones));
         }
         std::fs::remove_dir(&dir).ok();
     }

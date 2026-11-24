@@ -35,9 +35,14 @@ icu_datetime = { version = "=2.4.0", default-features = false, features = ["serd
 writeable = { version = "0.6", default-features = false }
 rong_quickjs_tz = { workspace = true }
 
+[features]
+# The tz database copy on Android and HarmonyOS (207 KB), used when the
+# system's cannot answer; see rong_quickjs_tz's `bundled`.
+bundled-tzdb = ["rong_quickjs_tz/bundled"]
+
 # Tests pick their engine and TLS backend through `rong`, such as
 # `--features rong/quickjs,rong/tls-ring` (or `rong/jscore`, the reference).
-# The crate itself is engine-generic and has no features.
+# The crate itself is engine-generic: its one feature is the tz copy above.
 [dev-dependencies]
 rong = { workspace = true }
 rong_test = { path = "../../testing/rong_test" }

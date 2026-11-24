@@ -22,6 +22,9 @@ smallvec = { workspace = true }
 default = []
 # ECMA-402 `Intl` as `rong_quickjs::intl`; off by default. Pulls in ICU4X.
 intl = ["dep:rong_quickjs_intl"]
+# With `intl`: a tz database copy on Android and HarmonyOS for when the
+# system's cannot answer (207 KB).
+intl-bundled-tzdb = ["intl", "rong_quickjs_intl?/bundled-tzdb"]
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

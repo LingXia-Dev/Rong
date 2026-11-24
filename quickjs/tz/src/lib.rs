@@ -23,8 +23,12 @@
 //! | Windows | bundled (Windows has no IANA rules) |
 //!
 //! A source counts only if it resolves `Etc/UTC` and `America/New_York`.
-//! When no system database answers, the bundled copy is used (Android,
-//! HarmonyOS and Windows carry one; Linux and Apple builds do not). The choice is reported once, through
+//! When no system database answers, the bundled copy is used: Windows always
+//! carries one; Android and HarmonyOS carry one with the `bundled` feature
+//! (207 KB; rong's `quickjs-intl` enables it, `quickjs-intl-system-tzdb` does
+//! not); Linux and Apple builds never do. With no database at all, a named
+//! zone is [`TzError::NoDatabase`], never a wrong offset; UTC and offset
+//! zones still answer. The choice is reported once, through
 //! the reporter set with [`set_reporter`] (the `log` crate otherwise), so it
 //! is visible on devices. [`configure`] lets an embedder name a path or ask
 //! for the bundled copy; [`source`] reports which database is in use.
@@ -67,6 +71,9 @@ pub enum TzError {
     /// Fields that are not a date and time, or a time outside the range
     /// the database covers.
     OutOfRange,
+    /// A named zone, in a process with no usable tz database: the system
+    /// has none that answers and this build bundles none.
+    NoDatabase(String),
 }
 
 impl std::fmt::Display for TzError {
@@ -75,6 +82,10 @@ impl std::fmt::Display for TzError {
             Self::InvalidName(name) => write!(f, "invalid time zone name: {name:?}"),
             Self::UnknownZone(name) => write!(f, "unknown time zone: {name:?}"),
             Self::OutOfRange => f.write_str("date or time out of range"),
+            Self::NoDatabase(name) => write!(
+                f,
+                "no time zone database for {name:?}: the system has none that answers and this build bundles none"
+            ),
         }
     }
 }
@@ -82,8 +93,67 @@ impl std::fmt::Display for TzError {
 impl std::error::Error for TzError {}
 
 struct Database {
-    db: TimeZoneDatabase,
+    zones: Zones,
     source: String,
+}
+
+/// Where a database's zones are read from.
+enum Zones {
+    Jiff(TimeZoneDatabase),
+    /// The bundled copy on Android and HarmonyOS, read straight from
+    /// `jiff-tzdb` (jiff bundles it there only with a feature that would
+    /// also bundle it on Linux and Apple builds).
+    #[cfg(any(
+        test,
+        all(feature = "bundled", any(target_os = "android", target_env = "ohos"))
+    ))]
+    Embedded(embedded::Embedded),
+    /// No usable database.
+    None,
+}
+
+impl Zones {
+    fn get(&self, name: &str) -> Result<TimeZone, TzError> {
+        match self {
+            Self::Jiff(db) => db.get(name).map_err(|_| TzError::UnknownZone(name.into())),
+            #[cfg(any(
+                test,
+                all(feature = "bundled", any(target_os = "android", target_env = "ohos"))
+            ))]
+            Self::Embedded(db) => db
+                .get(name)
+                .ok_or_else(|| TzError::UnknownZone(name.into())),
+            Self::None => Err(TzError::NoDatabase(name.into())),
+        }
+    }
+}
+
+#[cfg(any(
+    test,
+    all(feature = "bundled", any(target_os = "android", target_env = "ohos"))
+))]
+mod embedded {
+    use jiff::tz::TimeZone;
+    use std::collections::HashMap;
+    use std::sync::Mutex;
+
+    /// Zones parsed from `jiff-tzdb` on first use, by canonical name.
+    #[derive(Default)]
+    pub(crate) struct Embedded(Mutex<HashMap<&'static str, TimeZone>>);
+
+    impl Embedded {
+        /// Matched without regard to case; links keep their own name.
+        pub(crate) fn get(&self, name: &str) -> Option<TimeZone> {
+            let (canonical, tzif) = jiff_tzdb::get(name)?;
+            let mut zones = self.0.lock().unwrap_or_else(|e| e.into_inner());
+            if let Some(zone) = zones.get(canonical) {
+                return Some(zone.clone());
+            }
+            let zone = TimeZone::tzif(canonical, tzif).ok()?;
+            zones.insert(canonical, zone.clone());
+            Some(zone)
+        }
+    }
 }
 
 /// What `configure` and the first lookup agree on, under one lock.
@@ -221,6 +291,12 @@ pub fn source() -> &'static str {
     &database().source
 }
 
+/// Whether a database answers named zones. Without one, only UTC and
+/// offset zones do; see [`TzError::NoDatabase`].
+pub fn has_database() -> bool {
+    !matches!(database().zones, Zones::None)
+}
+
 fn database() -> &'static Database {
     REGISTRY.database()
 }
@@ -250,22 +326,26 @@ fn report_line(database: &Database, skipped: &[String]) -> String {
 
 /// A database counts only if it answers: an existing but empty directory
 /// opens without error and then fails every lookup.
-fn answers(db: &TimeZoneDatabase) -> bool {
-    db.get("Etc/UTC").is_ok() && db.get("America/New_York").is_ok()
+fn answers(zones: &Zones) -> bool {
+    zones.get("Etc/UTC").is_ok() && zones.get("America/New_York").is_ok()
 }
 
-/// The copy built into this binary: Android, HarmonyOS and Windows only.
+/// The copy built into this binary: Windows, and Android and HarmonyOS with
+/// the `bundled` feature.
 fn bundled() -> Option<Database> {
-    let db = TimeZoneDatabase::bundled();
-    answers(&db).then(|| Database {
-        db,
+    #[cfg(all(feature = "bundled", any(target_os = "android", target_env = "ohos")))]
+    let zones = Zones::Embedded(embedded::Embedded::default());
+    #[cfg(not(all(feature = "bundled", any(target_os = "android", target_env = "ohos"))))]
+    let zones = Zones::Jiff(TimeZoneDatabase::bundled());
+    answers(&zones).then(|| Database {
+        zones,
         source: String::from("bundled"),
     })
 }
 
 fn none_database() -> Database {
     Database {
-        db: TimeZoneDatabase::none(),
+        zones: Zones::None,
         source: String::from("none: no usable system database and none bundled"),
     }
 }
@@ -287,7 +367,8 @@ fn open_path(path: &std::path::Path) -> Option<Database> {
             format!("packed {label}"),
         )
     };
-    answers(&db).then_some(Database { db, source })
+    let zones = Zones::Jiff(db);
+    answers(&zones).then_some(Database { zones, source })
 }
 
 /// Places the general search does not look, tried first. On HarmonyOS the
@@ -311,7 +392,7 @@ fn system_database(first: &[&str], skipped: &mut Vec<String>) -> Option<Database
             Some(db) => {
                 return Some(Database {
                     source: format!("system {}", db.source),
-                    db: db.db,
+                    zones: db.zones,
                 });
             }
             None => skipped.push(format!("{} (cannot answer)", path.display())),
@@ -319,8 +400,8 @@ fn system_database(first: &[&str], skipped: &mut Vec<String>) -> Option<Database
     }
     // TZDIR, the usual zoneinfo directories, Android's older packed file.
     // On Windows this is already the bundled copy.
-    let db = TimeZoneDatabase::from_env();
-    if !answers(&db) {
+    let zones = Zones::Jiff(TimeZoneDatabase::from_env());
+    if !answers(&zones) {
         skipped.push(String::from("the general search (cannot answer)"));
         return None;
     }
@@ -329,7 +410,7 @@ fn system_database(first: &[&str], skipped: &mut Vec<String>) -> Option<Database
     } else {
         String::from("system (searched)")
     };
-    Some(Database { db, source })
+    Some(Database { zones, source })
 }
 
 /// An offset zone (`+05:30`, `-08`, `+0530`) as ECMA-402 accepts them: sign,
@@ -382,10 +463,7 @@ fn zone(name: &str) -> Result<TimeZone, TzError> {
     if name.eq_ignore_ascii_case("UTC") {
         return Ok(TimeZone::UTC);
     }
-    database()
-        .db
-        .get(name)
-        .map_err(|_| TzError::UnknownZone(name.into()))
+    database().zones.get(name)
 }
 
 /// The zone's canonical spelling if `name` is a zone in the database (matched
