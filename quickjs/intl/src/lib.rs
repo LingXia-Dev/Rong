@@ -16,6 +16,7 @@ mod cldr_dates;
 mod cldr_numbers;
 mod cldr_units;
 mod data;
+mod date_range;
 mod date_time_format;
 mod list_format;
 mod locale;

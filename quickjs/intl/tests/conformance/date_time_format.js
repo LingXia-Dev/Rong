@@ -523,6 +523,112 @@ test('sec-formatdatetimerangetoparts', 'sources', () => {
   assert.ok(years.some((p) => p.type === 'year' && p.source === 'endRange'));
 });
 
+// Ranges whose CLDR interval pattern writes a field in another width than
+// the date pattern (en 'long' ranges use MMM where the date uses MMMM,
+// zh-Hans 'medium' MMM where the date uses M, every 'full' range E where the
+// date uses EEEE). Every field of the range must still be one of the
+// locale's own values for that date, never a code or a placeholder.
+const RANGE_LOCALES = ['zh-Hans', 'zh-Hant', 'zh-HK', 'ja', 'ko', 'en', 'de', 'fr', 'es', 'pt', 'ar', 'he', 'ru'];
+const RANGE_PAIRS = [
+  ['days apart', Date.UTC(2026, 10, 22, 9), Date.UTC(2026, 10, 25, 9)],
+  ['months apart', Date.UTC(2026, 10, 22, 9), Date.UTC(2026, 11, 5, 9)],
+  ['years apart', Date.UTC(2026, 10, 22, 9), Date.UTC(2027, 0, 5, 9)],
+  ['hours apart', Date.UTC(2026, 10, 22, 9), Date.UTC(2026, 10, 22, 15)],
+  ['BCE', Date.UTC(-500, 2, 1, 9), Date.UTC(-500, 2, 9, 9)],
+];
+const RANGE_STYLES = [
+  { dateStyle: 'full' }, { dateStyle: 'long' }, { dateStyle: 'medium' }, { dateStyle: 'short' },
+  { timeStyle: 'medium' }, { timeStyle: 'short' }, { dateStyle: 'medium', timeStyle: 'short' },
+  { year: 'numeric', month: 'long' }, { month: 'long', day: 'numeric' }, { month: 'short', day: 'numeric', weekday: 'short' },
+];
+// Every value the locale writes for each field of the instant, in any width.
+// Formatters per locale and values per instant are built once: constructors
+// dominate the run time.
+const fieldFormatters = {};
+const fieldValueCache = {};
+function fieldValues(locale, x) {
+  const key = locale + ' ' + x;
+  if (fieldValueCache[key]) return fieldValueCache[key];
+  let formatters = fieldFormatters[locale];
+  if (!formatters) {
+    const optionSets = [];
+    // Format and stand-alone forms: a month with a day, and alone or with a
+    // year (ru 'ноября' and 'ноябрь'); a weekday alone and with a day (de
+    // 'So' and 'So.'); the date styles for their own widths ('26').
+    for (const w of ['numeric', '2-digit', 'short', 'long', 'narrow']) {
+      optionSets.push({ month: w, day: 'numeric' }, { month: w }, { year: 'numeric', month: w });
+    }
+    for (const w of ['short', 'long', 'narrow']) {
+      optionSets.push({ weekday: w }, { weekday: w, day: 'numeric' }, { era: w, year: 'numeric' },
+        { hour: 'numeric', dayPeriod: w });
+    }
+    for (const dateStyle of ['full', 'long', 'medium', 'short']) optionSets.push({ dateStyle });
+    for (const w of ['numeric', '2-digit']) {
+      optionSets.push({ year: w }, { day: w },
+        { hour: w, minute: '2-digit', second: '2-digit', hour12: true },
+        { hour: w, minute: '2-digit', second: '2-digit', hour12: false });
+    }
+    formatters = fieldFormatters[locale] = optionSets.map((o) => new DTF(locale, Object.assign({ timeZone: 'UTC' }, o)));
+  }
+  const out = {};
+  for (const f of formatters) {
+    for (const p of f.formatToParts(x)) {
+      if (p.type !== 'literal') (out[p.type] = out[p.type] || []).push(p.value);
+    }
+  }
+  return (fieldValueCache[key] = out);
+}
+for (const locale of RANGE_LOCALES) {
+  for (const style of RANGE_STYLES) {
+    test('sec-formatdatetimerange', 'every field is the locale\'s own: ' + locale + ' ' + JSON.stringify(style), () => {
+      const f = new DTF(locale, Object.assign({ timeZone: 'UTC' }, style));
+      for (const [what, a, b] of RANGE_PAIRS) {
+        const parts = f.formatRangeToParts(a, b);
+        const text = f.formatRange(a, b);
+        assert.sameValue(joinParts(parts), text, what + ': formatRangeToParts joins to formatRange');
+        assert.ok(!/M\d\d|\{[A-Za-z]\}/.test(text), what + ': no month code or placeholder in ' + show(text));
+        const values = [fieldValues(locale, a), fieldValues(locale, b)];
+        for (const p of parts) {
+          if (p.type === 'literal') continue;
+          const sides = p.source === 'startRange' ? [values[0]] : p.source === 'endRange' ? [values[1]] : values;
+          assert.ok(sides.some((v) => (v[p.type] || []).indexOf(p.value) >= 0),
+            what + ': ' + p.type + ' ' + show(p.value) + ' (' + p.source + ') in ' + show(text));
+        }
+        const fieldsDiffer = parts.some((p) => p.source !== 'shared');
+        if (!fieldsDiffer) assert.sameValue(text, f.format(a), what + ': a range within one field value is one date');
+      }
+    });
+  }
+}
+
+test('sec-formatdatetimerange', 'a range inside the format\'s precision is one date', () => {
+  for (const locale of RANGE_LOCALES) {
+    for (const dateStyle of ['full', 'long', 'medium', 'short']) {
+      const f = new DTF(locale, { dateStyle, timeZone: 'UTC' });
+      const [, a, b] = RANGE_PAIRS[3];
+      assert.sameValue(f.formatRange(a, b), f.format(a), locale + ' ' + dateStyle);
+      assert.ok(f.formatRangeToParts(a, b).every((p) => p.source === 'shared'), locale + ' ' + dateStyle + ' sources');
+    }
+  }
+});
+
+only('rong', 'the text is ICU4X\'s, from CLDR 49 interval formats; WebKit\'s ICU adjusts the interval pattern\'s field widths instead',
+  'sec-formatdatetimerange', 'ranges whose interval pattern needs other names are two dates in full', () => {
+    const range = (locale, options, a, b) => new DTF(locale, Object.assign({ timeZone: 'UTC' }, options))
+      .formatRange(a, b).replace(/[\u2009\u202f]/g, ' ');
+    const [, a, b] = RANGE_PAIRS[0];
+    const [, , c] = RANGE_PAIRS[1];
+    // Interval patterns in the date pattern's widths: ICU4X's.
+    assert.sameValue(range('en', { dateStyle: 'medium' }, a, b), 'Nov 22 \u2013 25, 2026');
+    assert.sameValue(range('zh-Hant', { dateStyle: 'medium' }, a, b), '2026\u5e7411\u670822\u65e5\u81f325\u65e5');
+    assert.sameValue(range('ja', { dateStyle: 'long' }, a, c), '2026\u5e7411\u670822\u65e5\uff5e12\u67085\u65e5');
+    // Interval patterns in other widths: both dates, joined by the locale's glue.
+    assert.sameValue(range('en', { dateStyle: 'long' }, a, b), 'November 22, 2026 \u2013 November 25, 2026');
+    assert.sameValue(range('en', { dateStyle: 'full' }, a, b), 'Sunday, November 22, 2026 \u2013 Wednesday, November 25, 2026');
+    assert.sameValue(range('zh-Hans', { dateStyle: 'medium' }, a, b), '2026\u5e7411\u670822\u65e5 \u2013 2026\u5e7411\u670825\u65e5');
+    assert.sameValue(range('ko', { dateStyle: 'long' }, a, b), '2026\ub144 11\uc6d4 22\uc77c ~ 2026\ub144 11\uc6d4 25\uc77c');
+  });
+
 test('sec-intl.datetimeformat.supportedlocalesof', 'localeMatcher', () => {
   for (const m of ['lookup', 'best fit', undefined]) {
     assert.deepEqual(DTF.supportedLocalesOf(['en-US', 'fr'], { localeMatcher: m }), ['en-US', 'fr']);

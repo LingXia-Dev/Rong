@@ -8,6 +8,7 @@ use crate::cldr_dates::{
     HOUR_CYCLES,
 };
 use crate::data::IntlData;
+use crate::date_range::{self, Watch};
 use icu::calendar::types::RataDie;
 use icu::calendar::{Date, Iso};
 use icu::datetime::fieldbag::DateTimeFieldBag;
@@ -15,11 +16,15 @@ use icu::datetime::fieldbag::field;
 use icu::datetime::fieldsets::builder::{DateFields, FieldSetBuilder, ZoneStyle};
 use icu::datetime::fieldsets::enums::CompositeFieldSet;
 use icu::datetime::options::{Length, TimePrecision};
+use icu::datetime::pattern::DateTimeNames;
+use icu::datetime::provider::pattern::GenericPatternItem;
+use icu::datetime::provider::range_patterns::DatetimePatternsRangeGlueV1;
 use icu::datetime::range::DateRangeFormatter;
 use icu::datetime::{DateTimeFormatter, DateTimeFormatterPreferences};
 use icu::time::zone::iana::IanaParserExtended;
 use icu::time::zone::{IanaParser, UtcOffset};
 use icu::time::{DateTime, Time, TimeZone, ZonedDateTime};
+use icu_provider::prelude::*;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::fmt;
@@ -66,11 +71,21 @@ pub(crate) struct Format {
     /// What a range formatter is built from, on first use.
     prefs: DateTimeFormatterPreferences,
     field_set: CompositeFieldSet,
-    range: RefCell<Option<Rc<DateRangeFormatter<CompositeFieldSet>>>>,
+    range: RefCell<Option<Rc<Range>>>,
     /// The pattern's fields as resolvedOptions reports them.
     pub fields: Vec<(&'static str, String)>,
     /// What the parts need that ICU4X cannot write.
     fixups: Fixups,
+}
+
+/// A range formatter, built on first use.
+struct Range {
+    formatter: DateRangeFormatter<CompositeFieldSet>,
+    /// False when ICU4X's range formatter would write numbers without the
+    /// decimal formatter it skipped loading (see `date_range`): both dates
+    /// are then formatted on their own and joined with `glue`.
+    usable: bool,
+    glue: Option<DataPayload<DatetimePatternsRangeGlueV1>>,
 }
 
 /// What the parts need that ICU4X cannot write.
@@ -395,13 +410,18 @@ fn build(data: &IntlData, request: &Request) -> Result<Format, String> {
     }
     let prefs = preferences(&request.data_locale, &extensions)?;
     let field_set = field_set(request)?;
-    let formatter = DateTimeFormatter::try_new_unstable(&data.provider(), prefs, field_set)
-        .map_err(|e| {
-            format!(
-                "the data blob has no date and time data for {} in the {} calendar: {e}",
-                request.data_locale, request.calendar
-            )
-        })?;
+    let watch = Watch::new(data.provider(), Vec::new());
+    let formatter = DateTimeFormatter::try_new_unstable(&watch, prefs, field_set).map_err(|e| {
+        format!(
+            "the data blob has no date and time data for {} in the {} calendar: {e}",
+            request.data_locale, request.calendar
+        )
+    })?;
+    let formatter = if watch.decimal() {
+        formatter
+    } else {
+        with_decimal_formatter(data, prefs, field_set, formatter)?
+    };
     // The pattern does not depend on the instant for these field sets.
     let sample = zoned_utc(Time::try_new(0, 0, 0, 0).map_err(|e| e.to_string())?);
     let pattern = formatter.format(&sample).pattern().to_string();
@@ -466,6 +486,25 @@ fn build(data: &IntlData, request: &Request) -> Result<Format, String> {
             day_period,
         },
     })
+}
+
+/// The formatter with a decimal formatter, which ICU4X 2.4 leaves out for
+/// some patterns whose numbers need it (pt `{year, month: 'long'}`, where
+/// one variant's year is quoted text): their numbers then fail as missing
+/// names do.
+fn with_decimal_formatter(
+    data: &IntlData,
+    prefs: DateTimeFormatterPreferences,
+    field_set: CompositeFieldSet,
+    formatter: DateTimeFormatter<CompositeFieldSet>,
+) -> Result<DateTimeFormatter<CompositeFieldSet>, String> {
+    let provider = data.provider();
+    let mut names = DateTimeNames::from_formatter(prefs, formatter);
+    // A blob without decimal data leaves the names as they were.
+    let _ = names.as_mut().load_decimal_formatter(&provider);
+    names
+        .try_into_formatter_unstable(&provider, field_set)
+        .map_err(|(e, _)| format!("the data blob cannot rebuild a date formatter: {e}"))
 }
 
 /// Whether a UTS 35 pattern has one of these field symbols outside quotes.
@@ -685,11 +724,18 @@ pub(crate) fn format_to_parts(
 ) -> Result<Vec<Part>, String> {
     let (input, _) = local_time(data, zone, epoch_ms)?;
     let mut sink = Collector::default();
-    format
-        .formatter
-        .format(&input)
+    let formatted = format.formatter.format(&input);
+    formatted
         .write_to_parts(&mut sink)
         .map_err(|_| String::from("formatting failed"))?;
+    // A field ICU4X could not write (names or digits it did not load): an
+    // error, not a month code in the text.
+    if sink.has_error() {
+        return Err(format!(
+            "the data blob cannot write every field of {:?}",
+            formatted.pattern().to_string()
+        ));
+    }
     Ok(adjust(&format.fixups, sink.parts(), input.time, input.time))
 }
 
@@ -706,14 +752,7 @@ pub(crate) fn format_range_to_parts(
         match slot.as_ref() {
             Some(range) => range.clone(),
             None => {
-                let built = Rc::new(
-                    DateRangeFormatter::try_new_unstable(
-                        &data.provider(),
-                        format.prefs,
-                        format.field_set,
-                    )
-                    .map_err(|e| format!("the data blob has no date range patterns: {e}"))?,
-                );
+                let built = Rc::new(build_range(data, format)?);
                 *slot = Some(built.clone());
                 built
             }
@@ -727,50 +766,145 @@ pub(crate) fn format_range_to_parts(
     if start_offset == end_offset {
         end.zone = start.zone;
     }
-    let mut sink = Collector::default();
-    let written = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        range.format(&start, &end).write_to_parts(&mut sink)
-    }));
-    match written {
-        Ok(Ok(())) => {
+    if range.usable {
+        let mut sink = Collector::default();
+        range
+            .formatter
+            .format(&start, &end)
+            .write_to_parts(&mut sink)
+            .map_err(|_| String::from("formatting failed"))?;
+        // A field ICU4X could not write; the checks in `build_range` leave
+        // none, and two whole dates are better than a broken one.
+        if !sink.has_error() {
             let parts = adjust(&format.fixups, sink.parts(), start.time, end.time);
-            Ok(shared_sources(parts))
-        }
-        Ok(Err(_)) => Err(String::from("formatting failed")),
-        Err(_) => {
-            // ICU4X 2.4's DateRangeFormatter panics with NamesNotLoaded(Era)
-            // when YearStyle::Auto triggers era display on BCE/era-crossing dates.
-            // Fall back to formatting each side with the single-date formatter.
-            let mut left_sink = Collector::default();
-            format
-                .formatter
-                .format(&start)
-                .write_to_parts(&mut left_sink)
-                .map_err(|_| String::from("formatting failed"))?;
-            let left = adjust(&format.fixups, left_sink.parts(), start.time, start.time);
-            let mut right_sink = Collector::default();
-            format
-                .formatter
-                .format(&end)
-                .write_to_parts(&mut right_sink)
-                .map_err(|_| String::from("formatting failed"))?;
-            let right = adjust(&format.fixups, right_sink.parts(), end.time, end.time);
-            if left
-                .iter()
-                .map(|(k, v, _)| (*k, v.as_str()))
-                .eq(right.iter().map(|(k, v, _)| (*k, v.as_str())))
-            {
-                return Ok(left.into_iter().map(|(k, v, _)| (k, v, "shared")).collect());
-            }
-            let mut parts: Vec<Part> = left
-                .into_iter()
-                .map(|(k, v, _)| (k, v, "startRange"))
-                .collect();
-            parts.push(("literal", String::from(" \u{2013} "), "shared"));
-            parts.extend(right.into_iter().map(|(k, v, _)| (k, v, "endRange")));
-            Ok(parts)
+            return Ok(shared_sources(parts));
         }
     }
+    joined_range(format, range.glue.as_ref(), &start, &end)
+}
+
+/// The range formatter, built through `Watch` with the names the date
+/// formatter's patterns load, over sample years in each of ICU4X's year
+/// variants (recent, centuries away, first millennium, BCE).
+fn build_range(data: &IntlData, format: &Format) -> Result<Range, String> {
+    let patterns: Vec<String> = [2026, 1500, 500, -500, 9000]
+        .into_iter()
+        .filter_map(sample)
+        .map(|input| format.formatter.format(&input).pattern().to_string())
+        .collect();
+    let loaded = date_range::names_of(patterns.iter().map(String::as_str));
+    let watch = Watch::new(data.provider(), loaded);
+    let formatter = DateRangeFormatter::try_new_unstable(&watch, format.prefs, format.field_set)
+        .map_err(|e| format!("the data blob has no date range patterns: {e}"))?;
+    if watch.emptied() > 0 {
+        log::debug!(
+            "rong_quickjs_intl: {} range pattern entries need names the date patterns do not load",
+            watch.emptied()
+        );
+    }
+    let locale = DatetimePatternsRangeGlueV1::INFO.make_locale(format.prefs.locale_preferences);
+    let glue = DataProvider::<DatetimePatternsRangeGlueV1>::load(
+        &data.provider(),
+        DataRequest {
+            id: DataIdentifierBorrowed::for_locale(&locale),
+            ..Default::default()
+        },
+    )
+    .ok()
+    .map(|response| response.payload);
+    Ok(Range {
+        formatter,
+        usable: watch.decimal() || !needs_digits(&patterns),
+        glue,
+    })
+}
+
+/// Whether any of the patterns writes a number.
+fn needs_digits(patterns: &[String]) -> bool {
+    patterns.iter().any(|pattern| {
+        date_range::pattern_runs(pattern)
+            .iter()
+            .any(|&(symbol, length)| match symbol {
+                'M' | 'L' | 'e' | 'c' => length <= 2,
+                _ => "yuUdDFghHkKmsSA".contains(symbol),
+            })
+    })
+}
+
+/// An instant in `year` (ISO) at noon, at UTC.
+fn sample(year: i32) -> Option<Input> {
+    let date = Date::try_new_iso(year, 1, 15).ok()?;
+    let time = Time::try_new(12, 0, 0, 0).ok()?;
+    Some(ZonedDateTime {
+        date,
+        time,
+        zone: TimeZone::UNKNOWN
+            .with_offset(Some(UtcOffset::zero()))
+            .at_date_time(DateTime { date, time }),
+    })
+}
+
+/// Each date formatted on its own, joined with the locale's range glue
+/// (`{0} – {1}`); one date when both read the same.
+fn joined_range(
+    format: &Format,
+    glue: Option<&DataPayload<DatetimePatternsRangeGlueV1>>,
+    start: &Input,
+    end: &Input,
+) -> Result<Vec<Part>, String> {
+    let side = |input: &Input| -> Result<Vec<Part>, String> {
+        let mut sink = Collector::default();
+        format
+            .formatter
+            .format(input)
+            .write_to_parts(&mut sink)
+            .map_err(|_| String::from("formatting failed"))?;
+        Ok(adjust(&format.fixups, sink.parts(), input.time, input.time))
+    };
+    let left = side(start)?;
+    let right = side(end)?;
+    if left
+        .iter()
+        .map(|(k, v, _)| (*k, v.as_str()))
+        .eq(right.iter().map(|(k, v, _)| (*k, v.as_str())))
+    {
+        return Ok(left.into_iter().map(|(k, v, _)| (k, v, "shared")).collect());
+    }
+    let items: Vec<GenericPatternItem> = match glue {
+        Some(glue) => glue.get().pattern.items.iter().collect(),
+        None => [
+            GenericPatternItem::Placeholder(0),
+            GenericPatternItem::Literal(' '),
+            GenericPatternItem::Literal('\u{2013}'),
+            GenericPatternItem::Literal(' '),
+            GenericPatternItem::Placeholder(1),
+        ]
+        .into(),
+    };
+    let mut parts: Vec<Part> = Vec::new();
+    let (mut left, mut right) = (Some(left), Some(right));
+    for item in items {
+        match item {
+            GenericPatternItem::Literal(c) => match parts.last_mut() {
+                Some(("literal", text, "shared")) => text.push(c),
+                _ => parts.push(("literal", c.to_string(), "shared")),
+            },
+            GenericPatternItem::Placeholder(0) => parts.extend(
+                left.take()
+                    .into_iter()
+                    .flatten()
+                    .map(|(k, v, _)| (k, v, "startRange")),
+            ),
+            GenericPatternItem::Placeholder(_) => parts.extend(
+                right
+                    .take()
+                    .into_iter()
+                    .flatten()
+                    .map(|(k, v, _)| (k, v, "endRange")),
+            ),
+        }
+    }
+    Ok(parts)
 }
 
 /// ICU4X's range spans take in the fields written once and the separator;
@@ -892,6 +1026,13 @@ impl PartsWrite for Collector {
 }
 
 impl Collector {
+    /// Whether ICU4X marked a field it could not write.
+    fn has_error(&self) -> bool {
+        self.spans
+            .iter()
+            .any(|(.., part, _)| *part == writeable::Part::ERROR)
+    }
+
     /// ECMA-402 parts: each run takes its outermost date-time field part
     /// (a second with a fraction splits at the decimal separator) and the
     /// range side it falls in.
