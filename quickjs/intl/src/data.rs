@@ -1,5 +1,5 @@
-use icu::locale::LocaleCanonicalizer;
 use icu::locale::fallback::LocaleFallbacker;
+use icu::locale::{LocaleCanonicalizer, LocaleExpander};
 use icu_provider::IterableDynamicDataProvider;
 use icu_provider::buf::{AsDeserializingBufferProvider, DeserializingBufferProvider};
 use icu_provider::prelude::*;
@@ -15,6 +15,7 @@ pub struct IntlData(Rc<Inner>);
 struct Inner {
     blob: BlobDataProvider,
     canonicalizer: LocaleCanonicalizer,
+    expander: LocaleExpander,
     fallbacker: LocaleFallbacker,
     fallback_locale: std::cell::OnceCell<String>,
 }
@@ -34,14 +35,29 @@ impl IntlData {
     }
 
     fn new(blob: BlobDataProvider) -> JSResult<Self> {
+        let provider = blob.as_deserializing();
+        // The blob decides: the extended likely subtags when it carries
+        // them (73 KB), else the common ones. They differ only for languages
+        // and scripts the common data has no entry for (`haw`, `ab`): their
+        // likely region, which picks the default hour cycle and the
+        // replacement for a split region (`ab-SU` is `ab-GE` with them,
+        // `ab-RU` without).
+        let expander = match LocaleExpander::try_new_extended_unstable(&provider) {
+            Ok(expander) => expander,
+            Err(e) if e.kind == DataErrorKind::MarkerNotFound => {
+                LocaleExpander::try_new_common_unstable(&provider).map_err(invalid)?
+            }
+            Err(e) => return Err(invalid(e)),
+        };
         let canonicalizer =
-            LocaleCanonicalizer::try_new_extended_unstable(&blob.as_deserializing())
+            LocaleCanonicalizer::try_new_with_expander_unstable(&provider, expander.clone())
                 .map_err(invalid)?;
         let fallbacker =
             LocaleFallbacker::try_new_unstable(&blob.as_deserializing()).map_err(invalid)?;
         Ok(Self(Rc::new(Inner {
             blob,
             canonicalizer,
+            expander,
             fallbacker,
             fallback_locale: std::cell::OnceCell::new(),
         })))
@@ -134,6 +150,11 @@ impl IntlData {
 
     pub(crate) fn canonicalizer(&self) -> &LocaleCanonicalizer {
         &self.0.canonicalizer
+    }
+
+    /// Likely subtags, extended when the blob carries them.
+    pub(crate) fn expander(&self) -> &LocaleExpander {
+        &self.0.expander
     }
 
     /// The blob with locale fallback, for the ICU4X constructors.

@@ -56,6 +56,14 @@ How the tag list maps to what is exported:
   collation data it compares in code-point order after NFC normalization and
   says so once in the log, and cannot honour `sensitivity: "base"` or
   `"accent"`.
+- `LocaleLikelySubtagsExtendedV1` (73 KB, 26 KB gzipped) is optional:
+  `--markers-for-bin` keeps it, and a blob made with an explicit `--markers`
+  list may leave it out. Without it, languages and scripts the common likely
+  subtags lack (about 7,200, among them 81 CLDR locales such as `haw`, `yi`,
+  `kab`, `dz`, `nb`) have no likely region: their default hour cycle is the
+  world's (`h23`; `haw` is `h12` with it), and a split region takes its
+  first replacement (`ab-SU` is `ab-RU`, not `ab-GE`). Every other tag
+  answers the same.
 
 The default locale is one the blob holds: the host's locale (`IntlSettings`)
 if the blob supports it, through the same lookup as a requested locale;
