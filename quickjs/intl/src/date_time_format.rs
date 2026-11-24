@@ -220,11 +220,7 @@ fn hour_cycles(data: &IntlData, locale: &str) -> [String; 3] {
         .parse::<icu::locale::LanguageIdentifier>()
         .ok()
         .and_then(|mut id| {
-            if let Ok(expander) =
-                icu::locale::LocaleExpander::try_new_extended_unstable(&data.provider())
-            {
-                let _ = expander.maximize(&mut id);
-            }
+            let _ = data.expander().maximize(&mut id);
             let region = id.region?;
             [format!("{}-{}", id.language, region), region.to_string()]
                 .into_iter()

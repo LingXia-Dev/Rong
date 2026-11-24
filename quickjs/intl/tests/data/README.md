@@ -33,3 +33,18 @@ Made with
       --locales none --format blob --out locale-services.postcard
 
 89,720 bytes. sha256 b41fd1a31fd9cffc593cf2d3eca41e00d782c459dea8b5eb1a08f73f2a6ff40e.
+
+`likely-common.postcard` and `likely-extended.postcard`: twins, equal but for
+`LocaleLikelySubtagsExtendedV1`; `likely_subtags.rs` pins what that marker
+changes. Made with
+
+    icu4x-datagen --markers LocaleAliasesV1 LocaleLikelySubtagsLanguageV1 \
+      LocaleLikelySubtagsScriptRegionV1 LocaleParentsV1 DecimalSymbolsV1 DecimalDigitsV1 \
+      DatetimePatternsDateGregorianV1 DatetimePatternsTimeV1 DatetimePatternsGlueV1 \
+      DatetimeNamesMonthGregorianV1 DatetimeNamesWeekdayV1 DatetimeNamesDayperiodV1 \
+      DatetimeNamesYearGregorianV1 CalendarWeekV1 CalendarPreferredV1 \
+      --locales en haw --format blob --out likely-common.postcard
+
+and the same with `LocaleLikelySubtagsExtendedV1` added for `likely-extended.postcard`:
+59,374 bytes (sha256 b06f8cd490d828ad2ec18e20524b73140517633d233a962ca05009d8162a0163) and
+132,500 bytes (sha256 408fc5b7348e631298430a45ee63f80daa39e96d81e862e67eda481b0905dd07).
