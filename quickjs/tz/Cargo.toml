@@ -13,11 +13,20 @@ categories.workspace = true
 documentation = "https://docs.rs/rong"
 readme = "README.md"
 
+[features]
+# A copy of the tz database (207 KB) on Android and HarmonyOS, used when the
+# system's cannot answer. Elsewhere it changes nothing: Windows always
+# carries one, Linux and Apple builds never do.
+bundled = ["dep:jiff-tzdb"]
+
 [dependencies]
 # Default features: the system tz database on Unix, a bundled copy on Windows.
 jiff = "1.0"
 log = "0.4"
 
-# No system database is guaranteed there, so carry the bundled copy.
 [target.'cfg(any(target_os = "android", target_env = "ohos"))'.dependencies]
-jiff = { version = "1.0", features = ["tzdb-bundle-always"] }
+jiff-tzdb = { version = "1.0", optional = true }
+
+[dev-dependencies]
+# The bundled copy's reader, tested on every host.
+jiff-tzdb = "1.0"

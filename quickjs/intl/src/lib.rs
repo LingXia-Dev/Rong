@@ -521,7 +521,9 @@ where
     natives.set(
         "primaryTimeZone",
         JSFunc::<E::Value>::new(ctx, move |name: String| -> JSResult<Option<String>> {
-            Ok(date_time_format::primary_zone(&state(&own)?.data, &name).ok())
+            let state = state(&own)?;
+            no_database(&name)?;
+            Ok(date_time_format::primary_zone(&state.data, &name).ok())
         })?,
     )?;
     let own = ctx.clone();
@@ -533,8 +535,16 @@ where
                 .settings
                 .get()
                 .time_zone
-                .or_else(rong_quickjs_tz::system_zone)
-                .unwrap_or_else(|| String::from("UTC"));
+                .or_else(rong_quickjs_tz::system_zone);
+            // UTC stands in for a host zone that cannot be read, never for
+            // one that cannot be answered: that would give wrong offsets.
+            let Some(name) = name else {
+                if !rong_quickjs_tz::has_database() {
+                    return Err(no_database_error("the host's time zone"));
+                }
+                return Ok(String::from("UTC"));
+            };
+            no_database(&name)?;
             Ok(date_time_format::primary_zone(&state.data, &name)
                 .unwrap_or_else(|_| String::from("UTC")))
         })?,
@@ -632,6 +642,19 @@ where
 fn state<C: JSContextImpl>(ctx: &JSContext<C>) -> JSResult<&IntlState> {
     ctx.get_service::<IntlState>()
         .ok_or_else(|| bad("Intl is not configured for this context"))
+}
+
+/// A named zone with no tz database to answer it: an error naming the
+/// cause, not `Invalid time zone`.
+fn no_database(name: &str) -> JSResult<()> {
+    match rong_quickjs_tz::canonical_zone(name) {
+        Err(rong_quickjs_tz::TzError::NoDatabase(_)) => Err(no_database_error(name)),
+        _ => Ok(()),
+    }
+}
+
+fn no_database_error(what: &str) -> rong_core::RongJSError {
+    bad(&rong_quickjs_tz::TzError::NoDatabase(what.to_string()).to_string())
 }
 
 fn bad(message: &str) -> rong_core::RongJSError {

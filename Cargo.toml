@@ -162,7 +162,12 @@ default = []
 quickjs = ["dep:rong_quickjs"]
 # ECMA-402 `Intl` for QuickJS, which has none (`rong::quickjs::intl`). Needs
 # `quickjs`; JavaScriptCore and ArkJS have their own and never carry this.
-quickjs-intl = ["rong_quickjs?/intl"]
+# On Android and HarmonyOS it carries a tz database copy (207 KB) for when the
+# system's cannot answer.
+quickjs-intl = ["quickjs-intl-system-tzdb", "rong_quickjs?/intl-bundled-tzdb"]
+# `quickjs-intl` without that copy: Android 10+ and HarmonyOS always ship a
+# database; without one, named zones throw an error naming the cause.
+quickjs-intl-system-tzdb = ["rong_quickjs?/intl"]
 jscore = ["dep:rong_jscore"]
 # Source/JSCOnly builds always enable hard interruption in `rong_jscore`.
 jscore-source = ["jscore", "rong_jscore/source"]
