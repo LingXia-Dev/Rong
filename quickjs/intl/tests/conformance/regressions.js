@@ -22,6 +22,17 @@ only('rong', 'ICU writes the bidi marks around a sign as literal parts; ICU4X\'s
       [['minusSign', '\u061c-'], ['integer', '\u0662\u0665'], ['percentSign', '\u066a\u061c']]);
   });
 
+test('regression', 'a pt year and long month keep their digits, alone and in a range', () => {
+  // ICU4X 2.4 loads no decimal formatter for this pattern (one variant quotes its year).
+  const f = new Intl.DateTimeFormat('pt', { year: 'numeric', month: 'long', timeZone: 'UTC' });
+  assert.sameValue(f.format(Date.UTC(2026, 0, 5)), 'janeiro de 2026');
+  assert.deepEqual(f.formatToParts(Date.UTC(2026, 0, 5)).map((p) => p.type), ['month', 'literal', 'year']);
+  const range = f.formatRangeToParts(Date.UTC(2026, 10, 5), Date.UTC(2026, 11, 5));
+  assert.ok(range.some((p) => p.type === 'year' && p.value === '2026'));
+  assert.ok(range.some((p) => p.type === 'month' && p.value === 'novembro' && p.source === 'startRange'));
+  assert.ok(range.some((p) => p.type === 'month' && p.value === 'dezembro' && p.source === 'endRange'));
+});
+
 test('regression', 'NaN under signDisplay takes the positive-zero pattern', () => {
   const nan = (signDisplay) => new Intl.NumberFormat('en', { signDisplay }).format(NaN);
   assert.sameValue(nan('auto'), 'NaN');

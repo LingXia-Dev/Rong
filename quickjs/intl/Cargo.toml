@@ -33,6 +33,9 @@ log = "0.4"
 # is unstable in ICU4X 2.4, which `icu` pins exactly.
 icu_datetime = { version = "=2.4.0", default-features = false, features = ["serde", "unstable"] }
 writeable = { version = "0.6", default-features = false }
+# To rebuild the range patterns ICU4X loads (date_range.rs).
+zerovec = { version = "0.11", default-features = false, features = ["alloc"] }
+zerofrom = { version = "0.1", default-features = false }
 rong_quickjs_tz = { workspace = true }
 
 # Tests pick their engine and TLS backend through `rong`, such as
