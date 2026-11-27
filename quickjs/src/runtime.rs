@@ -136,6 +136,8 @@ impl JSRuntimeImpl for QJSRuntime {
         }
     }
 
+    /// `JS_ComputeMemoryUsage` walks every object, shape and atom, so the cost
+    /// grows with the heap: sample periodically, never per frame or per call.
     fn memory_usage(&self) -> Option<MemoryUsage> {
         if self.inner.rt.is_null() {
             return None;

@@ -54,14 +54,15 @@ pub struct MemoryUsage {
     /// Non-GC / external backing memory (in bytes) tracked alongside JS
     /// objects, when reported separately by the engine.
     ///
-    /// Note: on JavaScriptCore (`extraMemorySize`), these bytes are also
-    /// included in `used_bytes` and `allocated_bytes`. QuickJS accounts
-    /// `ArrayBuffer` bytes directly inside `used_bytes` without a separate
-    /// external counter, so it reports `None`.
+    /// Whether these bytes are already part of `used_bytes` differs per
+    /// engine, so never add this field to `used_bytes` without checking:
     ///
-    /// - **QuickJS**: `None`.
-    /// - **JavaScriptCore (`source` / JSCOnly)**: `Some(extraMemorySize)`.
-    /// - **ArkJS**: `Some(JSVM_HeapStatistics::externalMemory)`.
+    /// - **QuickJS**: `None`; `ArrayBuffer` bytes are counted in `used_bytes`.
+    /// - **JavaScriptCore (`source` / JSCOnly)**: `Some(extraMemorySize)`,
+    ///   already **inside** `used_bytes` and `allocated_bytes` (`heapSize` /
+    ///   `heapCapacity`). Adding it double-counts.
+    /// - **ArkJS**: `Some(JSVM_HeapStatistics::externalMemory)`, **outside**
+    ///   `used_bytes`; the total footprint is `used_bytes + external_bytes`.
     pub external_bytes: Option<u64>,
     /// Number of live GC / JavaScript objects on the heap, when reported by the
     /// engine.
@@ -197,6 +198,9 @@ pub trait JSRuntimeImpl {
 
     /// Samples the runtime's current heap and allocator memory usage, if the
     /// underlying engine backend exposes heap statistics.
+    ///
+    /// May walk the whole heap (QuickJS is O(heap)); see
+    /// [`JSRuntime::memory_usage`].
     fn memory_usage(&self) -> Option<MemoryUsage> {
         None
     }
@@ -327,6 +331,11 @@ impl<R: JSRuntimeImpl + 'static> JSRuntime<R> {
     /// backend, and HarmonyOS ArkJS. Returns `None` when the backend has no
     /// public heap-statistics API (notably Apple's system
     /// `JavaScriptCore.framework`).
+    ///
+    /// This is a sampling call for tests, diagnostics, or a periodic gauge,
+    /// not something to run per frame or per native call: QuickJS walks every
+    /// object on the heap (O(heap)), and JSC / ArkJS gather VM-wide heap
+    /// statistics.
     pub fn memory_usage(&self) -> Option<MemoryUsage> {
         self.inner.memory_usage()
     }

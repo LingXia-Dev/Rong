@@ -45,8 +45,9 @@ pub struct JSCRuntime {
     /// null when no interrupt flag was installed.
     #[cfg(jsc_interrupt)]
     watchdog_state: Cell<*mut WatchdogState>,
-    /// Lazily created lightweight context used only when `memory_usage` is
-    /// queried while no `JSCContext` is alive in this context group.
+    /// A context created on the first `memory_usage` call and kept until the
+    /// runtime drops: JSC reports statistics through a context, and any context
+    /// of the group reads the same VM-wide heap.
     #[cfg(jsc_source)]
     stats_context: Cell<*mut jsc::OpaqueJSContext>,
 }
@@ -114,33 +115,25 @@ impl JSRuntimeImpl for JSCRuntime {
     /// no C++ struct-offset sensitivity across platforms/toolchains). Apple's
     /// system `JavaScriptCore.framework` has no public heap-statistics API
     /// (keeping default iOS/macOS builds free of private SPI symbols) and keeps
-    /// the default `None`.
+    /// the default `None`. Gathers VM-wide statistics: sample, not per call.
     #[cfg(jsc_source)]
     fn memory_usage(&self) -> Option<rong_core::MemoryUsage> {
         if self.raw.is_null() {
             return None;
         }
-        // Prefer any live user context in this group so steady-state sampling
-        // never allocates an extra global object. When no user context is
-        // currently alive (for example, between tasks on a shared worker pool),
-        // lazily create and retain at most one lightweight context for the
-        // lifetime of the runtime rather than churning dropped contexts.
-        let ctx = match crate::context::any_context_of_group(self.raw) {
-            Some(live_ctx) => live_ctx,
-            None => {
-                let cached = self.stats_context.get();
-                if !cached.is_null() {
-                    cached
-                } else {
-                    let created = unsafe {
-                        jsc::JSGlobalContextCreateInGroup(self.raw, std::ptr::null_mut())
-                    };
-                    if created.is_null() {
-                        return None;
-                    }
-                    self.stats_context.set(created);
-                    created
+        // Created on first use instead of tracking the group's live contexts:
+        // that bookkeeping would cost every context retain and release, a hot
+        // path, to serve a rare sampling call.
+        let ctx = match self.stats_context.get() {
+            cached if !cached.is_null() => cached,
+            _ => {
+                let created =
+                    unsafe { jsc::JSGlobalContextCreateInGroup(self.raw, std::ptr::null_mut()) };
+                if created.is_null() {
+                    return None;
                 }
+                self.stats_context.set(created);
+                created
             }
         };
 
@@ -154,6 +147,7 @@ impl JSRuntimeImpl for JSCRuntime {
             if let Some(cap) = read_stat_u64(ctx, stats_obj, c"heapCapacity") {
                 usage = usage.with_allocated_bytes(cap);
             }
+            // Already counted in heapSize; reported for breakdown only.
             if let Some(extra) = read_stat_u64(ctx, stats_obj, c"extraMemorySize") {
                 usage = usage.with_external_bytes(extra);
             }
@@ -215,7 +209,6 @@ impl Drop for JSCRuntime {
             }
             #[cfg(jsc_source)]
             {
-                crate::context::clear_group_contexts(self.raw);
                 let stats_ctx = self.stats_context.replace(std::ptr::null_mut());
                 if !stats_ctx.is_null() {
                     jsc::JSGlobalContextRelease(stats_ctx);
