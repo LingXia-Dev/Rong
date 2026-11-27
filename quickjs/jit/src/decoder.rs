@@ -12,6 +12,7 @@ pub enum RejectReason {
     EmptyBytecode,
     TruncatedBytecode,
     InvalidBranchTarget,
+    InvalidOperandIndex,
     StackMismatch,
     StackOverflow,
     UnsupportedOpcode(u8),
@@ -114,7 +115,9 @@ pub enum Op {
 
     // Calls & returns
     Call(u16),
+    TailCall(u16),
     CallMethod(u16),
+    TailCallMethod(u16),
     Return,
     ReturnUndef,
 }
@@ -180,7 +183,7 @@ fn branch_target(insn_pc: usize, diff: isize, len: usize) -> Result<usize, Rejec
 
 impl Op {
     /// Returns `(pop_count, push_count)` for operand stack depth verification.
-    pub fn stack_effect(self) -> (u16, u16) {
+    pub fn stack_effect(self) -> (u32, u32) {
         match self {
             Op::Nop | Op::SetLocUninitialized(_) | Op::IncLoc(_) | Op::DecLoc(_) | Op::Goto(_) => {
                 (0, 0)
@@ -252,8 +255,10 @@ impl Op {
             | Op::Neq
             | Op::StrictEq
             | Op::StrictNeq => (2, 1),
-            Op::Call(argc) => (1 + argc, 1),
-            Op::CallMethod(argc) => (2 + argc, 1),
+            Op::Call(argc) => (1 + argc as u32, 1),
+            Op::TailCall(argc) => (1 + argc as u32, 0),
+            Op::CallMethod(argc) => (2 + argc as u32, 1),
+            Op::TailCallMethod(argc) => (2 + argc as u32, 0),
         }
     }
 }
@@ -531,8 +536,14 @@ pub fn decode_bytecode(
             x if x == sys::QJSJitOp_QJS_OP_call1 as u32 => (Op::Call(1), 1),
             x if x == sys::QJSJitOp_QJS_OP_call2 as u32 => (Op::Call(2), 1),
             x if x == sys::QJSJitOp_QJS_OP_call3 as u32 => (Op::Call(3), 1),
+            x if x == sys::QJSJitOp_QJS_OP_tail_call as u32 => {
+                (Op::TailCall(read_u16(buf, pc + 1)?), 3)
+            }
             x if x == sys::QJSJitOp_QJS_OP_call_method as u32 => {
                 (Op::CallMethod(read_u16(buf, pc + 1)?), 3)
+            }
+            x if x == sys::QJSJitOp_QJS_OP_tail_call_method as u32 => {
+                (Op::TailCallMethod(read_u16(buf, pc + 1)?), 3)
             }
             x if x == sys::QJSJitOp_QJS_OP_return as u32 => (Op::Return, 1),
             x if x == sys::QJSJitOp_QJS_OP_return_undef as u32 => (Op::ReturnUndef, 1),
@@ -543,6 +554,30 @@ pub fn decode_bytecode(
         let next_pc = pc + size;
         if next_pc > len {
             return Err(RejectReason::TruncatedBytecode);
+        }
+
+        let bad_operand = match op {
+            Op::PushConst(cidx) => {
+                info.cpool_count <= 0
+                    || info.cpool.is_null()
+                    || (cidx as usize) >= (info.cpool_count as usize)
+            }
+            Op::GetLoc(i)
+            | Op::GetLocCheck(i)
+            | Op::PutLoc(i)
+            | Op::PutLocCheck(i)
+            | Op::SetLoc(i)
+            | Op::SetLocUninitialized(i)
+            | Op::IncLoc(i)
+            | Op::DecLoc(i)
+            | Op::AddLoc(i) => i >= info.var_count,
+            Op::GetLoc0Loc1 => info.var_count < 2,
+            Op::GetArg(i) | Op::PutArg(i) | Op::SetArg(i) => i >= info.arg_count,
+            Op::GetVarRef(i) | Op::PutVarRef(i) | Op::SetVarRef(i) => i >= info.closure_var_count,
+            _ => false,
+        };
+        if bad_operand {
+            return Err(RejectReason::InvalidOperandIndex);
         }
 
         let idx = insns.len();
@@ -561,7 +596,9 @@ pub fn decode_bytecode(
                     block_starts.insert(next_pc);
                 }
             }
-            Op::Return | Op::ReturnUndef if next_pc < len => {
+            Op::Return | Op::ReturnUndef | Op::TailCall(_) | Op::TailCallMethod(_)
+                if next_pc < len =>
+            {
                 block_starts.insert(next_pc);
             }
             _ => {}
@@ -584,16 +621,17 @@ pub fn decode_bytecode(
     queue.push_back(0usize);
 
     while let Some(idx) = queue.pop_front() {
-        let depth = depths[idx].unwrap();
+        let depth = depths[idx].unwrap() as u32;
         let insn = insns[idx];
         let (pop, push) = insn.op.stack_effect();
         if depth < pop {
             return Err(RejectReason::StackMismatch);
         }
-        let after = depth - pop + push;
-        if after > info.stack_size {
+        let after_u32 = depth - pop + push;
+        if after_u32 > info.stack_size as u32 {
             return Err(RejectReason::StackOverflow);
         }
+        let after = after_u32 as u16;
 
         let mut visit = |target_pc: usize| -> Result<(), RejectReason> {
             let &target_idx = pc_to_idx
@@ -618,7 +656,7 @@ pub fn decode_bytecode(
                     visit(insn.next_pc)?;
                 }
             }
-            Op::Return | Op::ReturnUndef => {}
+            Op::Return | Op::ReturnUndef | Op::TailCall(_) | Op::TailCallMethod(_) => {}
             _ => {
                 if insn.next_pc < len {
                     visit(insn.next_pc)?;
@@ -744,5 +782,94 @@ mod tests {
             decode_bytecode(&make_info(&unsupported), 1024).unwrap_err(),
             RejectReason::UnsupportedOpcode(sys::QJSJitOp_QJS_OP_catch as u8)
         );
+    }
+
+    #[test]
+    fn rejects_invalid_operand_indices_and_huge_call_argc() {
+        // get_loc 1 when var_count == 1
+        let bad_loc = [
+            sys::QJSJitOp_QJS_OP_get_loc1 as u8,
+            sys::QJSJitOp_QJS_OP_return as u8,
+        ];
+        assert_eq!(
+            decode_bytecode(&make_info(&bad_loc), 1024).unwrap_err(),
+            RejectReason::InvalidOperandIndex
+        );
+
+        // get_loc0_loc1 when var_count == 1
+        let bad_pair = [
+            sys::QJSJitOp_QJS_OP_get_loc0_loc1 as u8,
+            sys::QJSJitOp_QJS_OP_drop as u8,
+            sys::QJSJitOp_QJS_OP_return as u8,
+        ];
+        assert_eq!(
+            decode_bytecode(&make_info(&bad_pair), 1024).unwrap_err(),
+            RejectReason::InvalidOperandIndex
+        );
+
+        // get_arg 1 when arg_count == 1
+        let bad_arg = [
+            sys::QJSJitOp_QJS_OP_get_arg1 as u8,
+            sys::QJSJitOp_QJS_OP_return as u8,
+        ];
+        assert_eq!(
+            decode_bytecode(&make_info(&bad_arg), 1024).unwrap_err(),
+            RejectReason::InvalidOperandIndex
+        );
+
+        // get_var_ref 0 when closure_var_count == 0
+        let bad_ref = [
+            sys::QJSJitOp_QJS_OP_get_var_ref0 as u8,
+            sys::QJSJitOp_QJS_OP_return as u8,
+        ];
+        assert_eq!(
+            decode_bytecode(&make_info(&bad_ref), 1024).unwrap_err(),
+            RejectReason::InvalidOperandIndex
+        );
+
+        // push_const8 0 when cpool_count == 0
+        let bad_const = [
+            sys::QJSJitOp_QJS_OP_push_const8 as u8,
+            0,
+            sys::QJSJitOp_QJS_OP_return as u8,
+        ];
+        assert_eq!(
+            decode_bytecode(&make_info(&bad_const), 1024).unwrap_err(),
+            RejectReason::InvalidOperandIndex
+        );
+
+        // call(u16::MAX) must not overflow u16 stack depth math
+        let huge_call = [
+            sys::QJSJitOp_QJS_OP_push_0 as u8,
+            sys::QJSJitOp_QJS_OP_call as u8,
+            0xff,
+            0xff,
+            sys::QJSJitOp_QJS_OP_return as u8,
+        ];
+        assert_eq!(
+            decode_bytecode(&make_info(&huge_call), 1024).unwrap_err(),
+            RejectReason::StackMismatch
+        );
+    }
+
+    #[test]
+    fn decodes_tail_calls_as_terminal_cfg_edges() {
+        // if_false8(+4) -> pc=7; pc=3: push_0, tail_call(0); pc=7: push_1, return
+        let code = [
+            sys::QJSJitOp_QJS_OP_get_arg0 as u8,  // pc 0
+            sys::QJSJitOp_QJS_OP_if_false8 as u8, // pc 1..3
+            5,                                    // target = 1 + 1 + 5 = 7
+            sys::QJSJitOp_QJS_OP_push_0 as u8,    // pc 3
+            sys::QJSJitOp_QJS_OP_tail_call as u8, // pc 4..7
+            0,
+            0,
+            sys::QJSJitOp_QJS_OP_push_1 as u8, // pc 7
+            sys::QJSJitOp_QJS_OP_return as u8, // pc 8
+        ];
+        let decoded = decode_bytecode(&make_info(&code), 1024).expect("tail_call should decode");
+        assert!(decoded.block_starts.contains(&7));
+        assert_eq!(decoded.insns[3].op, Op::TailCall(0));
+        assert_eq!(decoded.insns[3].stack_before, 1);
+        assert_eq!(decoded.insns[4].stack_before, 0);
     }
 }

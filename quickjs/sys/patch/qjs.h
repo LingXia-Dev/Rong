@@ -119,6 +119,15 @@ typedef struct QJSJitBytecodeInfo {
     JSContext *realm;
 } QJSJitBytecodeInfo;
 
+typedef int (*QJSJitNativeFn)(
+    JSContext *ctx,
+    const JSValue *func_obj,
+    const JSValue *this_obj,
+    int argc,
+    const JSValue *argv,
+    JSValue *ret_out
+);
+
 void QJS_SetJitHooks(
     JSRuntime *rt,
     void *opaque,
@@ -133,12 +142,25 @@ void *QJS_JitGetBytecodeData(const void *bc);
 void QJS_JitSetBytecodeData(void *bc, void *data);
 uint32_t QJS_JitIncCallCount(void *bc);
 uint32_t QJS_JitValueSize(void);
+int QJS_JitCheckValueLayout(void);
+int QJS_JitInvoke(
+    JSContext *ctx,
+    QJSJitNativeFn fn,
+    const void *bc,
+    const JSValue *func_obj,
+    const JSValue *this_obj,
+    int argc,
+    const JSValue *argv,
+    JSValue *ret_out
+);
 
 int QJS_JitPollInterrupts(JSContext *ctx);
 int QJS_JitCheckStack(JSContext *ctx, size_t frame_bytes);
 void QJS_JitDupValue(JSContext *ctx, const JSValue *v);
 void QJS_JitFreeValue(JSContext *ctx, const JSValue *v);
 int QJS_JitToBool(JSContext *ctx, const JSValue *v);
+int QJS_JitBoxThis(JSContext *ctx, const JSValue *this_obj, JSValue *out);
+void QJS_JitThrowUninitialized(JSContext *ctx, uint32_t idx);
 int QJS_JitCall(
     JSContext *ctx,
     const JSValue *func_obj,
@@ -160,6 +182,13 @@ int QJS_JitUnarySlow(
     const JSValue *a,
     JSValue *out
 );
+int QJS_JitPostIncSlow(
+    JSContext *ctx,
+    int opcode,
+    const JSValue *a,
+    JSValue *old_out,
+    JSValue *new_out
+);
 int QJS_JitGetVar(JSContext *ctx, uint32_t atom, JSValue *out);
 int QJS_JitGetVarUndef(JSContext *ctx, uint32_t atom, JSValue *out);
 int QJS_JitPutVar(JSContext *ctx, uint32_t atom, const JSValue *val);
@@ -168,8 +197,8 @@ int QJS_JitPutField(JSContext *ctx, const JSValue *obj, uint32_t atom, const JSV
 int QJS_JitGetArrayEl(JSContext *ctx, const JSValue *obj, const JSValue *idx, JSValue *out);
 int QJS_JitPutArrayEl(JSContext *ctx, const JSValue *obj, const JSValue *idx, const JSValue *val);
 int QJS_JitGetLength(JSContext *ctx, const JSValue *obj, JSValue *out);
-int QJS_JitGetClosureVar(JSContext *ctx, const JSValue *func_obj, uint16_t idx, JSValue *out);
-int QJS_JitPutClosureVar(JSContext *ctx, const JSValue *func_obj, uint16_t idx, const JSValue *val);
+int QJS_JitGetClosureVar(JSContext *ctx, const JSValue *func_obj, uint32_t idx, JSValue *out);
+int QJS_JitPutClosureVar(JSContext *ctx, const JSValue *func_obj, uint32_t idx, const JSValue *val);
 
 #endif /* CONFIG_RONG_JIT */
 

@@ -82,9 +82,10 @@ mod engine {
     impl JitEngine {
         fn new(config: JitConfig) -> Result<Self, String> {
             let val_size = unsafe { sys::QJS_JitValueSize() };
-            if val_size != 16 {
+            let layout_ok = unsafe { sys::QJS_JitCheckValueLayout() };
+            if val_size != 16 || layout_ok == 0 {
                 return Err(format!(
-                    "unsupported QuickJS JSValue layout (size={val_size}, expected 16)"
+                    "unsupported QuickJS JSValue layout (size={val_size}, layout_ok={layout_ok})"
                 ));
             }
             let backend = CraneliftBackend::new()?;
@@ -175,7 +176,18 @@ mod engine {
             entry.realm
         };
         engine.stats.jit_calls += 1;
-        let rc = unsafe { (entry.func)(exec_ctx, func_obj, this_obj, argc, argv, ret_out) };
+        let rc = unsafe {
+            sys::QJS_JitInvoke(
+                exec_ctx,
+                Some(entry.func),
+                bc,
+                func_obj,
+                this_obj,
+                argc,
+                argv,
+                ret_out,
+            )
+        };
         if rc == 0 {
             1 // handled by JIT
         } else {

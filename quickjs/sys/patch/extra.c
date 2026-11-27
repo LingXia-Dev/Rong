@@ -124,6 +124,58 @@ uint32_t QJS_JitValueSize(void)
     return (uint32_t)sizeof(JSValue);
 }
 
+int QJS_JitCheckValueLayout(void)
+{
+#ifdef JS_NAN_BOXING
+    return 0;
+#else
+    return sizeof(JSValue) == 16 &&
+           offsetof(JSValue, u) == 0 &&
+           offsetof(JSValue, tag) == 8;
+#endif
+}
+
+int QJS_JitInvoke(
+    JSContext *ctx,
+    QJSJitNativeFn fn,
+    const void *bc,
+    const JSValue *func_obj,
+    const JSValue *this_obj,
+    int argc,
+    const JSValue *argv,
+    JSValue *ret_out
+)
+{
+    const JSFunctionBytecode *b = (const JSFunctionBytecode *)bc;
+    JSRuntime *rt = ctx->rt;
+    JSStackFrame sf;
+    int rc;
+
+    sf.prev_frame = rt->current_stack_frame;
+    sf.cur_func = *func_obj;
+    sf.arg_buf = NULL;
+    sf.var_buf = NULL;
+    sf.var_refs = NULL;
+    sf.cur_pc = b->byte_code_buf + 1;
+    sf.var_ref_count = 0;
+    sf.arg_count = 0;
+    sf.is_strict_mode = b->is_strict_mode;
+    sf.is_constructor = false;
+    sf.cur_sp = NULL;
+    sf.cur_gc_obj = NULL;
+    rt->current_stack_frame = &sf;
+
+    rc = fn(ctx, func_obj, this_obj, argc, argv, ret_out);
+
+    if (rc == 0 && JS_IsException(*ret_out)) {
+        if (needs_backtrace(rt->current_exception) || JS_IsUndefined(ctx->error_back_trace)) {
+            build_backtrace(ctx, rt->current_exception, JS_UNDEFINED, NULL, 0, 0, 0);
+        }
+    }
+    rt->current_stack_frame = sf.prev_frame;
+    return rc;
+}
+
 int QJS_JitPollInterrupts(JSContext *ctx)
 {
     return js_poll_interrupts(ctx);
@@ -152,6 +204,37 @@ void QJS_JitFreeValue(JSContext *ctx, const JSValue *v)
 int QJS_JitToBool(JSContext *ctx, const JSValue *v)
 {
     return JS_ToBool(ctx, *v);
+}
+
+int QJS_JitBoxThis(JSContext *ctx, const JSValue *this_obj, JSValue *out)
+{
+    JSValue v = *this_obj;
+    uint32_t tag = JS_VALUE_GET_TAG(v);
+    JSValue val;
+    if (tag == JS_TAG_OBJECT) {
+        val = JS_DupValue(ctx, v);
+    } else if (tag == JS_TAG_NULL || tag == JS_TAG_UNDEFINED) {
+        val = JS_DupValue(ctx, ctx->global_obj);
+    } else {
+        val = JS_ToObject(ctx, v);
+        if (JS_IsException(val)) {
+            *out = JS_EXCEPTION;
+            return 1;
+        }
+    }
+    *out = val;
+    return 0;
+}
+
+void QJS_JitThrowUninitialized(JSContext *ctx, uint32_t idx)
+{
+    JSStackFrame *sf = ctx->rt->current_stack_frame;
+    JSFunctionBytecode *b = sf ? JS_GetFunctionBytecode(sf->cur_func) : NULL;
+    if (b) {
+        JS_ThrowReferenceErrorUninitialized2(ctx, b, (int)idx, false);
+    } else {
+        JS_ThrowReferenceErrorUninitialized(ctx, JS_ATOM_NULL);
+    }
 }
 
 int QJS_JitCall(
@@ -276,6 +359,30 @@ int QJS_JitUnarySlow(
     return 0;
 }
 
+int QJS_JitPostIncSlow(
+    JSContext *ctx,
+    int opcode,
+    const JSValue *a,
+    JSValue *old_out,
+    JSValue *new_out
+)
+{
+    JSValue sp[2];
+    int ret;
+    sp[0] = JS_DupValue(ctx, *a);
+    sp[1] = JS_UNDEFINED;
+    ret = js_post_inc_slow(ctx, sp + 1, (OPCodeEnum)opcode);
+    if (ret) {
+        JS_FreeValue(ctx, sp[0]);
+        *old_out = JS_EXCEPTION;
+        *new_out = JS_EXCEPTION;
+        return 1;
+    }
+    *old_out = sp[0];
+    *new_out = sp[1];
+    return 0;
+}
+
 int QJS_JitGetVar(JSContext *ctx, uint32_t atom, JSValue *out)
 {
     JSValue val = JS_GetGlobalVar(ctx, (JSAtom)atom, true);
@@ -305,20 +412,52 @@ int QJS_JitGetField(JSContext *ctx, const JSValue *obj, uint32_t atom, JSValue *
 
 int QJS_JitPutField(JSContext *ctx, const JSValue *obj, uint32_t atom, const JSValue *val)
 {
-    int ret = JS_SetProperty(ctx, *obj, (JSAtom)atom, JS_DupValue(ctx, *val));
+    int ret = JS_SetPropertyInternal(
+        ctx,
+        *obj,
+        (JSAtom)atom,
+        JS_DupValue(ctx, *val),
+        JS_PROP_THROW_STRICT
+    );
     return ret < 0 ? 1 : 0;
 }
 
 int QJS_JitGetArrayEl(JSContext *ctx, const JSValue *obj, const JSValue *idx, JSValue *out)
 {
-    JSValue val = JS_GetPropertyValue(ctx, *obj, JS_DupValue(ctx, *idx));
+    JSValue val;
+    if (likely(JS_VALUE_GET_TAG(*obj) == JS_TAG_OBJECT &&
+               JS_VALUE_GET_TAG(*idx) == JS_TAG_INT)) {
+        JSObject *p = JS_VALUE_GET_OBJ(*obj);
+        uint32_t i = JS_VALUE_GET_INT(*idx);
+        if (likely(p->class_id == JS_CLASS_ARRAY && i < (uint32_t)p->u.array.count)) {
+            *out = js_dup(p->u.array.u.values[i]);
+            return 0;
+        }
+    }
+    val = JS_GetPropertyValue(ctx, *obj, JS_DupValue(ctx, *idx));
     *out = val;
     return JS_IsException(val) ? 1 : 0;
 }
 
 int QJS_JitPutArrayEl(JSContext *ctx, const JSValue *obj, const JSValue *idx, const JSValue *val)
 {
-    int ret = JS_SetPropertyValue(ctx, *obj, JS_DupValue(ctx, *idx), JS_DupValue(ctx, *val), JS_PROP_THROW);
+    int ret;
+    if (likely(JS_VALUE_GET_TAG(*obj) == JS_TAG_OBJECT &&
+               JS_VALUE_GET_TAG(*idx) == JS_TAG_INT)) {
+        JSObject *p = JS_VALUE_GET_OBJ(*obj);
+        uint32_t i = JS_VALUE_GET_INT(*idx);
+        if (likely(p->class_id == JS_CLASS_ARRAY && i < (uint32_t)p->u.array.count)) {
+            set_value(ctx, &p->u.array.u.values[i], JS_DupValue(ctx, *val));
+            return 0;
+        }
+    }
+    ret = JS_SetPropertyValue(
+        ctx,
+        *obj,
+        JS_DupValue(ctx, *idx),
+        JS_DupValue(ctx, *val),
+        JS_PROP_THROW_STRICT
+    );
     return ret < 0 ? 1 : 0;
 }
 
@@ -329,7 +468,7 @@ int QJS_JitGetLength(JSContext *ctx, const JSValue *obj, JSValue *out)
     return JS_IsException(val) ? 1 : 0;
 }
 
-int QJS_JitGetClosureVar(JSContext *ctx, const JSValue *func_obj, uint16_t idx, JSValue *out)
+int QJS_JitGetClosureVar(JSContext *ctx, const JSValue *func_obj, uint32_t idx, JSValue *out)
 {
     JSObject *p = JS_VALUE_GET_OBJ(*func_obj);
     JSValue val = *p->u.func.var_refs[idx]->pvalue;
@@ -342,12 +481,11 @@ int QJS_JitGetClosureVar(JSContext *ctx, const JSValue *func_obj, uint16_t idx, 
     return 0;
 }
 
-int QJS_JitPutClosureVar(JSContext *ctx, const JSValue *func_obj, uint16_t idx, const JSValue *val)
+int QJS_JitPutClosureVar(JSContext *ctx, const JSValue *func_obj, uint32_t idx, const JSValue *val)
 {
     JSObject *p = JS_VALUE_GET_OBJ(*func_obj);
     JSValue *slot = p->u.func.var_refs[idx]->pvalue;
-    JS_FreeValue(ctx, *slot);
-    *slot = JS_DupValue(ctx, *val);
+    set_value(ctx, slot, JS_DupValue(ctx, *val));
     return 0;
 }
 

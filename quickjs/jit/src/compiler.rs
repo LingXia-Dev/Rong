@@ -23,6 +23,7 @@ use cranelift_jit::{JITBuilder, JITModule};
 use cranelift_module::{FuncId, Linkage, Module};
 use rong_quickjs_sys as sys;
 use std::collections::HashMap;
+use std::mem::ManuallyDrop;
 
 /// Signature of every JIT-compiled JS function.
 ///
@@ -45,6 +46,7 @@ pub type CompiledFn = unsafe extern "C" fn(
 //   offset 0: u   (8 bytes: int32 / f64 / ptr)
 //   offset 8: tag (8 bytes: i64; negative => refcounted)
 const JSVAL_SIZE: u32 = 16;
+const TAG_OBJECT: i64 = sys::JS_TAG_OBJECT as i64;
 const TAG_INT: i64 = sys::JS_TAG_INT as i64;
 const TAG_BOOL: i64 = sys::JS_TAG_BOOL as i64;
 const TAG_NULL: i64 = sys::JS_TAG_NULL as i64;
@@ -59,9 +61,11 @@ struct Helpers {
     dup_value: FuncId,
     free_value: FuncId,
     to_bool: FuncId,
+    box_this: FuncId,
     call: FuncId,
     binary_slow: FuncId,
     unary_slow: FuncId,
+    post_inc_slow: FuncId,
     get_var: FuncId,
     get_var_undef: FuncId,
     put_var: FuncId,
@@ -75,20 +79,23 @@ struct Helpers {
     throw_uninitialized: FuncId,
 }
 
-unsafe extern "C" fn jit_throw_uninitialized(ctx: *mut sys::JSContext) {
-    unsafe {
-        sys::JS_ThrowReferenceError(
-            ctx,
-            c"cannot access lexical declaration before initialization".as_ptr(),
-        );
-    }
-}
-
 pub struct CraneliftBackend {
-    module: JITModule,
+    module: ManuallyDrop<JITModule>,
     fb_ctx: FunctionBuilderContext,
     helpers: Helpers,
     ptr_ty: types::Type,
+}
+
+impl Drop for CraneliftBackend {
+    fn drop(&mut self) {
+        // SAFETY: `CraneliftBackend` is owned by `JitEngine`, which is only
+        // dropped in `jit_free_runtime_hook` after `JS_RunGC(rt)` has freed
+        // all `JSFunctionBytecode`s and no JIT-compiled functions remain active.
+        unsafe {
+            let module = ManuallyDrop::take(&mut self.module);
+            module.free_memory();
+        }
+    }
 }
 
 impl CraneliftBackend {
@@ -120,9 +127,11 @@ impl CraneliftBackend {
         builder.symbol("QJS_JitDupValue", sys::QJS_JitDupValue as *const u8);
         builder.symbol("QJS_JitFreeValue", sys::QJS_JitFreeValue as *const u8);
         builder.symbol("QJS_JitToBool", sys::QJS_JitToBool as *const u8);
+        builder.symbol("QJS_JitBoxThis", sys::QJS_JitBoxThis as *const u8);
         builder.symbol("QJS_JitCall", sys::QJS_JitCall as *const u8);
         builder.symbol("QJS_JitBinarySlow", sys::QJS_JitBinarySlow as *const u8);
         builder.symbol("QJS_JitUnarySlow", sys::QJS_JitUnarySlow as *const u8);
+        builder.symbol("QJS_JitPostIncSlow", sys::QJS_JitPostIncSlow as *const u8);
         builder.symbol("QJS_JitGetVar", sys::QJS_JitGetVar as *const u8);
         builder.symbol("QJS_JitGetVarUndef", sys::QJS_JitGetVarUndef as *const u8);
         builder.symbol("QJS_JitPutVar", sys::QJS_JitPutVar as *const u8);
@@ -140,8 +149,8 @@ impl CraneliftBackend {
             sys::QJS_JitPutClosureVar as *const u8,
         );
         builder.symbol(
-            "jit_throw_uninitialized",
-            jit_throw_uninitialized as *const u8,
+            "QJS_JitThrowUninitialized",
+            sys::QJS_JitThrowUninitialized as *const u8,
         );
 
         let mut module = JITModule::new(builder);
@@ -184,6 +193,12 @@ impl CraneliftBackend {
                 &[ptr_ty, ptr_ty],
                 Some(types::I32),
             )?,
+            box_this: decl(
+                &mut module,
+                "QJS_JitBoxThis",
+                &[ptr_ty, ptr_ty, ptr_ty],
+                Some(types::I32),
+            )?,
             call: decl(
                 &mut module,
                 "QJS_JitCall",
@@ -200,6 +215,12 @@ impl CraneliftBackend {
                 &mut module,
                 "QJS_JitUnarySlow",
                 &[ptr_ty, types::I32, ptr_ty, ptr_ty],
+                Some(types::I32),
+            )?,
+            post_inc_slow: decl(
+                &mut module,
+                "QJS_JitPostIncSlow",
+                &[ptr_ty, types::I32, ptr_ty, ptr_ty, ptr_ty],
                 Some(types::I32),
             )?,
             get_var: decl(
@@ -253,20 +274,25 @@ impl CraneliftBackend {
             get_closure_var: decl(
                 &mut module,
                 "QJS_JitGetClosureVar",
-                &[ptr_ty, ptr_ty, types::I16, ptr_ty],
+                &[ptr_ty, ptr_ty, types::I32, ptr_ty],
                 Some(types::I32),
             )?,
             put_closure_var: decl(
                 &mut module,
                 "QJS_JitPutClosureVar",
-                &[ptr_ty, ptr_ty, types::I16, ptr_ty],
+                &[ptr_ty, ptr_ty, types::I32, ptr_ty],
                 Some(types::I32),
             )?,
-            throw_uninitialized: decl(&mut module, "jit_throw_uninitialized", &[ptr_ty], None)?,
+            throw_uninitialized: decl(
+                &mut module,
+                "QJS_JitThrowUninitialized",
+                &[ptr_ty, types::I32],
+                None,
+            )?,
         };
 
         Ok(Self {
-            module,
+            module: ManuallyDrop::new(module),
             fb_ctx: FunctionBuilderContext::new(),
             helpers,
             ptr_ty,
@@ -312,6 +338,9 @@ impl CraneliftBackend {
         let f_to_bool = self
             .module
             .declare_func_in_func(self.helpers.to_bool, &mut ctx.func);
+        let f_box_this = self
+            .module
+            .declare_func_in_func(self.helpers.box_this, &mut ctx.func);
         let f_call = self
             .module
             .declare_func_in_func(self.helpers.call, &mut ctx.func);
@@ -321,6 +350,9 @@ impl CraneliftBackend {
         let f_un_slow = self
             .module
             .declare_func_in_func(self.helpers.unary_slow, &mut ctx.func);
+        let f_post_inc_slow = self
+            .module
+            .declare_func_in_func(self.helpers.post_inc_slow, &mut ctx.func);
         let f_get_var = self
             .module
             .declare_func_in_func(self.helpers.get_var, &mut ctx.func);
@@ -392,10 +424,10 @@ impl CraneliftBackend {
             let scratch1_off = ((total_slots + 1) * JSVAL_SIZE) as i32;
             let poll_off = ((total_slots + 2) * JSVAL_SIZE) as i32;
 
-            // Stack overflow guard in prologue.
+            // Stack overflow guard in prologue (leave room for backtrace construction).
             let stack_ok_block = b.create_block();
             let stack_ovf_block = b.create_block();
-            let req_bytes = b.ins().iconst(ptr_ty, (frame_bytes as i64) + 1024);
+            let req_bytes = b.ins().iconst(ptr_ty, (frame_bytes as i64) + 4096);
             let ovf_call = b.ins().call(f_check_stack, &[p_ctx, req_bytes]);
             let ovf_res = b.inst_results(ovf_call)[0];
             b.ins()
@@ -504,16 +536,40 @@ impl CraneliftBackend {
                         store_slot_const(&mut b, frame_slot, slot_off(sp), v as i64, TAG_BOOL);
                     }
                     Op::PushThis => {
+                        let dst = slot_off(sp);
                         let u = b
                             .ins()
                             .load(types::I64, MemFlagsData::trusted(), p_this_obj, 0);
                         let tag = b
                             .ins()
                             .load(types::I64, MemFlagsData::trusted(), p_this_obj, 8);
-                        let dst = slot_off(sp);
-                        sstore(&mut b, u, frame_slot, dst);
-                        sstore(&mut b, tag, frame_slot, dst + 8);
-                        emit_dup_if_ref(&mut b, f_dup, ptr_ty, p_ctx, frame_slot, dst, tag);
+                        if info.is_strict_mode != 0 {
+                            sstore(&mut b, u, frame_slot, dst);
+                            sstore(&mut b, tag, frame_slot, dst + 8);
+                            emit_dup_if_ref(&mut b, f_dup, ptr_ty, p_ctx, frame_slot, dst, tag);
+                        } else {
+                            let is_obj = b.ins().icmp_imm_s(IntCC::Equal, tag, TAG_OBJECT);
+                            let obj_blk = b.create_block();
+                            let box_blk = b.create_block();
+                            let done_blk = b.create_block();
+                            b.ins().brif(is_obj, obj_blk, &[], box_blk, &[]);
+
+                            b.switch_to_block(obj_blk);
+                            sstore(&mut b, u, frame_slot, dst);
+                            sstore(&mut b, tag, frame_slot, dst + 8);
+                            let dst_addr = b.ins().stack_addr(ptr_ty, frame_slot, dst);
+                            b.ins().call(f_dup, &[p_ctx, dst_addr]);
+                            b.ins().jump(done_blk, &[]);
+
+                            b.switch_to_block(box_blk);
+                            let out_ptr = b.ins().stack_addr(ptr_ty, frame_slot, dst);
+                            let c = b.ins().call(f_box_this, &[p_ctx, p_this_obj, out_ptr]);
+                            let err = b.inst_results(c)[0];
+                            emit_check_exc(&mut b, err, exc_block);
+                            b.ins().jump(done_blk, &[]);
+
+                            b.switch_to_block(done_blk);
+                        }
                     }
                     Op::PushConst(cidx) => {
                         let cptr_addr = unsafe { info.cpool.add(cidx as usize) } as i64;
@@ -578,7 +634,8 @@ impl CraneliftBackend {
                         let ok_blk = b.create_block();
                         b.ins().brif(is_uninit, tdz_blk, &[], ok_blk, &[]);
                         b.switch_to_block(tdz_blk);
-                        b.ins().call(f_throw_tdz, &[p_ctx]);
+                        let idx_val = b.ins().iconst(types::I32, idx as i64);
+                        b.ins().call(f_throw_tdz, &[p_ctx, idx_val]);
                         b.ins().jump(exc_block, &[]);
                         b.switch_to_block(ok_blk);
                         let tag = copy_slot(&mut b, frame_slot, src, dst);
@@ -608,7 +665,8 @@ impl CraneliftBackend {
                         let ok_blk = b.create_block();
                         b.ins().brif(is_uninit, tdz_blk, &[], ok_blk, &[]);
                         b.switch_to_block(tdz_blk);
-                        b.ins().call(f_throw_tdz, &[p_ctx]);
+                        let idx_val = b.ins().iconst(types::I32, idx as i64);
+                        b.ins().call(f_throw_tdz, &[p_ctx, idx_val]);
                         b.ins().jump(exc_block, &[]);
                         b.switch_to_block(ok_blk);
                         emit_free_slot(&mut b, f_free, ptr_ty, p_ctx, frame_slot, dst);
@@ -652,7 +710,7 @@ impl CraneliftBackend {
                     Op::GetVarRef(idx) => {
                         let dst = slot_off(sp);
                         let dst_ptr = b.ins().stack_addr(ptr_ty, frame_slot, dst);
-                        let idx_val = b.ins().iconst(types::I16, idx as i64);
+                        let idx_val = b.ins().iconst(types::I32, idx as i64);
                         let c = b
                             .ins()
                             .call(f_get_closure, &[p_ctx, p_func_obj, idx_val, dst_ptr]);
@@ -662,7 +720,7 @@ impl CraneliftBackend {
                     Op::PutVarRef(idx) => {
                         let src = slot_off(sp - 1);
                         let src_ptr = b.ins().stack_addr(ptr_ty, frame_slot, src);
-                        let idx_val = b.ins().iconst(types::I16, idx as i64);
+                        let idx_val = b.ins().iconst(types::I32, idx as i64);
                         let c = b
                             .ins()
                             .call(f_put_closure, &[p_ctx, p_func_obj, idx_val, src_ptr]);
@@ -673,7 +731,7 @@ impl CraneliftBackend {
                     Op::SetVarRef(idx) => {
                         let src = slot_off(sp - 1);
                         let src_ptr = b.ins().stack_addr(ptr_ty, frame_slot, src);
-                        let idx_val = b.ins().iconst(types::I16, idx as i64);
+                        let idx_val = b.ins().iconst(types::I32, idx as i64);
                         let c = b
                             .ins()
                             .call(f_put_closure, &[p_ctx, p_func_obj, idx_val, src_ptr]);
@@ -848,11 +906,11 @@ impl CraneliftBackend {
                             s_loc,
                             s_rhs,
                             s_loc,
+                            Some(s_rhs),
                             scratch0_off,
                             Op::Add,
                             exc_block,
                         );
-                        emit_free_and_undef(&mut b, f_free, ptr_ty, p_ctx, frame_slot, s_rhs);
                     }
 
                     // Unary ops
@@ -881,17 +939,19 @@ impl CraneliftBackend {
                             -1i64
                         };
                         let slow_op = if matches!(insn.op, Op::PostInc) {
-                            sys::QJSJitOp_QJS_OP_inc as i32
+                            sys::QJSJitOp_QJS_OP_post_inc as i32
                         } else {
-                            sys::QJSJitOp_QJS_OP_dec as i32
+                            sys::QJSJitOp_QJS_OP_post_dec as i32
                         };
                         let u = sload(&mut b, frame_slot, s0);
                         let tag = sload(&mut b, frame_slot, s0 + 8);
                         let is_int = b.ins().icmp_imm_s(IntCC::Equal, tag, TAG_INT);
                         let fast_blk = b.create_block();
+                        let non_int_blk = b.create_block();
+                        let f64_blk = b.create_block();
                         let slow_blk = b.create_block();
                         let done_blk = b.create_block();
-                        b.ins().brif(is_int, fast_blk, &[], slow_blk, &[]);
+                        b.ins().brif(is_int, fast_blk, &[], non_int_blk, &[]);
 
                         b.switch_to_block(fast_blk);
                         let i32_v = b.ins().ireduce(types::I32, u);
@@ -919,21 +979,33 @@ impl CraneliftBackend {
                         sstore(&mut b, ftag, frame_slot, s1 + 8);
                         b.ins().jump(done_blk, &[]);
 
+                        b.switch_to_block(non_int_blk);
+                        let is_f64 = b.ins().icmp_imm_s(IntCC::Equal, tag, TAG_FLOAT64);
+                        b.ins().brif(is_f64, f64_blk, &[], slow_blk, &[]);
+
+                        b.switch_to_block(f64_blk);
+                        let f_cur = b.ins().bitcast(types::F64, MemFlagsData::new(), u);
+                        let f_delta = b.ins().f64const(delta as f64);
+                        let f_next = b.ins().fadd(f_cur, f_delta);
+                        let next_bits = b.ins().bitcast(types::I64, MemFlagsData::new(), f_next);
+                        let ftag2 = b.ins().iconst(types::I64, TAG_FLOAT64);
+                        sstore(&mut b, next_bits, frame_slot, s1);
+                        sstore(&mut b, ftag2, frame_slot, s1 + 8);
+                        b.ins().jump(done_blk, &[]);
+
                         b.switch_to_block(slow_blk);
                         let src_ptr = b.ins().stack_addr(ptr_ty, frame_slot, s0);
                         let old_ptr = b.ins().stack_addr(ptr_ty, frame_slot, scratch0_off);
-                        let plus_op = b.ins().iconst(types::I32, sys::QJSJitOp_QJS_OP_plus as i64);
-                        let c1 = b.ins().call(f_un_slow, &[p_ctx, plus_op, src_ptr, old_ptr]);
-                        let err1 = b.inst_results(c1)[0];
-                        emit_check_exc(&mut b, err1, exc_block);
+                        let new_ptr = b.ins().stack_addr(ptr_ty, frame_slot, scratch1_off);
+                        let op_v = b.ins().iconst(types::I32, slow_op as i64);
+                        let c = b
+                            .ins()
+                            .call(f_post_inc_slow, &[p_ctx, op_v, src_ptr, old_ptr, new_ptr]);
+                        let err = b.inst_results(c)[0];
+                        emit_check_exc(&mut b, err, exc_block);
                         emit_free_slot(&mut b, f_free, ptr_ty, p_ctx, frame_slot, s0);
                         copy_slot(&mut b, frame_slot, scratch0_off, s0);
-
-                        let new_ptr = b.ins().stack_addr(ptr_ty, frame_slot, s1);
-                        let op_v = b.ins().iconst(types::I32, slow_op as i64);
-                        let c2 = b.ins().call(f_un_slow, &[p_ctx, op_v, src_ptr, new_ptr]);
-                        let err2 = b.inst_results(c2)[0];
-                        emit_check_exc(&mut b, err2, exc_block);
+                        copy_slot(&mut b, frame_slot, scratch1_off, s1);
                         b.ins().jump(done_blk, &[]);
 
                         b.switch_to_block(done_blk);
@@ -941,7 +1013,8 @@ impl CraneliftBackend {
                     Op::LNot => {
                         let s0 = slot_off(sp - 1);
                         let truthy = emit_to_bool(
-                            &mut b, f_to_bool, ptr_ty, p_ctx, frame_slot, s0, exc_block,
+                            &mut b, f_to_bool, f_free, ptr_ty, p_ctx, frame_slot, s0, false,
+                            exc_block,
                         );
                         emit_free_slot(&mut b, f_free, ptr_ty, p_ctx, frame_slot, s0);
                         let is_zero = b.ins().icmp_imm_s(IntCC::Equal, truthy, 0);
@@ -1016,11 +1089,11 @@ impl CraneliftBackend {
                             s0,
                             s1,
                             s0,
+                            Some(s1),
                             scratch0_off,
                             insn.op,
                             exc_block,
                         );
-                        emit_free_and_undef(&mut b, f_free, ptr_ty, p_ctx, frame_slot, s1);
                     }
 
                     // Control flow
@@ -1037,9 +1110,9 @@ impl CraneliftBackend {
                     Op::IfFalse(target) => {
                         let s0 = slot_off(sp - 1);
                         let truthy = emit_to_bool(
-                            &mut b, f_to_bool, ptr_ty, p_ctx, frame_slot, s0, exc_block,
+                            &mut b, f_to_bool, f_free, ptr_ty, p_ctx, frame_slot, s0, true,
+                            exc_block,
                         );
-                        emit_free_and_undef(&mut b, f_free, ptr_ty, p_ctx, frame_slot, s0);
                         if target <= insn.pc {
                             emit_backedge_poll(
                                 &mut b, f_poll, p_ctx, frame_slot, poll_off, exc_block,
@@ -1053,9 +1126,9 @@ impl CraneliftBackend {
                     Op::IfTrue(target) => {
                         let s0 = slot_off(sp - 1);
                         let truthy = emit_to_bool(
-                            &mut b, f_to_bool, ptr_ty, p_ctx, frame_slot, s0, exc_block,
+                            &mut b, f_to_bool, f_free, ptr_ty, p_ctx, frame_slot, s0, true,
+                            exc_block,
                         );
-                        emit_free_and_undef(&mut b, f_free, ptr_ty, p_ctx, frame_slot, s0);
                         if target <= insn.pc {
                             emit_backedge_poll(
                                 &mut b, f_poll, p_ctx, frame_slot, poll_off, exc_block,
@@ -1096,6 +1169,42 @@ impl CraneliftBackend {
                         emit_check_exc(&mut b, err, exc_block);
                         copy_slot(&mut b, frame_slot, scratch0_off, func_off);
                     }
+                    Op::TailCall(argc) => {
+                        let argc_u = argc as u32;
+                        let func_depth = sp - 1 - argc_u;
+                        let func_off = slot_off(func_depth);
+                        let argv_off = slot_off(func_depth + 1);
+
+                        store_slot_const(&mut b, frame_slot, scratch1_off, 0, TAG_UNDEFINED);
+                        let func_ptr = b.ins().stack_addr(ptr_ty, frame_slot, func_off);
+                        let this_ptr = b.ins().stack_addr(ptr_ty, frame_slot, scratch1_off);
+                        let argv_ptr = b.ins().stack_addr(ptr_ty, frame_slot, argv_off);
+                        let out_ptr = b.ins().stack_addr(ptr_ty, frame_slot, scratch0_off);
+                        let argc_val = b.ins().iconst(types::I32, argc as i64);
+
+                        let c = b.ins().call(
+                            f_call,
+                            &[p_ctx, func_ptr, this_ptr, argc_val, argv_ptr, out_ptr],
+                        );
+                        let err = b.inst_results(c)[0];
+                        emit_check_exc(&mut b, err, exc_block);
+
+                        let u = sload(&mut b, frame_slot, scratch0_off);
+                        let tag = sload(&mut b, frame_slot, scratch0_off + 8);
+                        b.ins().store(MemFlagsData::trusted(), u, p_ret_out, 0);
+                        b.ins().store(MemFlagsData::trusted(), tag, p_ret_out, 8);
+                        emit_cleanup_slots(
+                            &mut b,
+                            f_free,
+                            ptr_ty,
+                            p_ctx,
+                            frame_slot,
+                            arg_count + var_count + sp,
+                        );
+                        let zero = b.ins().iconst(types::I32, 0);
+                        b.ins().return_(&[zero]);
+                        terminated = true;
+                    }
                     Op::CallMethod(argc) => {
                         let argc_u = argc as u32;
                         let this_depth = sp - 2 - argc_u;
@@ -1122,6 +1231,42 @@ impl CraneliftBackend {
                         emit_check_exc(&mut b, err, exc_block);
                         copy_slot(&mut b, frame_slot, scratch0_off, this_off);
                     }
+                    Op::TailCallMethod(argc) => {
+                        let argc_u = argc as u32;
+                        let this_depth = sp - 2 - argc_u;
+                        let this_off = slot_off(this_depth);
+                        let func_off = slot_off(this_depth + 1);
+                        let argv_off = slot_off(this_depth + 2);
+
+                        let func_ptr = b.ins().stack_addr(ptr_ty, frame_slot, func_off);
+                        let this_ptr = b.ins().stack_addr(ptr_ty, frame_slot, this_off);
+                        let argv_ptr = b.ins().stack_addr(ptr_ty, frame_slot, argv_off);
+                        let out_ptr = b.ins().stack_addr(ptr_ty, frame_slot, scratch0_off);
+                        let argc_val = b.ins().iconst(types::I32, argc as i64);
+
+                        let c = b.ins().call(
+                            f_call,
+                            &[p_ctx, func_ptr, this_ptr, argc_val, argv_ptr, out_ptr],
+                        );
+                        let err = b.inst_results(c)[0];
+                        emit_check_exc(&mut b, err, exc_block);
+
+                        let u = sload(&mut b, frame_slot, scratch0_off);
+                        let tag = sload(&mut b, frame_slot, scratch0_off + 8);
+                        b.ins().store(MemFlagsData::trusted(), u, p_ret_out, 0);
+                        b.ins().store(MemFlagsData::trusted(), tag, p_ret_out, 8);
+                        emit_cleanup_slots(
+                            &mut b,
+                            f_free,
+                            ptr_ty,
+                            p_ctx,
+                            frame_slot,
+                            arg_count + var_count + sp,
+                        );
+                        let zero = b.ins().iconst(types::I32, 0);
+                        b.ins().return_(&[zero]);
+                        terminated = true;
+                    }
 
                     // Returns
                     Op::Return => {
@@ -1132,14 +1277,28 @@ impl CraneliftBackend {
                         b.ins().store(MemFlagsData::trusted(), u, p_ret_out, 0);
                         b.ins().store(MemFlagsData::trusted(), tag, p_ret_out, 8);
                         store_slot_const(&mut b, frame_slot, ret_src, 0, TAG_UNDEFINED);
-                        emit_cleanup_all(&mut b, f_free, ptr_ty, p_ctx, frame_slot, total_slots);
+                        emit_cleanup_slots(
+                            &mut b,
+                            f_free,
+                            ptr_ty,
+                            p_ctx,
+                            frame_slot,
+                            arg_count + var_count + (sp - 1),
+                        );
                         let zero = b.ins().iconst(types::I32, 0);
                         b.ins().return_(&[zero]);
                         terminated = true;
                     }
                     Op::ReturnUndef => {
                         store_raw_ptr(&mut b, p_ret_out, 0, TAG_UNDEFINED);
-                        emit_cleanup_all(&mut b, f_free, ptr_ty, p_ctx, frame_slot, total_slots);
+                        emit_cleanup_slots(
+                            &mut b,
+                            f_free,
+                            ptr_ty,
+                            p_ctx,
+                            frame_slot,
+                            arg_count + var_count + sp,
+                        );
                         let zero = b.ins().iconst(types::I32, 0);
                         b.ins().return_(&[zero]);
                         terminated = true;
@@ -1149,14 +1308,14 @@ impl CraneliftBackend {
 
             if !terminated {
                 store_raw_ptr(&mut b, p_ret_out, 0, TAG_UNDEFINED);
-                emit_cleanup_all(&mut b, f_free, ptr_ty, p_ctx, frame_slot, total_slots);
+                emit_cleanup_slots(&mut b, f_free, ptr_ty, p_ctx, frame_slot, total_slots);
                 let zero = b.ins().iconst(types::I32, 0);
                 b.ins().return_(&[zero]);
             }
 
             // Build exception epilogue block.
             b.switch_to_block(exc_block);
-            emit_cleanup_all(&mut b, f_free, ptr_ty, p_ctx, frame_slot, total_slots);
+            emit_cleanup_slots(&mut b, f_free, ptr_ty, p_ctx, frame_slot, total_slots);
             store_raw_ptr(&mut b, p_ret_out, 0, TAG_EXCEPTION);
             let zero = b.ins().iconst(types::I32, 0);
             b.ins().return_(&[zero]);
@@ -1261,15 +1420,15 @@ fn emit_free_and_undef(
     store_slot_const(b, slot, off, 0, TAG_UNDEFINED);
 }
 
-fn emit_cleanup_all(
+fn emit_cleanup_slots(
     b: &mut FunctionBuilder,
     f_free: cranelift_codegen::ir::FuncRef,
     ptr_ty: types::Type,
     p_ctx: Value,
     slot: StackSlot,
-    total_slots: u32,
+    slot_count: u32,
 ) {
-    for i in 0..total_slots {
+    for i in 0..slot_count {
         emit_free_slot(b, f_free, ptr_ty, p_ctx, slot, (i * JSVAL_SIZE) as i32);
     }
 }
@@ -1306,13 +1465,20 @@ fn emit_backedge_poll(
 }
 
 /// Evaluates JS ToBool with an inline fast path for INT/BOOL/NULL/UNDEFINED.
+///
+/// When `clear_and_free` is `true`, clears `slot[off]` to `TAG_UNDEFINED`
+/// directly on the fast path (avoiding a redundant `emit_free_slot` reload and
+/// branch) and frees+clears on the slow path.
+#[allow(clippy::too_many_arguments)]
 fn emit_to_bool(
     b: &mut FunctionBuilder,
     f_to_bool: cranelift_codegen::ir::FuncRef,
+    f_free: cranelift_codegen::ir::FuncRef,
     ptr_ty: types::Type,
     p_ctx: Value,
     slot: StackSlot,
     off: i32,
+    clear_and_free: bool,
     exc_block: Block,
 ) -> Value {
     let u = b.ins().stack_load(types::I64, types::I64, slot, off);
@@ -1334,6 +1500,9 @@ fn emit_to_bool(
     let u32_val = b.ins().ireduce(types::I32, u);
     let nz = b.ins().icmp_imm_s(IntCC::NotEqual, u32_val, 0);
     let fast_res = b.ins().uextend(types::I32, nz);
+    if clear_and_free {
+        store_slot_const(b, slot, off, 0, TAG_UNDEFINED);
+    }
     b.ins().jump(merge_blk, &[fast_res.into()]);
 
     b.switch_to_block(slow_blk);
@@ -1344,6 +1513,9 @@ fn emit_to_bool(
     let slow_ok = b.create_block();
     b.ins().brif(is_err, exc_block, &[], slow_ok, &[]);
     b.switch_to_block(slow_ok);
+    if clear_and_free {
+        emit_free_and_undef(b, f_free, ptr_ty, p_ctx, slot, off);
+    }
     b.ins().jump(merge_blk, &[slow_res.into()]);
 
     b.switch_to_block(merge_blk);
@@ -1371,9 +1543,11 @@ fn emit_inc_dec_loc(
 
     let is_int = b.ins().icmp_imm_s(IntCC::Equal, tag, TAG_INT);
     let fast_blk = b.create_block();
+    let non_int_blk = b.create_block();
+    let f64_blk = b.create_block();
     let slow_blk = b.create_block();
     let done_blk = b.create_block();
-    b.ins().brif(is_int, fast_blk, &[], slow_blk, &[]);
+    b.ins().brif(is_int, fast_blk, &[], non_int_blk, &[]);
 
     b.switch_to_block(fast_blk);
     let i32_v = b.ins().ireduce(types::I32, u);
@@ -1397,6 +1571,18 @@ fn emit_inc_dec_loc(
     let ftag = b.ins().iconst(types::I64, TAG_FLOAT64);
     b.ins().stack_store(types::I64, fbits, slot, loc_off);
     b.ins().stack_store(types::I64, ftag, slot, loc_off + 8);
+    b.ins().jump(done_blk, &[]);
+
+    b.switch_to_block(non_int_blk);
+    let is_f64 = b.ins().icmp_imm_s(IntCC::Equal, tag, TAG_FLOAT64);
+    b.ins().brif(is_f64, f64_blk, &[], slow_blk, &[]);
+
+    b.switch_to_block(f64_blk);
+    let f_cur = b.ins().bitcast(types::F64, MemFlagsData::new(), u);
+    let f_delta = b.ins().f64const(delta as f64);
+    let f_next = b.ins().fadd(f_cur, f_delta);
+    let next_bits = b.ins().bitcast(types::I64, MemFlagsData::new(), f_next);
+    b.ins().stack_store(types::I64, next_bits, slot, loc_off);
     b.ins().jump(done_blk, &[]);
 
     b.switch_to_block(slow_blk);
@@ -1439,9 +1625,10 @@ fn emit_unary_op(
 
     let is_int = b.ins().icmp_imm_s(IntCC::Equal, tag, TAG_INT);
     let fast_blk = b.create_block();
+    let non_int_blk = b.create_block();
     let slow_blk = b.create_block();
     let done_blk = b.create_block();
-    b.ins().brif(is_int, fast_blk, &[], slow_blk, &[]);
+    b.ins().brif(is_int, fast_blk, &[], non_int_blk, &[]);
 
     b.switch_to_block(fast_blk);
     let i32_v = b.ins().ireduce(types::I32, u);
@@ -1494,6 +1681,38 @@ fn emit_unary_op(
         _ => unreachable!(),
     }
 
+    b.switch_to_block(non_int_blk);
+    if matches!(op, Op::Plus | Op::Neg | Op::Inc | Op::Dec) {
+        let is_f64 = b.ins().icmp_imm_s(IntCC::Equal, tag, TAG_FLOAT64);
+        let f64_blk = b.create_block();
+        b.ins().brif(is_f64, f64_blk, &[], slow_blk, &[]);
+        b.switch_to_block(f64_blk);
+        match op {
+            Op::Plus => {
+                b.ins().jump(done_blk, &[]);
+            }
+            Op::Neg => {
+                let f = b.ins().bitcast(types::F64, MemFlagsData::new(), u);
+                let neg = b.ins().fneg(f);
+                let nbits = b.ins().bitcast(types::I64, MemFlagsData::new(), neg);
+                b.ins().stack_store(types::I64, nbits, slot, s0);
+                b.ins().jump(done_blk, &[]);
+            }
+            Op::Inc | Op::Dec => {
+                let delta = if matches!(op, Op::Inc) { 1.0 } else { -1.0 };
+                let f = b.ins().bitcast(types::F64, MemFlagsData::new(), u);
+                let d = b.ins().f64const(delta);
+                let res = b.ins().fadd(f, d);
+                let rbits = b.ins().bitcast(types::I64, MemFlagsData::new(), res);
+                b.ins().stack_store(types::I64, rbits, slot, s0);
+                b.ins().jump(done_blk, &[]);
+            }
+            _ => unreachable!(),
+        }
+    } else {
+        b.ins().jump(slow_blk, &[]);
+    }
+
     b.switch_to_block(slow_blk);
     let src_ptr = b.ins().stack_addr(ptr_ty, slot, s0);
     let out_ptr = b.ins().stack_addr(ptr_ty, slot, scratch_off);
@@ -1519,6 +1738,7 @@ fn emit_binary_op(
     lhs_off: i32,
     rhs_off: i32,
     dst_off: i32,
+    free_rhs: Option<i32>,
     scratch_off: i32,
     op: Op,
     exc_block: Block,
@@ -1564,6 +1784,11 @@ fn emit_binary_op(
     let non_int_blk = b.create_block();
     let slow_blk = b.create_block();
     let done_blk = b.create_block();
+    let prim_done_blk = if free_rhs.is_some() {
+        b.create_block()
+    } else {
+        done_blk
+    };
 
     b.ins().brif(both_int, int_blk, &[], non_int_blk, &[]);
 
@@ -1606,7 +1831,7 @@ fn emit_binary_op(
             let int_tag = b.ins().iconst(types::I64, TAG_INT);
             b.ins().stack_store(types::I64, res_u, slot, dst_off);
             b.ins().stack_store(types::I64, int_tag, slot, dst_off + 8);
-            b.ins().jump(done_blk, &[]);
+            b.ins().jump(prim_done_blk, &[]);
 
             b.switch_to_block(ovf_blk);
             let f = b.ins().fcvt_from_sint(types::F64, res64);
@@ -1614,7 +1839,7 @@ fn emit_binary_op(
             let ftag = b.ins().iconst(types::I64, TAG_FLOAT64);
             b.ins().stack_store(types::I64, fbits, slot, dst_off);
             b.ins().stack_store(types::I64, ftag, slot, dst_off + 8);
-            b.ins().jump(done_blk, &[]);
+            b.ins().jump(prim_done_blk, &[]);
         }
         Op::Div => {
             let fa = b.ins().fcvt_from_sint(types::F64, a32);
@@ -1624,7 +1849,7 @@ fn emit_binary_op(
             let ftag = b.ins().iconst(types::I64, TAG_FLOAT64);
             b.ins().stack_store(types::I64, fbits, slot, dst_off);
             b.ins().stack_store(types::I64, ftag, slot, dst_off + 8);
-            b.ins().jump(done_blk, &[]);
+            b.ins().jump(prim_done_blk, &[]);
         }
         Op::Mod => {
             // Fast path: b32 > 0 && a32 >= 0 avoids -0.0 and INT32_MIN % -1 traps.
@@ -1639,7 +1864,7 @@ fn emit_binary_op(
             let int_tag = b.ins().iconst(types::I64, TAG_INT);
             b.ins().stack_store(types::I64, rem_u, slot, dst_off);
             b.ins().stack_store(types::I64, int_tag, slot, dst_off + 8);
-            b.ins().jump(done_blk, &[]);
+            b.ins().jump(prim_done_blk, &[]);
         }
         Op::Pow => {
             b.ins().jump(slow_blk, &[]);
@@ -1663,7 +1888,7 @@ fn emit_binary_op(
             let int_tag = b.ins().iconst(types::I64, TAG_INT);
             b.ins().stack_store(types::I64, res_u, slot, dst_off);
             b.ins().stack_store(types::I64, int_tag, slot, dst_off + 8);
-            b.ins().jump(done_blk, &[]);
+            b.ins().jump(prim_done_blk, &[]);
         }
         Op::Shr => {
             let sh = b.ins().band_imm_s(b32, 31);
@@ -1678,7 +1903,7 @@ fn emit_binary_op(
             let int_tag = b.ins().iconst(types::I64, TAG_INT);
             b.ins().stack_store(types::I64, res_u, slot, dst_off);
             b.ins().stack_store(types::I64, int_tag, slot, dst_off + 8);
-            b.ins().jump(done_blk, &[]);
+            b.ins().jump(prim_done_blk, &[]);
 
             b.switch_to_block(u32_f64_blk);
             let f = b.ins().fcvt_from_uint(types::F64, res32);
@@ -1686,7 +1911,7 @@ fn emit_binary_op(
             let ftag = b.ins().iconst(types::I64, TAG_FLOAT64);
             b.ins().stack_store(types::I64, fbits, slot, dst_off);
             b.ins().stack_store(types::I64, ftag, slot, dst_off + 8);
-            b.ins().jump(done_blk, &[]);
+            b.ins().jump(prim_done_blk, &[]);
         }
         Op::Lt | Op::Lte | Op::Gt | Op::Gte | Op::Eq | Op::Neq | Op::StrictEq | Op::StrictNeq => {
             let cc = match op {
@@ -1703,16 +1928,27 @@ fn emit_binary_op(
             let tag_bool = b.ins().iconst(types::I64, TAG_BOOL);
             b.ins().stack_store(types::I64, res_u, slot, dst_off);
             b.ins().stack_store(types::I64, tag_bool, slot, dst_off + 8);
-            b.ins().jump(done_blk, &[]);
+            b.ins().jump(prim_done_blk, &[]);
         }
         _ => unreachable!(),
     }
 
-    // ── Float64 fast path (for numeric arithmetic & relational comparisons) ──
+    // ── Float64 fast path (for numeric arithmetic & comparisons) ──
     b.switch_to_block(non_int_blk);
     let supports_f64 = matches!(
         op,
-        Op::Add | Op::Sub | Op::Mul | Op::Div | Op::Lt | Op::Lte | Op::Gt | Op::Gte
+        Op::Add
+            | Op::Sub
+            | Op::Mul
+            | Op::Div
+            | Op::Lt
+            | Op::Lte
+            | Op::Gt
+            | Op::Gte
+            | Op::Eq
+            | Op::Neq
+            | Op::StrictEq
+            | Op::StrictNeq
     );
     if supports_f64 {
         let t1_f64 = b.ins().icmp_imm_s(IntCC::Equal, t1, TAG_FLOAT64);
@@ -1740,14 +1976,23 @@ fn emit_binary_op(
                 let ftag = b.ins().iconst(types::I64, TAG_FLOAT64);
                 b.ins().stack_store(types::I64, fbits, slot, dst_off);
                 b.ins().stack_store(types::I64, ftag, slot, dst_off + 8);
-                b.ins().jump(done_blk, &[]);
+                b.ins().jump(prim_done_blk, &[]);
             }
-            Op::Lt | Op::Lte | Op::Gt | Op::Gte => {
+            Op::Lt
+            | Op::Lte
+            | Op::Gt
+            | Op::Gte
+            | Op::Eq
+            | Op::Neq
+            | Op::StrictEq
+            | Op::StrictNeq => {
                 let cc = match op {
                     Op::Lt => FloatCC::LessThan,
                     Op::Lte => FloatCC::LessThanOrEqual,
                     Op::Gt => FloatCC::GreaterThan,
                     Op::Gte => FloatCC::GreaterThanOrEqual,
+                    Op::Eq | Op::StrictEq => FloatCC::Equal,
+                    Op::Neq | Op::StrictNeq => FloatCC::NotEqual,
                     _ => unreachable!(),
                 };
                 let cmp = b.ins().fcmp(cc, fa, fb);
@@ -1755,12 +2000,19 @@ fn emit_binary_op(
                 let tag_bool = b.ins().iconst(types::I64, TAG_BOOL);
                 b.ins().stack_store(types::I64, res_u, slot, dst_off);
                 b.ins().stack_store(types::I64, tag_bool, slot, dst_off + 8);
-                b.ins().jump(done_blk, &[]);
+                b.ins().jump(prim_done_blk, &[]);
             }
             _ => unreachable!(),
         }
     } else {
         b.ins().jump(slow_blk, &[]);
+    }
+
+    if let Some(rhs_clear_off) = free_rhs {
+        b.switch_to_block(prim_done_blk);
+        // Fast paths already proved `rhs` is TAG_INT or TAG_FLOAT64 (not refcounted).
+        store_slot_const(b, slot, rhs_clear_off, 0, TAG_UNDEFINED);
+        b.ins().jump(done_blk, &[]);
     }
 
     // ── Generic QuickJS slow path (strings, objects, BigInt, NaN/Coercion, etc.) ──
@@ -1776,6 +2028,9 @@ fn emit_binary_op(
     emit_check_exc(b, err, exc_block);
     emit_free_slot(b, f_free, ptr_ty, p_ctx, slot, dst_off);
     copy_slot(b, slot, scratch_off, dst_off);
+    if let Some(rhs_clear_off) = free_rhs {
+        emit_free_and_undef(b, f_free, ptr_ty, p_ctx, slot, rhs_clear_off);
+    }
     b.ins().jump(done_blk, &[]);
 
     b.switch_to_block(done_blk);
