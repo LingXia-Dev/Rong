@@ -356,6 +356,26 @@ impl JSRuntimeImpl for ArkJSRuntime {
         }
     }
 
+    fn memory_usage(&self) -> Option<rong_core::MemoryUsage> {
+        if self.inner.raw.is_null() {
+            return None;
+        }
+        let mut stats = std::mem::MaybeUninit::<arkjs::JSVM_HeapStatistics>::zeroed();
+        let status =
+            unsafe { arkjs::OH_JSVM_GetHeapStatistics(self.inner.raw, stats.as_mut_ptr()) };
+        if status != arkjs::JSVM_Status_JSVM_OK {
+            return None;
+        }
+        let stats = unsafe { stats.assume_init() };
+        let mut usage = rong_core::MemoryUsage::new(stats.usedHeapSize as u64)
+            .with_allocated_bytes(stats.totalHeapSize as u64)
+            .with_external_bytes(stats.externalMemory as u64);
+        if stats.heapSizeLimit > 0 {
+            usage = usage.with_limit_bytes(stats.heapSizeLimit as u64);
+        }
+        Some(usage)
+    }
+
     // Engine preemption is intentionally NOT implemented: the JSVM-API surface
     // bound here (ark_runtime/jsvm.h, OpenHarmony SDK 20) exposes no
     // execution-terminate or interrupt-request primitive (no

@@ -45,7 +45,7 @@ pub use iterator::{
 pub use pinned::*;
 pub use promise::{Promise, PromiseResolver};
 pub use rejection::{RejectionEvent, RejectionEvents};
-pub use runtime::{JSEngine, JSRuntime};
+pub use runtime::{JSEngine, JSRuntime, MemoryUsage};
 pub use source::{Source, SourceKind};
 pub use value::{
     AnyJSTypedArray, Coerced, FromJSValue, IntoJSValue, JSArray, JSArrayBuffer, JSBytes, JSDate,
@@ -71,8 +71,8 @@ pub mod prelude {
         JSContextImpl, JSDate, JSEngine, JSErrorFactory, JSException, JSExceptionThrower, JSFunc,
         JSIterator, JSObject, JSObjectOps, JSProxy, JSProxyOps, JSRawContext, JSResult, JSRuntime,
         JSRuntimeImpl, JSSymbol, JSTypeOf, JSTypedArray, JSTypedArrayOps, JSValue,
-        JSValueConversion, JSValueImpl, JSValueMapper, JsInvokePriority, Promise, RongJSError,
-        Source, SourceKind, enqueue_js_invoke, install_async_iterator_symbol,
+        JSValueConversion, JSValueImpl, JSValueMapper, JsInvokePriority, MemoryUsage, Promise,
+        RongJSError, Source, SourceKind, enqueue_js_invoke, install_async_iterator_symbol,
         install_iterator_symbol,
     };
 }

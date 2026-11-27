@@ -129,9 +129,11 @@ worker is reused. Timeouts return `E_TIMEOUT` and can be matched with
 
 For manual supervision, `Worker::interrupt_mode()` reports
 `InterruptMode::{Cooperative, Preemptive}`, while `interrupt_handle()` exposes
-persistent and scoped low-level requests. Coding agents should use the
-[Rong Runtime Embedder skill](docs/skills/rong-runtime-embedder/SKILL.md) for
-engine policy, lifecycle, timeout, and interruption workflows.
+persistent and scoped low-level requests. Runtime heap and allocator usage can
+be sampled via `runtime.memory_usage()` or across worker pools via
+`rong.memory_usage().await` (`Option<MemoryUsage>`). Coding agents should use
+the [Rong Runtime Embedder skill](docs/skills/rong-runtime-embedder/SKILL.md)
+for engine policy, lifecycle, timeout, and interruption workflows.
 
 ## Advanced Runtime Control
 

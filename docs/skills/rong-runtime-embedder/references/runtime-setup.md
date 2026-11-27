@@ -45,6 +45,10 @@ let value: i32 = ctx.eval(Source::from_bytes("20 + 22"))?;
 Keep the runtime and every context created from it on the owning thread. Share
 only explicitly thread-safe handles such as `InterruptHandle` across threads.
 Use a worker pool instead of wrapping runtime/context values in ad-hoc locking.
+Sample heap and allocator metrics with `runtime.memory_usage()` (or
+`rong.memory_usage().await` on shared/pinned worker pools); handle `None` on
+backends without a public heap-statistics API (such as Apple's system
+`JavaScriptCore.framework`).
 
 ## Install an explicit module surface
 

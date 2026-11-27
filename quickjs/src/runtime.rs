@@ -1,5 +1,5 @@
 use crate::{QJSContext, QJSValue, qjs};
-use rong_core::{InterruptSignal, JSEngine, JSRuntimeImpl};
+use rong_core::{InterruptSignal, JSEngine, JSRuntimeImpl, MemoryUsage};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::{Rc, Weak};
@@ -136,6 +136,24 @@ impl JSRuntimeImpl for QJSRuntime {
         }
     }
 
+    fn memory_usage(&self) -> Option<MemoryUsage> {
+        if self.inner.rt.is_null() {
+            return None;
+        }
+        let mut raw = std::mem::MaybeUninit::<qjs::JSMemoryUsage>::zeroed();
+        unsafe {
+            qjs::JS_ComputeMemoryUsage(self.inner.rt, raw.as_mut_ptr());
+        }
+        let stats = unsafe { raw.assume_init() };
+        let mut usage = MemoryUsage::new(stats.memory_used_size.max(0) as u64)
+            .with_allocated_bytes(stats.malloc_size.max(0) as u64)
+            .with_object_count(stats.obj_count.max(0) as u64);
+        if stats.malloc_limit > 0 {
+            usage = usage.with_limit_bytes(stats.malloc_limit as u64);
+        }
+        Some(usage)
+    }
+
     fn install_interrupt(&self, signal: InterruptSignal) -> bool {
         let signal = Box::new(signal);
         let opaque = &*signal as *const InterruptSignal as *mut std::os::raw::c_void;
@@ -223,5 +241,33 @@ mod tests {
         })
         .join()
         .expect("thread exit freeing the last runtime value");
+    }
+
+    #[test]
+    fn memory_usage_tracks_configured_malloc_limit() {
+        let runtime = QJSRuntime::new();
+        let initial = runtime
+            .memory_usage()
+            .expect("QuickJS reports memory usage");
+        assert!(initial.used_bytes > 0);
+        assert!(initial.allocated_bytes.unwrap_or(0) > 0);
+        assert_eq!(initial.limit_bytes, None);
+
+        let limit = 64 * 1024 * 1024;
+        unsafe {
+            qjs::JS_SetMemoryLimit(runtime.to_raw(), limit);
+        }
+        let bounded = runtime
+            .memory_usage()
+            .expect("QuickJS reports memory usage");
+        assert_eq!(bounded.limit_bytes, Some(limit as u64));
+
+        unsafe {
+            qjs::JS_SetMemoryLimit(runtime.to_raw(), 0);
+        }
+        let unbounded = runtime
+            .memory_usage()
+            .expect("QuickJS reports memory usage");
+        assert_eq!(unbounded.limit_bytes, None);
     }
 }

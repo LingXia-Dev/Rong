@@ -76,6 +76,25 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
   report `is_supported() == false` and keep running in the interpreter. Builds
   without `quickjs-jit` compile QuickJS without JIT hooks or Cranelift.
 
+### Runtime
+
+- Added cross-engine heap and allocator memory statistics via `MemoryUsage` and
+  `JSRuntime::memory_usage(&self) -> Option<MemoryUsage>`, plus worker-pool
+  sampling on `Worker::memory_usage`, `Rong::memory_usage`,
+  `PinnedWorker::memory_usage`, and `PinnedRong::memory_usage` (with
+  `*_blocking` counterparts, and `PinnedRong::{worker, workers}` /
+  `rong::PinnedWorker`).
+  - **QuickJS**: backed by `JS_ComputeMemoryUsage` (`used_bytes`,
+    `allocated_bytes`, optional `limit_bytes` from `JS_SetMemoryLimit`, and
+    `object_count`).
+  - **JavaScriptCore (`jscore-source` / non-Apple `jscore`)**: backed by
+    `JSGetMemoryUsageStatistics` (`used_bytes`, `allocated_bytes`,
+    `external_bytes`, and `object_count`). Apple's system
+    `JavaScriptCore.framework` has no public heap-statistics C API and returns
+    `None`.
+  - **ArkJS**: backed by `OH_JSVM_GetHeapStatistics` (`used_bytes`,
+    `allocated_bytes`, `limit_bytes`, and `external_bytes`).
+
 ## [0.8.0] - 2026-11-22
 
 Crate releases: `rong_core`, `rong`, `rong_quickjs`, `rong_jscore`,
