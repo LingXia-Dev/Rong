@@ -65,7 +65,7 @@ mod engine {
 
     /// Sentinel stored in `JSFunctionBytecode::jit_data` for functions that
     /// cannot be compiled so we do not retry compilation on subsequent calls.
-    const JIT_REJECTED: *mut c_void = 1usize as *mut c_void;
+    const JIT_REJECTED: *mut c_void = std::ptr::dangling_mut::<c_void>();
 
     struct CompiledEntry {
         func: CompiledFn,

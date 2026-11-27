@@ -561,10 +561,8 @@ pub fn decode_bytecode(
                     block_starts.insert(next_pc);
                 }
             }
-            Op::Return | Op::ReturnUndef => {
-                if next_pc < len {
-                    block_starts.insert(next_pc);
-                }
+            Op::Return | Op::ReturnUndef if next_pc < len => {
+                block_starts.insert(next_pc);
             }
             _ => {}
         }
@@ -646,4 +644,105 @@ pub fn decode_bytecode(
         var_count: info.var_count,
         stack_size: info.stack_size,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_info(buf: &[u8]) -> sys::QJSJitBytecodeInfo {
+        sys::QJSJitBytecodeInfo {
+            buf: buf.as_ptr(),
+            len: buf.len() as u32,
+            arg_count: 1,
+            var_count: 1,
+            stack_size: 4,
+            var_ref_count: 0,
+            closure_var_count: 0,
+            is_strict_mode: 1,
+            func_kind: 0,
+            cpool_count: 0,
+            cpool: std::ptr::null(),
+            realm: std::ptr::null_mut(),
+        }
+    }
+
+    #[test]
+    fn rejects_non_normal_and_captured_and_empty_and_oversized() {
+        let code = [sys::QJSJitOp_QJS_OP_return_undef as u8];
+        let mut info = make_info(&code);
+        info.func_kind = 1;
+        assert_eq!(
+            decode_bytecode(&info, 1024).unwrap_err(),
+            RejectReason::NotNormalFunction
+        );
+
+        let mut info = make_info(&code);
+        info.var_ref_count = 1;
+        assert_eq!(
+            decode_bytecode(&info, 1024).unwrap_err(),
+            RejectReason::HasCapturedLocals
+        );
+
+        let mut info = make_info(&[]);
+        info.buf = std::ptr::null();
+        assert_eq!(
+            decode_bytecode(&info, 1024).unwrap_err(),
+            RejectReason::EmptyBytecode
+        );
+
+        let info = make_info(&code);
+        assert_eq!(
+            decode_bytecode(&info, 0).unwrap_err(),
+            RejectReason::BytecodeTooLarge
+        );
+    }
+
+    #[test]
+    fn rejects_truncated_invalid_branch_stack_mismatch_and_unsupported() {
+        // push_i32 needs 4 immediate bytes, only 2 provided
+        let trunc = [sys::QJSJitOp_QJS_OP_push_i32 as u8, 1, 2];
+        assert_eq!(
+            decode_bytecode(&make_info(&trunc), 1024).unwrap_err(),
+            RejectReason::TruncatedBytecode
+        );
+
+        // goto8 jumping out of bounds (+50)
+        let bad_branch = [sys::QJSJitOp_QJS_OP_goto8 as u8, 50];
+        assert_eq!(
+            decode_bytecode(&make_info(&bad_branch), 1024).unwrap_err(),
+            RejectReason::InvalidBranchTarget
+        );
+
+        // drop on empty stack -> StackMismatch
+        let underflow = [
+            sys::QJSJitOp_QJS_OP_drop as u8,
+            sys::QJSJitOp_QJS_OP_return_undef as u8,
+        ];
+        assert_eq!(
+            decode_bytecode(&make_info(&underflow), 1024).unwrap_err(),
+            RejectReason::StackMismatch
+        );
+
+        // Exceeds info.stack_size (4)
+        let overflow = [
+            sys::QJSJitOp_QJS_OP_push_0 as u8,
+            sys::QJSJitOp_QJS_OP_push_0 as u8,
+            sys::QJSJitOp_QJS_OP_push_0 as u8,
+            sys::QJSJitOp_QJS_OP_push_0 as u8,
+            sys::QJSJitOp_QJS_OP_push_0 as u8,
+            sys::QJSJitOp_QJS_OP_return_undef as u8,
+        ];
+        assert_eq!(
+            decode_bytecode(&make_info(&overflow), 1024).unwrap_err(),
+            RejectReason::StackOverflow
+        );
+
+        // Unsupported opcode (OP_catch)
+        let unsupported = [sys::QJSJitOp_QJS_OP_catch as u8, 0, 0, 0, 0];
+        assert_eq!(
+            decode_bytecode(&make_info(&unsupported), 1024).unwrap_err(),
+            RejectReason::UnsupportedOpcode(sys::QJSJitOp_QJS_OP_catch as u8)
+        );
+    }
 }
