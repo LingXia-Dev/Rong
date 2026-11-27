@@ -161,35 +161,40 @@ where
         return Ok(());
     }
     let natives = JSObject::<E::Value>::new(ctx);
-    let own = ctx.clone();
     natives.set(
         "canonicalizeTag",
-        JSFunc::<E::Value>::new(ctx, move |tag: String| -> Option<String> {
-            let state = own.get_service::<IntlState>()?;
-            locale::canonicalize(state.data.canonicalizer(), &tag)
-        })?,
+        JSFunc::<E::Value>::new(
+            ctx,
+            move |own: JSContext<E::Context>, tag: String| -> Option<String> {
+                let state = own.get_service::<IntlState>()?;
+                locale::canonicalize(state.data.canonicalizer(), &tag)
+            },
+        )?,
     )?;
-    let own = ctx.clone();
     natives.set(
         "defaultLocale",
-        JSFunc::<E::Value>::new(ctx, move |service: String| -> JSResult<String> {
-            Ok(state(&own)?.default_locale(&service))
-        })?,
+        JSFunc::<E::Value>::new(
+            ctx,
+            move |own: JSContext<E::Context>, service: String| -> JSResult<String> {
+                Ok(state(&own)?.default_locale(&service))
+            },
+        )?,
     )?;
-    let own = ctx.clone();
     natives.set(
         "settingsGeneration",
-        JSFunc::<E::Value>::new(ctx, move || -> f64 {
+        JSFunc::<E::Value>::new(ctx, move |own: JSContext<E::Context>| -> f64 {
             own.get_service::<IntlState>()
                 .map_or(0.0, |state| state.settings.generation() as f64)
         })?,
     )?;
-    let own = ctx.clone();
     natives.set(
         "resolveLocale",
         JSFunc::<E::Value>::new(
             ctx,
-            move |service: String, requested: Vec<String>| -> JSResult<String> {
+            move |own: JSContext<E::Context>,
+                  service: String,
+                  requested: Vec<String>|
+                  -> JSResult<String> {
                 let state = state(&own)?;
                 let available = |tag: &str| available(&state.data, &service, tag);
                 let default = state.default_locale(&service);
@@ -206,24 +211,28 @@ where
             },
         )?,
     )?;
-    let own = ctx.clone();
     natives.set(
         "supportedLocales",
         JSFunc::<E::Value>::new(
             ctx,
-            move |service: String, requested: Vec<String>| -> JSResult<Vec<String>> {
+            move |own: JSContext<E::Context>,
+                  service: String,
+                  requested: Vec<String>|
+                  -> JSResult<Vec<String>> {
                 let state = state(&own)?;
                 let available = |tag: &str| available(&state.data, &service, tag);
                 Ok(locale::supported_locales(&available, &requested))
             },
         )?,
     )?;
-    let own = ctx.clone();
     natives.set(
         "pluralResolve",
         JSFunc::<E::Value>::new(
             ctx,
-            move |slots: JSObject<E::Value>, value: String| -> JSResult<Vec<String>> {
+            move |own: JSContext<E::Context>,
+                  slots: JSObject<E::Value>,
+                  value: String|
+                  -> JSResult<Vec<String>> {
                 let state = state(&own)?;
                 let options = plural_options::<E>(&slots)?;
                 let (category, string) = plural::resolve(
@@ -236,12 +245,12 @@ where
             },
         )?,
     )?;
-    let own = ctx.clone();
     natives.set(
         "pluralResolveRange",
         JSFunc::<E::Value>::new(
             ctx,
-            move |slots: JSObject<E::Value>,
+            move |own: JSContext<E::Context>,
+                  slots: JSObject<E::Value>,
                   start: String,
                   end: String|
                   -> JSResult<Option<String>> {
@@ -272,12 +281,14 @@ where
             },
         )?,
     )?;
-    let own = ctx.clone();
     natives.set(
         "pluralCategories",
         JSFunc::<E::Value>::new(
             ctx,
-            move |locale: String, kind: String| -> JSResult<Vec<String>> {
+            move |own: JSContext<E::Context>,
+                  locale: String,
+                  kind: String|
+                  -> JSResult<Vec<String>> {
                 let state = state(&own)?;
                 let categories =
                     plural::categories(&state.plurals, &state.data, &locale, kind == "ordinal");
@@ -285,12 +296,12 @@ where
             },
         )?,
     )?;
-    let own = ctx.clone();
     natives.set(
         "resolveNumberFormat",
         JSFunc::<E::Value>::new(
             ctx,
-            move |requested: Vec<String>,
+            move |own: JSContext<E::Context>,
+                  requested: Vec<String>,
                   nu: Option<String>,
                   service: Option<String>|
                   -> JSResult<Vec<String>> {
@@ -317,12 +328,14 @@ where
             },
         )?,
     )?;
-    let own = ctx.clone();
     natives.set(
         "numberFormatParts",
         JSFunc::<E::Value>::new(
             ctx,
-            move |slots: JSObject<E::Value>, value: String| -> JSResult<Vec<Vec<String>>> {
+            move |own: JSContext<E::Context>,
+                  slots: JSObject<E::Value>,
+                  value: String|
+                  -> JSResult<Vec<Vec<String>>> {
                 let state = state(&own)?;
                 let options = number_format_options::<E>(&slots)?;
                 let (format, compact, measure) = number_format_data(state, &options)?;
@@ -340,12 +353,12 @@ where
             },
         )?,
     )?;
-    let own = ctx.clone();
     natives.set(
         "relativeTimeParts",
         JSFunc::<E::Value>::new(
             ctx,
-            move |slots: JSObject<E::Value>,
+            move |own: JSContext<E::Context>,
+                  slots: JSObject<E::Value>,
                   number_slots: JSObject<E::Value>,
                   unit: String,
                   value: String|
@@ -391,12 +404,14 @@ where
             },
         )?,
     )?;
-    let own = ctx.clone();
     natives.set(
         "listParts",
         JSFunc::<E::Value>::new(
             ctx,
-            move |slots: JSObject<E::Value>, list: Vec<String>| -> JSResult<Vec<Vec<String>>> {
+            move |own: JSContext<E::Context>,
+                  slots: JSObject<E::Value>,
+                  list: Vec<String>|
+                  -> JSResult<Vec<Vec<String>>> {
                 let state = state(&own)?;
                 let text = |key: &str| -> JSResult<String> { slots.get::<_, String>(key) };
                 let parts = list_format::format_to_parts(
@@ -418,12 +433,12 @@ where
             },
         )?,
     )?;
-    let own = ctx.clone();
     natives.set(
         "numberFormatRangeParts",
         JSFunc::<E::Value>::new(
             ctx,
-            move |slots: JSObject<E::Value>,
+            move |own: JSContext<E::Context>,
+                  slots: JSObject<E::Value>,
                   start: String,
                   end: String|
                   -> JSResult<Option<Vec<Vec<String>>>> {
@@ -454,19 +469,21 @@ where
             },
         )?,
     )?;
-    let own = ctx.clone();
     natives.set(
         "currencyDigits",
-        JSFunc::<E::Value>::new(ctx, move |code: String| -> JSResult<f64> {
-            Ok(f64::from(currency_digits(&state(&own)?.data, &code)))
-        })?,
+        JSFunc::<E::Value>::new(
+            ctx,
+            move |own: JSContext<E::Context>, code: String| -> JSResult<f64> {
+                Ok(f64::from(currency_digits(&state(&own)?.data, &code)))
+            },
+        )?,
     )?;
-    let own = ctx.clone();
     natives.set(
         "resolveDateTimeFormat",
         JSFunc::<E::Value>::new(
             ctx,
-            move |requested: Vec<String>,
+            move |own: JSContext<E::Context>,
+                  requested: Vec<String>,
                   ca: Option<String>,
                   nu: Option<String>,
                   hc: Option<String>|
@@ -518,19 +535,20 @@ where
             },
         )?,
     )?;
-    let own = ctx.clone();
     natives.set(
         "primaryTimeZone",
-        JSFunc::<E::Value>::new(ctx, move |name: String| -> JSResult<Option<String>> {
-            let state = state(&own)?;
-            no_database(&name)?;
-            Ok(date_time_format::primary_zone(&state.data, &name).ok())
-        })?,
+        JSFunc::<E::Value>::new(
+            ctx,
+            move |own: JSContext<E::Context>, name: String| -> JSResult<Option<String>> {
+                let state = state(&own)?;
+                no_database(&name)?;
+                Ok(date_time_format::primary_zone(&state.data, &name).ok())
+            },
+        )?,
     )?;
-    let own = ctx.clone();
     natives.set(
         "systemTimeZone",
-        JSFunc::<E::Value>::new(ctx, move || -> JSResult<String> {
+        JSFunc::<E::Value>::new(ctx, move |own: JSContext<E::Context>| -> JSResult<String> {
             let state = state(&own)?;
             let name = state
                 .settings
@@ -550,12 +568,13 @@ where
                 .unwrap_or_else(|_| String::from("UTC")))
         })?,
     )?;
-    let own = ctx.clone();
     natives.set(
         "dateTimeFormatFields",
         JSFunc::<E::Value>::new(
             ctx,
-            move |slots: JSObject<E::Value>| -> JSResult<Vec<Vec<String>>> {
+            move |own: JSContext<E::Context>,
+                  slots: JSObject<E::Value>|
+                  -> JSResult<Vec<Vec<String>>> {
                 let state = state(&own)?;
                 let request = date_time_request::<E>(&slots)?;
                 let format = state.date_times.get(&state.data, &request).map_err(|e| {
@@ -570,12 +589,14 @@ where
             },
         )?,
     )?;
-    let own = ctx.clone();
     natives.set(
         "dateTimeFormatParts",
         JSFunc::<E::Value>::new(
             ctx,
-            move |slots: JSObject<E::Value>, x: f64| -> JSResult<Vec<Vec<String>>> {
+            move |own: JSContext<E::Context>,
+                  slots: JSObject<E::Value>,
+                  x: f64|
+                  -> JSResult<Vec<Vec<String>>> {
                 let state = state(&own)?;
                 let request = date_time_request::<E>(&slots)?;
                 let zone: String = slots.get("timeZone")?;
@@ -592,12 +613,15 @@ where
             },
         )?,
     )?;
-    let own = ctx.clone();
     natives.set(
         "dateTimeFormatRangeParts",
         JSFunc::<E::Value>::new(
             ctx,
-            move |slots: JSObject<E::Value>, x: f64, y: f64| -> JSResult<Vec<Vec<String>>> {
+            move |own: JSContext<E::Context>,
+                  slots: JSObject<E::Value>,
+                  x: f64,
+                  y: f64|
+                  -> JSResult<Vec<Vec<String>>> {
                 let state = state(&own)?;
                 let request = date_time_request::<E>(&slots)?;
                 let zone: String = slots.get("timeZone")?;
@@ -618,12 +642,12 @@ where
             },
         )?,
     )?;
-    let own = ctx.clone();
     natives.set(
         "transformCase",
         JSFunc::<E::Value>::new(
             ctx,
-            move |text: String,
+            move |own: JSContext<E::Context>,
+                  text: String,
                   requested: Option<String>,
                   upper: bool|
                   -> JSResult<Option<String>> {
