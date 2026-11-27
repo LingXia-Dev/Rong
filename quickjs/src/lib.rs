@@ -2,6 +2,8 @@ mod class;
 mod context;
 #[cfg(feature = "intl")]
 pub mod intl;
+#[cfg(feature = "jit")]
+pub mod jit;
 mod runtime;
 mod stack;
 mod value;

@@ -2,7 +2,7 @@
 members = [
     "core",
     "rong_macro",
-    "quickjs", "quickjs/sys", "quickjs/intl", "quickjs/tz",
+    "quickjs", "quickjs/sys", "quickjs/intl", "quickjs/tz", "quickjs/jit",
     "javascriptcore", "javascriptcore/sys",
     "arkjs", "arkjs/sys",
     "testing/rong_test",
@@ -46,6 +46,7 @@ rong_quickjs = { path = "quickjs"      , version = "0.8.0" }
 rong_quickjs_sys = { path = "quickjs/sys"      , version = "0.7.0" }
 rong_quickjs_intl = { path = "quickjs/intl"      , version = "0.8.0" }
 rong_quickjs_tz = { path = "quickjs/tz"      , version = "0.8.0" }
+rong_quickjs_jit = { path = "quickjs/jit"      , version = "0.8.0" }
 rong_jscore = { path = "javascriptcore"      , version = "0.8.0" }
 rong_jscore_sys = { path = "javascriptcore/sys"      , version = "0.6.1" }
 rong_arkjs = { path = "arkjs"      , version = "0.8.0" }
@@ -168,6 +169,9 @@ quickjs-intl = ["quickjs-intl-system-tzdb", "rong_quickjs?/intl-bundled-tzdb"]
 # `quickjs-intl` without that copy: Android 10+ and HarmonyOS always ship a
 # database; without one, named zones throw an error naming the cause.
 quickjs-intl-system-tzdb = ["rong_quickjs?/intl"]
+# Cranelift baseline JIT compiler for QuickJS (`rong::quickjs::jit`). Needs
+# `quickjs`; enabled on x86_64 and aarch64 (excluding iOS, where it is a no-op).
+quickjs-jit = ["rong_quickjs?/jit"]
 jscore = ["dep:rong_jscore"]
 # Source/JSCOnly builds always enable hard interruption in `rong_jscore`.
 jscore-source = ["jscore", "rong_jscore/source"]

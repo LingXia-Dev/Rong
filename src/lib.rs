@@ -93,11 +93,20 @@ pub mod quickjs {
     /// ECMA-402 `Intl` for QuickJS (the `quickjs-intl` feature).
     #[cfg(feature = "quickjs-intl")]
     pub use rong_quickjs::intl;
+
+    /// Cranelift baseline JIT for QuickJS (the `quickjs-jit` feature).
+    #[cfg(feature = "quickjs-jit")]
+    pub use rong_quickjs::jit;
 }
 
 #[cfg(all(feature = "quickjs-intl", not(feature = "quickjs")))]
 compile_error!(
     "the `rong` feature `quickjs-intl` gives QuickJS an `Intl`; enable `quickjs` too. JavaScriptCore and ArkJS have their own."
+);
+
+#[cfg(all(feature = "quickjs-jit", not(feature = "quickjs")))]
+compile_error!(
+    "the `rong` feature `quickjs-jit` gives QuickJS a JIT compiler; enable `quickjs` too."
 );
 
 /// JavaScriptCore, usable beside another engine in the same binary.

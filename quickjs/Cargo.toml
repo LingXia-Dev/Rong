@@ -16,6 +16,7 @@ readme = "README.md"
 rong_quickjs_sys = { workspace = true }
 rong_core = { workspace = true }
 rong_quickjs_intl = { workspace = true, optional = true }
+rong_quickjs_jit = { workspace = true, optional = true }
 smallvec = { workspace = true }
 
 [features]
@@ -25,6 +26,8 @@ intl = ["dep:rong_quickjs_intl"]
 # With `intl`: a tz database copy on Android and HarmonyOS for when the
 # system's cannot answer (207 KB).
 intl-bundled-tzdb = ["intl", "rong_quickjs_intl?/bundled-tzdb"]
+# Cranelift baseline JIT compiler as `rong_quickjs::jit`; off by default.
+jit = ["dep:rong_quickjs_jit", "rong_quickjs_sys/jit"]
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
