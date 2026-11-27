@@ -353,6 +353,18 @@ run_all_core_tests() {
         else
             record_suite_result "quickjs-intl feature" 1 || true
         fi
+        log_info "Running JIT tests (quickjs)"
+        if run_cargo_test -p rong_quickjs_jit --quiet "${extra[@]}"; then
+            record_suite_result "JIT tests on quickjs" 0
+        else
+            record_suite_result "JIT tests on quickjs" 1 || true
+        fi
+        log_info "Running the quickjs-jit feature test"
+        if run_cargo_test -p rong --no-default-features --features="$feature_set,quickjs-jit" --test quickjs_jit --quiet "${extra[@]}"; then
+            record_suite_result "quickjs-jit feature" 0
+        else
+            record_suite_result "quickjs-jit feature" 1 || true
+        fi
     fi
 
     # The examples in `rong::function` include the closures that must not compile.

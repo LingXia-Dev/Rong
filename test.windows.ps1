@@ -259,6 +259,19 @@ function Run-AllCoreTests([string]$EngineName, [string[]]$CoreTests) {
         $featArgs = @("-p", "rong", "--no-default-features", "--features=$featureSet,quickjs-intl", "--test", "quickjs_intl", "--quiet")
         & cargo test @featArgs
         Record-SuiteResult -Name "quickjs-intl feature" -ExitCode $LASTEXITCODE
+
+        Log-Info "Running JIT tests (quickjs)"
+        $jitArgs = @("-p", "rong_quickjs_jit", "--quiet")
+        if (-not $script:FailFast) {
+            $jitArgs += "--no-fail-fast"
+        }
+        & cargo test @jitArgs
+        Record-SuiteResult -Name "JIT tests on quickjs" -ExitCode $LASTEXITCODE
+
+        Log-Info "Running the quickjs-jit feature test"
+        $jitFeatArgs = @("-p", "rong", "--no-default-features", "--features=$featureSet,quickjs-jit", "--test", "quickjs_jit", "--quiet")
+        & cargo test @jitFeatArgs
+        Record-SuiteResult -Name "quickjs-jit feature" -ExitCode $LASTEXITCODE
     }
 
     # The examples in `rong::function` include the closures that must not compile.
