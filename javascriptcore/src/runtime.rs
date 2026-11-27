@@ -2,7 +2,7 @@ use crate::{JSCContext, JSCValue, jsc};
 #[cfg(jsc_interrupt)]
 use rong_core::InterruptSignal;
 use rong_core::{JSEngine, JSRuntimeImpl};
-#[cfg(jsc_interrupt)]
+#[cfg(any(jsc_interrupt, jsc_source))]
 use std::cell::Cell;
 
 /// How often JSC's watchdog consults the callback while JavaScript runs.
@@ -17,12 +17,38 @@ struct WatchdogState {
     signal: InterruptSignal,
 }
 
+#[cfg(jsc_source)]
+unsafe fn read_stat_u64(
+    ctx: jsc::JSContextRef,
+    obj: jsc::JSObjectRef,
+    name: &std::ffi::CStr,
+) -> Option<u64> {
+    unsafe {
+        let key = jsc::JSStringCreateWithUTF8CString(name.as_ptr());
+        let mut exception: jsc::JSValueRef = std::ptr::null();
+        let val = jsc::JSObjectGetProperty(ctx, obj, key, &mut exception);
+        jsc::JSStringRelease(key);
+        if !exception.is_null() || val.is_null() || !jsc::JSValueIsNumber(ctx, val) {
+            return None;
+        }
+        let num = jsc::JSValueToNumber(ctx, val, &mut exception);
+        if !exception.is_null() || !num.is_finite() || num < 0.0 {
+            return None;
+        }
+        Some(num as u64)
+    }
+}
+
 pub struct JSCRuntime {
     raw: *const jsc::OpaqueJSContextGroup,
     /// The installed watchdog's callback context (`*mut WatchdogState`), or
     /// null when no interrupt flag was installed.
     #[cfg(jsc_interrupt)]
     watchdog_state: Cell<*mut WatchdogState>,
+    /// Lazily created lightweight context used only when `memory_usage` is
+    /// queried while no `JSCContext` is alive in this context group.
+    #[cfg(jsc_source)]
+    stats_context: Cell<*mut jsc::OpaqueJSContext>,
 }
 
 /// Invoked on the JS thread each time the execution time limit elapses.
@@ -69,6 +95,8 @@ impl JSRuntimeImpl for JSCRuntime {
             raw: unsafe { jsc::JSContextGroupCreate() },
             #[cfg(jsc_interrupt)]
             watchdog_state: Cell::new(std::ptr::null_mut()),
+            #[cfg(jsc_source)]
+            stats_context: Cell::new(std::ptr::null_mut()),
         }
     }
 
@@ -80,6 +108,61 @@ impl JSRuntimeImpl for JSCRuntime {
     // its own schedule, from timers that `run_engine_timers` services on
     // Apple's system framework.
     fn run_gc(&self) {}
+
+    /// Source/JSCOnly builds query `JSGetMemoryUsageStatistics` (C ABI from
+    /// `JSBasePrivate.h`, compiled inside `libJavaScriptCore` itself so there is
+    /// no C++ struct-offset sensitivity across platforms/toolchains). Apple's
+    /// system `JavaScriptCore.framework` has no public heap-statistics API
+    /// (keeping default iOS/macOS builds free of private SPI symbols) and keeps
+    /// the default `None`.
+    #[cfg(jsc_source)]
+    fn memory_usage(&self) -> Option<rong_core::MemoryUsage> {
+        if self.raw.is_null() {
+            return None;
+        }
+        // Prefer any live user context in this group so steady-state sampling
+        // never allocates an extra global object. When no user context is
+        // currently alive (for example, between tasks on a shared worker pool),
+        // lazily create and retain at most one lightweight context for the
+        // lifetime of the runtime rather than churning dropped contexts.
+        let ctx = match crate::context::any_context_of_group(self.raw) {
+            Some(live_ctx) => live_ctx,
+            None => {
+                let cached = self.stats_context.get();
+                if !cached.is_null() {
+                    cached
+                } else {
+                    let created = unsafe {
+                        jsc::JSGlobalContextCreateInGroup(self.raw, std::ptr::null_mut())
+                    };
+                    if created.is_null() {
+                        return None;
+                    }
+                    self.stats_context.set(created);
+                    created
+                }
+            }
+        };
+
+        unsafe {
+            let stats_obj = jsc::JSGetMemoryUsageStatistics(ctx);
+            if stats_obj.is_null() {
+                return None;
+            }
+            let used_bytes = read_stat_u64(ctx, stats_obj, c"heapSize")?;
+            let mut usage = rong_core::MemoryUsage::new(used_bytes);
+            if let Some(cap) = read_stat_u64(ctx, stats_obj, c"heapCapacity") {
+                usage = usage.with_allocated_bytes(cap);
+            }
+            if let Some(extra) = read_stat_u64(ctx, stats_obj, c"extraMemorySize") {
+                usage = usage.with_external_bytes(extra);
+            }
+            if let Some(objs) = read_stat_u64(ctx, stats_obj, c"objectCount") {
+                usage = usage.with_object_count(objs);
+            }
+            Some(usage)
+        }
+    }
 
     /// Apple's system framework runs JSC's collection timers, sweeper and
     /// deferred work on the VM thread's CFRunLoop. Always `Some`: timers get
@@ -128,6 +211,14 @@ impl Drop for JSCRuntime {
                 if !state.is_null() {
                     jsc::JSContextGroupClearExecutionTimeLimit(self.raw);
                     drop(Box::from_raw(state));
+                }
+            }
+            #[cfg(jsc_source)]
+            {
+                crate::context::clear_group_contexts(self.raw);
+                let stats_ctx = self.stats_context.replace(std::ptr::null_mut());
+                if !stats_ctx.is_null() {
+                    jsc::JSGlobalContextRelease(stats_ctx);
                 }
             }
             jsc::JSContextGroupRelease(self.raw);

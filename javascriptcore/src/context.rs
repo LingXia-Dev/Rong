@@ -4,8 +4,91 @@ use rong_core::{
     RongJSError,
 };
 use smallvec::SmallVec;
+#[cfg(jsc_source)]
+use std::cell::RefCell;
+#[cfg(jsc_source)]
+use std::collections::HashMap;
 use std::ffi::CString;
 use std::ptr;
+
+#[cfg(jsc_source)]
+thread_local! {
+    /// Tracks live `JSGlobalContextRef`s `(group_addr, rust_handle_count)` on
+    /// the current thread so `JSCRuntime::memory_usage` can query
+    /// `JSGetMemoryUsageStatistics` using an existing context when available.
+    #[allow(clippy::missing_const_for_thread_local)]
+    static LIVE_CONTEXTS: RefCell<HashMap<usize, (usize, usize)>> = RefCell::new(HashMap::new());
+}
+
+#[cfg(jsc_source)]
+fn register_live_context(group: *const jsc::OpaqueJSContextGroup, ctx: *mut jsc::OpaqueJSContext) {
+    if ctx.is_null() {
+        return;
+    }
+    let _ = LIVE_CONTEXTS.try_with(|map| {
+        let mut map = map.borrow_mut();
+        map.entry(ctx as usize)
+            .and_modify(|(_, count)| *count += 1)
+            .or_insert((group as usize, 1));
+    });
+}
+
+#[cfg(jsc_source)]
+fn retain_live_context(ctx: *mut jsc::OpaqueJSContext) {
+    if ctx.is_null() {
+        return;
+    }
+    let _ = LIVE_CONTEXTS.try_with(|map| {
+        if let Some((_, count)) = map.borrow_mut().get_mut(&(ctx as usize)) {
+            *count += 1;
+        }
+    });
+}
+
+#[cfg(jsc_source)]
+fn release_live_context(ctx: *mut jsc::OpaqueJSContext) {
+    if ctx.is_null() {
+        return;
+    }
+    let _ = LIVE_CONTEXTS.try_with(|map| {
+        let mut map = map.borrow_mut();
+        let remove = if let Some((_, count)) = map.get_mut(&(ctx as usize)) {
+            *count = count.saturating_sub(1);
+            *count == 0
+        } else {
+            false
+        };
+        if remove {
+            map.remove(&(ctx as usize));
+        }
+    });
+}
+
+#[cfg(jsc_source)]
+pub(crate) fn any_context_of_group(
+    group: *const jsc::OpaqueJSContextGroup,
+) -> Option<*mut jsc::OpaqueJSContext> {
+    let target = group as usize;
+    LIVE_CONTEXTS
+        .try_with(|map| {
+            map.borrow()
+                .iter()
+                .find_map(|(&ctx_addr, &(grp_addr, count))| {
+                    (grp_addr == target && count > 0)
+                        .then_some(ctx_addr as *mut jsc::OpaqueJSContext)
+                })
+        })
+        .ok()
+        .flatten()
+}
+
+#[cfg(jsc_source)]
+pub(crate) fn clear_group_contexts(group: *const jsc::OpaqueJSContextGroup) {
+    let target = group as usize;
+    let _ = LIVE_CONTEXTS.try_with(|map| {
+        map.borrow_mut().retain(|_, (grp, _)| *grp != target);
+    });
+}
 
 /// Bytecode is unavailable through JavaScriptCore's public C API, so every
 /// bytecode entry point reports the same not-supported message.
@@ -29,9 +112,11 @@ impl JSContextImpl for JSCContext {
         // framework gets this from the dylib's static initializers).
         #[cfg(jsc_source)]
         jsc::ensure_initialized();
-        let ctx = Self {
-            raw: unsafe { jsc::JSGlobalContextCreateInGroup(runtime.to_raw(), ptr::null_mut()) },
-        };
+        let group = runtime.to_raw();
+        let raw = unsafe { jsc::JSGlobalContextCreateInGroup(group, ptr::null_mut()) };
+        #[cfg(jsc_source)]
+        register_live_context(group, raw);
+        let ctx = Self { raw };
         let _ = crate::value::proxy::prime_proxy_helper(&ctx);
         ctx
     }
@@ -452,6 +537,8 @@ impl JSCContext {
 
     fn _from_borrowed_raw(ctx: *mut jsc::OpaqueJSContext) -> Self {
         let raw = unsafe { jsc::JSGlobalContextRetain(ctx) };
+        #[cfg(jsc_source)]
+        retain_live_context(raw);
         Self { raw }
     }
 
@@ -462,6 +549,8 @@ impl JSCContext {
 
 impl Drop for JSCContext {
     fn drop(&mut self) {
+        #[cfg(jsc_source)]
+        release_live_context(self.raw);
         unsafe {
             jsc::JSGlobalContextRelease(self.raw);
         }
@@ -473,6 +562,8 @@ impl Clone for JSCContext {
         unsafe {
             // Retains a global JavaScript execution context.
             jsc::JSGlobalContextRetain(self.raw);
+            #[cfg(jsc_source)]
+            retain_live_context(self.raw);
             Self { raw: self.raw }
         }
     }

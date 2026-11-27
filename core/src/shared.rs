@@ -479,6 +479,24 @@ impl<E: JSEngine + 'static> Worker<E> {
         }
     }
 
+    /// Samples this worker runtime's current heap and allocator memory usage on
+    /// the worker thread.
+    ///
+    /// Returns `Ok(None)` when the underlying engine backend has no public
+    /// heap-statistics API.
+    pub async fn memory_usage(&self) -> JSResult<Option<crate::MemoryUsage>> {
+        self.call(|runtime, _receiver| async move { Ok(runtime.memory_usage()) })
+            .await
+    }
+
+    /// Blocking counterpart to [`memory_usage`](Self::memory_usage).
+    pub fn memory_usage_blocking(&self) -> JSResult<Option<crate::MemoryUsage>> {
+        ensure_sync_bridge_allowed("Worker::memory_usage_blocking")?;
+        rong_rt::RongExecutor::global()
+            .handle()
+            .block_on(self.memory_usage())
+    }
+
     pub fn terminate(&self) -> JSResult<()> {
         self.terminate_signal.notify_one();
         Ok(())
@@ -646,6 +664,20 @@ impl<E: JSEngine + 'static> Rong<E> {
     pub async fn join(&self) -> JSResult<()> {
         futures::future::try_join_all(self.inner.workers.iter().map(Worker::join)).await?;
         Ok(())
+    }
+
+    /// Samples memory usage across every worker in worker-ID order
+    /// (`0..total_workers_count()`).
+    pub async fn memory_usage(&self) -> JSResult<Vec<Option<crate::MemoryUsage>>> {
+        futures::future::try_join_all(self.inner.workers.iter().map(Worker::memory_usage)).await
+    }
+
+    /// Blocking counterpart to [`memory_usage`](Self::memory_usage).
+    pub fn memory_usage_blocking(&self) -> JSResult<Vec<Option<crate::MemoryUsage>>> {
+        ensure_sync_bridge_allowed("Rong::memory_usage_blocking")?;
+        rong_rt::RongExecutor::global()
+            .handle()
+            .block_on(self.memory_usage())
     }
 
     pub fn shutdown(&self) -> JSResult<()> {

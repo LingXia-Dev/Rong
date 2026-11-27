@@ -8,16 +8,16 @@ pub use rong_core::{
     JSIterator, JSObject as CoreJSObject, JSProxy as CoreJSProxy, JSResult,
     JSRuntime as CoreJSRuntime, JSRuntimeService, JSSymbol as CoreJSSymbol,
     JSTypedArray as CoreJSTypedArray, JSTypedArrayKind, JSValue as CoreJSValue, JSValueType,
-    JsonToJSValue, Promise as CorePromise, PropertyDescriptor as CorePropertyDescriptor,
-    RejectionEvent as CoreRejectionEvent, RejectionEvents, RongJSError, Source, SourceKind,
-    TaskScope, Uint8Clamped, error, illegal_constructor, install_async_iterator_symbol,
-    install_iterator_symbol,
+    JsonToJSValue, MemoryUsage, Promise as CorePromise,
+    PropertyDescriptor as CorePropertyDescriptor, RejectionEvent as CoreRejectionEvent,
+    RejectionEvents, RongJSError, Source, SourceKind, TaskScope, Uint8Clamped, error,
+    illegal_constructor, install_async_iterator_symbol, install_iterator_symbol,
 };
 // Re-export selected runtime API from rong_core::rong so downstream crates use `rong::...`
 pub use rong_core::rong::{
     Rong, RongBuildError, TaskHandle, TaskMessage, Worker, WorkerState, spawn_local,
 };
-pub use rong_core::{PinnedRong, PinnedSpawnError};
+pub use rong_core::{PinnedRong, PinnedSpawnError, PinnedWorker};
 
 // Re-export user-agent helpers.
 pub use rong_rt::sse;

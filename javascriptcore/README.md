@@ -12,6 +12,11 @@ This crate provides the JavaScriptCore (JSC) backend for RongJS.
 - Interruption: source/JSCOnly builds always enable execution preemption;
   system-framework builds opt in with `jscore-interrupt` on `rong` (or
   `interrupt-spi` on this crate).
+- Memory statistics: source/JSCOnly builds report `Some(MemoryUsage)` from
+  `JSRuntime::memory_usage` via `JSGetMemoryUsageStatistics` (heap size,
+  capacity, extra memory, and object count); Apple's system
+  `JavaScriptCore.framework` exposes no public heap-statistics C API and
+  returns `None`.
 - Garbage collection: JSC collects on its own schedule, from timers it arms
   on the VM thread's run loop. With the system framework, Rong's workers
   service that run loop (public CoreFoundation only), so JSC reclaims retired

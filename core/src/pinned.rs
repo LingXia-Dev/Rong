@@ -38,6 +38,11 @@ struct PinnedAsyncTask<E: JSEngine + 'static, K, S> {
     parent_span: Span,
 }
 
+enum PinnedCommand<E: JSEngine + 'static, K, S> {
+    Task(PinnedAsyncTask<E, K, S>),
+    MemoryUsage(oneshot::Sender<JSResult<Option<crate::MemoryUsage>>>),
+}
+
 #[derive(Debug, Error)]
 pub enum PinnedSpawnError {
     #[error("pinned worker {worker_id} queue is full at depth {depth}")]
@@ -48,7 +53,7 @@ pub enum PinnedSpawnError {
 
 pub struct PinnedWorker<E: JSEngine + 'static, K, S> {
     id: usize,
-    task_tx: mpsc::Sender<PinnedAsyncTask<E, K, S>>,
+    task_tx: mpsc::Sender<PinnedCommand<E, K, S>>,
     terminate_signal: Arc<Notify>,
     interrupt: crate::InterruptHandle,
     inflight_tasks: Arc<AtomicUsize>,
@@ -145,7 +150,7 @@ where
             parent_span: Span::current(),
         };
 
-        if let Err(error) = self.task_tx.send(task).await {
+        if let Err(error) = self.task_tx.send(PinnedCommand::Task(task)).await {
             return Err(HostError::new(
                 crate::error::E_INTERNAL,
                 format!(
@@ -201,7 +206,7 @@ where
             parent_span: Span::current(),
         };
 
-        match self.task_tx.try_send(task) {
+        match self.task_tx.try_send(PinnedCommand::Task(task)) {
             Ok(()) => Ok(TaskHandle::new(self.id, message_tx, result_rx, execution)),
             Err(mpsc::error::TrySendError::Full(_)) => {
                 self.decrement_inflight();
@@ -309,6 +314,53 @@ where
         }
     }
 
+    /// Samples this pinned worker runtime's current heap and allocator memory
+    /// usage on the worker thread without requiring a routing key or touching
+    /// per-key state.
+    pub async fn memory_usage(&self) -> JSResult<Option<crate::MemoryUsage>> {
+        self.inflight_tasks.fetch_add(1, Ordering::SeqCst);
+        let mut inflight_guard = InflightGuard::new(
+            &self.inflight_tasks,
+            &self.idle_notify,
+            &self.any_worker_idle,
+        );
+
+        let (result_tx, result_rx) = oneshot::channel();
+        if let Err(error) = self
+            .task_tx
+            .send(PinnedCommand::MemoryUsage(result_tx))
+            .await
+        {
+            return Err(HostError::new(
+                crate::error::E_INTERNAL,
+                format!(
+                    "Failed to queue memory_usage query on pinned worker {}: {:?}",
+                    self.id, error
+                ),
+            )
+            .into());
+        }
+        inflight_guard.disarm();
+
+        result_rx.await.map_err(|error| {
+            HostError::new(
+                crate::error::E_INTERNAL,
+                format!(
+                    "Failed to receive memory_usage result from pinned worker {}: {:?}",
+                    self.id, error
+                ),
+            )
+        })?
+    }
+
+    /// Blocking counterpart to [`memory_usage`](Self::memory_usage).
+    pub fn memory_usage_blocking(&self) -> JSResult<Option<crate::MemoryUsage>> {
+        ensure_sync_bridge_allowed("PinnedWorker::memory_usage_blocking")?;
+        rong_rt::RongExecutor::global()
+            .handle()
+            .block_on(self.memory_usage())
+    }
+
     pub fn terminate(&self) -> JSResult<()> {
         self.terminate_signal.notify_one();
         Ok(())
@@ -396,6 +448,20 @@ where
 
     pub fn total_workers_count(&self) -> usize {
         self.inner.workers.len()
+    }
+
+    pub fn worker(&self, id: usize) -> JSResult<PinnedWorker<E, K, S>> {
+        self.inner.workers.get(id).cloned().ok_or_else(|| {
+            HostError::new(
+                crate::error::E_NOT_FOUND,
+                format!("Pinned worker {id} not found"),
+            )
+            .into()
+        })
+    }
+
+    pub fn workers(&self) -> Vec<PinnedWorker<E, K, S>> {
+        self.inner.workers.clone()
     }
 
     pub fn worker_id_for_key(&self, key: &K) -> usize {
@@ -490,6 +556,22 @@ where
     pub async fn join(&self) -> JSResult<()> {
         futures::future::try_join_all(self.inner.workers.iter().map(PinnedWorker::join)).await?;
         Ok(())
+    }
+
+    /// Samples memory usage across every pinned worker in worker-ID order
+    /// (`0..total_workers_count()`), without requiring routing keys or touching
+    /// per-key state.
+    pub async fn memory_usage(&self) -> JSResult<Vec<Option<crate::MemoryUsage>>> {
+        futures::future::try_join_all(self.inner.workers.iter().map(PinnedWorker::memory_usage))
+            .await
+    }
+
+    /// Blocking counterpart to [`memory_usage`](Self::memory_usage).
+    pub fn memory_usage_blocking(&self) -> JSResult<Vec<Option<crate::MemoryUsage>>> {
+        ensure_sync_bridge_allowed("PinnedRong::memory_usage_blocking")?;
+        rong_rt::RongExecutor::global()
+            .handle()
+            .block_on(self.memory_usage())
     }
 
     pub fn shutdown(&self) -> JSResult<()> {
@@ -633,7 +715,7 @@ where
 #[allow(clippy::too_many_arguments)]
 async fn run_pinned_worker_loop<E, K, S>(
     worker_id: usize,
-    mut task_rx: mpsc::Receiver<PinnedAsyncTask<E, K, S>>,
+    mut task_rx: mpsc::Receiver<PinnedCommand<E, K, S>>,
     terminate_signal: Arc<Notify>,
     interrupt: crate::InterruptHandle,
     inflight_tasks: Arc<AtomicUsize>,
@@ -699,9 +781,9 @@ async fn run_pinned_worker_loop<E, K, S>(
                         }
                     }
 
-                    maybe_task = task_rx.recv(), if current_task_join.is_none() && !shutting_down => {
-                        match maybe_task {
-                            Some(task) => {
+                    maybe_cmd = task_rx.recv(), if current_task_join.is_none() && !shutting_down => {
+                        match maybe_cmd {
+                            Some(PinnedCommand::Task(task)) => {
                                 let PinnedAsyncTask {
                                     key,
                                     future_fn,
@@ -744,6 +826,13 @@ async fn run_pinned_worker_loop<E, K, S>(
                                         idle_notify.notify_waiters();
                                         any_worker_idle.notify_one();
                                     }
+                                }
+                            }
+                            Some(PinnedCommand::MemoryUsage(result_tx)) => {
+                                let _ = result_tx.send(Ok(js_runtime.memory_usage()));
+                                if inflight_tasks.fetch_sub(1, Ordering::SeqCst) == 1 {
+                                    idle_notify.notify_waiters();
+                                    any_worker_idle.notify_one();
                                 }
                             }
                             None => {
@@ -803,12 +892,19 @@ async fn run_pinned_worker_loop<E, K, S>(
                 }
             }
 
-            while let Ok(task) = task_rx.try_recv() {
-                let result = match task.execution.finish() {
-                    Some(timeout) => Err(task_timeout_error(worker_id, timeout)),
-                    None => Err(HostError::aborted(None).into()),
-                };
-                let _ = task.result_tx.send(result);
+            while let Ok(command) = task_rx.try_recv() {
+                match command {
+                    PinnedCommand::Task(task) => {
+                        let result = match task.execution.finish() {
+                            Some(timeout) => Err(task_timeout_error(worker_id, timeout)),
+                            None => Err(HostError::aborted(None).into()),
+                        };
+                        let _ = task.result_tx.send(result);
+                    }
+                    PinnedCommand::MemoryUsage(result_tx) => {
+                        let _ = result_tx.send(Err(HostError::aborted(None).into()));
+                    }
+                }
                 if inflight_tasks.fetch_sub(1, Ordering::SeqCst) == 1 {
                     idle_notify.notify_waiters();
                     any_worker_idle.notify_one();

@@ -35,6 +35,13 @@ unsafe extern "C" {
     );
 }
 
+// Heap memory statistics from JSBasePrivate.h. Private on the system
+// framework, so only the source backend links or exposes it.
+#[cfg(jsc_source)]
+unsafe extern "C" {
+    pub fn JSGetMemoryUsageStatistics(ctx: JSContextRef) -> JSObjectRef;
+}
+
 // JavaScriptCore's full one-time global initialization (WTF, option parsing,
 // Gigacage, the executable allocator, signal handlers, Structure tables). The
 // system framework runs this from the dylib's static initializers before
