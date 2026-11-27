@@ -185,12 +185,12 @@ fn shared_and_pinned_worker_pools_report_memory_usage() {
         .expect("tokio runtime must start");
 
     rt.block_on(async {
-        let shared_stats = shared
-            .memory_usage()
-            .await
-            .expect("shared pool memory_usage must succeed");
+        let shared_stats = shared.memory_usage().await;
         assert_eq!(shared_stats.len(), 2);
         for entry in &shared_stats {
+            let entry = entry
+                .as_ref()
+                .expect("shared worker memory_usage must succeed");
             assert_eq!(entry.is_some(), expected_some);
             if let Some(usage) = entry {
                 assert!(usage.allocated_bytes.unwrap_or(0) > 0);
@@ -236,12 +236,12 @@ fn shared_and_pinned_worker_pools_report_memory_usage() {
             .expect("pinned call must succeed");
         assert_eq!(count, 3);
 
-        let pinned_stats = pinned
-            .memory_usage()
-            .await
-            .expect("pinned pool memory_usage must succeed");
+        let pinned_stats = pinned.memory_usage().await;
         assert_eq!(pinned_stats.len(), 2);
         for entry in &pinned_stats {
+            let entry = entry
+                .as_ref()
+                .expect("pinned worker memory_usage must succeed");
             assert_eq!(entry.is_some(), expected_some);
             if let Some(usage) = entry {
                 assert!(usage.allocated_bytes.unwrap_or(0) > 0);
@@ -266,6 +266,12 @@ fn shared_and_pinned_worker_pools_report_memory_usage() {
             .expect("pinned state must remain intact after memory_usage");
         assert_eq!(count_after, 3);
     });
+
+    let blocking = shared
+        .memory_usage_blocking()
+        .expect("sync bridge is allowed outside the executor");
+    assert_eq!(blocking.len(), 2);
+    assert!(blocking.iter().all(Result::is_ok));
 }
 
 #[test]

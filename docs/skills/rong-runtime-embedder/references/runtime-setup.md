@@ -46,9 +46,11 @@ Keep the runtime and every context created from it on the owning thread. Share
 only explicitly thread-safe handles such as `InterruptHandle` across threads.
 Use a worker pool instead of wrapping runtime/context values in ad-hoc locking.
 Sample heap and allocator metrics with `runtime.memory_usage()` (or
-`rong.memory_usage().await` on shared/pinned worker pools); handle `None` on
-backends without a public heap-statistics API (such as Apple's system
-`JavaScriptCore.framework`).
+`rong.memory_usage().await` on shared/pinned worker pools, one `JSResult` per
+worker); handle `None` on backends without a public heap-statistics API (such
+as Apple's system `JavaScriptCore.framework`). Sampling walks the heap, so do it
+periodically, never per call. `external_bytes` is inside `used_bytes` on JSC but
+outside it on ArkJS.
 
 ## Install an explicit module surface
 

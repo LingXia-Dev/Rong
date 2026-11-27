@@ -367,6 +367,7 @@ impl JSRuntimeImpl for ArkJSRuntime {
             return None;
         }
         let stats = unsafe { stats.assume_init() };
+        // V8-based JSVM keeps externalMemory outside usedHeapSize.
         let mut usage = rong_core::MemoryUsage::new(stats.usedHeapSize as u64)
             .with_allocated_bytes(stats.totalHeapSize as u64)
             .with_external_bytes(stats.externalMemory as u64);

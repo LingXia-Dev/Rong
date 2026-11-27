@@ -83,17 +83,22 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
   sampling on `Worker::memory_usage`, `Rong::memory_usage`,
   `PinnedWorker::memory_usage`, and `PinnedRong::memory_usage` (with
   `*_blocking` counterparts, and `PinnedRong::{worker, workers}` /
-  `rong::PinnedWorker`).
+  `rong::PinnedWorker`). Pool sampling returns one `JSResult` per worker in
+  worker-ID order, so one failing worker does not hide the others. Sampling
+  can walk the whole heap (QuickJS is O(heap)): use it for tests, diagnostics
+  or a periodic gauge, not per frame or per call.
   - **QuickJS**: backed by `JS_ComputeMemoryUsage` (`used_bytes`,
     `allocated_bytes`, optional `limit_bytes` from `JS_SetMemoryLimit`, and
     `object_count`).
   - **JavaScriptCore (`jscore-source` / non-Apple `jscore`)**: backed by
     `JSGetMemoryUsageStatistics` (`used_bytes`, `allocated_bytes`,
-    `external_bytes`, and `object_count`). Apple's system
+    `external_bytes`, and `object_count`); `external_bytes` is already inside
+    `used_bytes`, so do not add them. Apple's system
     `JavaScriptCore.framework` has no public heap-statistics C API and returns
     `None`.
   - **ArkJS**: backed by `OH_JSVM_GetHeapStatistics` (`used_bytes`,
-    `allocated_bytes`, `limit_bytes`, and `external_bytes`).
+    `allocated_bytes`, `limit_bytes`, and `external_bytes`); `external_bytes`
+    is outside `used_bytes`.
 
 ## [0.8.0] - 2026-11-22
 

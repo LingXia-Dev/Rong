@@ -558,20 +558,21 @@ where
         Ok(())
     }
 
-    /// Samples memory usage across every pinned worker in worker-ID order
-    /// (`0..total_workers_count()`), without requiring routing keys or touching
-    /// per-key state.
-    pub async fn memory_usage(&self) -> JSResult<Vec<Option<crate::MemoryUsage>>> {
-        futures::future::try_join_all(self.inner.workers.iter().map(PinnedWorker::memory_usage))
-            .await
+    /// Samples memory usage on every pinned worker, one entry per worker in
+    /// worker-ID order (`0..total_workers_count()`), without requiring routing
+    /// keys or touching per-key state; a failing worker does not hide the
+    /// other samples.
+    pub async fn memory_usage(&self) -> Vec<JSResult<Option<crate::MemoryUsage>>> {
+        futures::future::join_all(self.inner.workers.iter().map(PinnedWorker::memory_usage)).await
     }
 
-    /// Blocking counterpart to [`memory_usage`](Self::memory_usage).
-    pub fn memory_usage_blocking(&self) -> JSResult<Vec<Option<crate::MemoryUsage>>> {
+    /// Blocking counterpart to [`memory_usage`](Self::memory_usage). The outer
+    /// error only reports a disallowed sync bridge.
+    pub fn memory_usage_blocking(&self) -> JSResult<Vec<JSResult<Option<crate::MemoryUsage>>>> {
         ensure_sync_bridge_allowed("PinnedRong::memory_usage_blocking")?;
-        rong_rt::RongExecutor::global()
+        Ok(rong_rt::RongExecutor::global()
             .handle()
-            .block_on(self.memory_usage())
+            .block_on(self.memory_usage()))
     }
 
     pub fn shutdown(&self) -> JSResult<()> {
