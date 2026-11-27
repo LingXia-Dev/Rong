@@ -77,11 +77,32 @@ void QJS_SetJitHooks(
     rt->jit_call = call_hook;
     rt->jit_free_bytecode = free_bc_hook;
     rt->jit_free_runtime = free_rt_hook;
+    rt->jit_enabled = (call_hook != NULL) ? 1 : 0;
 }
 
 void *QJS_GetJitOpaque(JSRuntime *rt)
 {
     return rt->jit_opaque;
+}
+
+void QJS_SetJitEnabled(JSRuntime *rt, int enabled)
+{
+    rt->jit_enabled = enabled ? 1 : 0;
+}
+
+uint64_t QJS_JitGetDirectCalls(JSRuntime *rt)
+{
+    return rt->jit_direct_calls;
+}
+
+uint64_t *QJS_JitDirectCallsPtr(JSRuntime *rt)
+{
+    return &rt->jit_direct_calls;
+}
+
+const uintptr_t *QJS_JitStackLimitPtr(JSRuntime *rt)
+{
+    return &rt->stack_limit;
 }
 
 void QJS_JitGetBytecodeInfo(const void *bc, QJSJitBytecodeInfo *out)
@@ -111,6 +132,12 @@ void QJS_JitSetBytecodeData(void *bc, void *data)
 {
     JSFunctionBytecode *b = (JSFunctionBytecode *)bc;
     b->jit_data = data;
+}
+
+void QJS_JitSetBytecodeEntry(void *bc, QJSJitNativeFn fn)
+{
+    JSFunctionBytecode *b = (JSFunctionBytecode *)bc;
+    b->jit_entry = fn;
 }
 
 uint32_t QJS_JitIncCallCount(void *bc)
@@ -246,6 +273,27 @@ int QJS_JitCall(
     JSValue *ret_out
 )
 {
+    /* Fast path: direct JIT-to-JIT dispatch without JS_CallInternal or Rust hook overhead. */
+    if (likely(JS_VALUE_GET_TAG(*func_obj) == JS_TAG_OBJECT)) {
+        JSObject *p = JS_VALUE_GET_OBJ(*func_obj);
+        if (likely(p->class_id == JS_CLASS_BYTECODE_FUNCTION)) {
+            JSFunctionBytecode *b = p->u.func.function_bytecode;
+            QJSJitNativeFn fn = b->jit_entry;
+            JSRuntime *rt = ctx->rt;
+            if (likely(fn != NULL && rt->jit_enabled)) {
+                if (unlikely((++rt->jit_direct_calls & 1023) == 0) && js_poll_interrupts(ctx)) {
+                    *ret_out = JS_EXCEPTION;
+                    return 1;
+                }
+                JSContext *exec_ctx = b->realm ? b->realm : ctx;
+                int rc = QJS_JitInvoke(exec_ctx, fn, b, func_obj, this_obj, argc, argv, ret_out);
+                if (likely(rc == 0)) {
+                    return JS_IsException(*ret_out) ? 1 : 0;
+                }
+            }
+        }
+    }
+
     JSValue res = JS_CallInternal(
         ctx,
         *func_obj,

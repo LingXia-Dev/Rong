@@ -136,10 +136,15 @@ void QJS_SetJitHooks(
     QJSJitFreeRuntimeHook free_rt_hook
 );
 void *QJS_GetJitOpaque(JSRuntime *rt);
+void QJS_SetJitEnabled(JSRuntime *rt, int enabled);
+uint64_t QJS_JitGetDirectCalls(JSRuntime *rt);
+uint64_t *QJS_JitDirectCallsPtr(JSRuntime *rt);
+const uintptr_t *QJS_JitStackLimitPtr(JSRuntime *rt);
 
 void QJS_JitGetBytecodeInfo(const void *bc, QJSJitBytecodeInfo *out);
 void *QJS_JitGetBytecodeData(const void *bc);
 void QJS_JitSetBytecodeData(void *bc, void *data);
+void QJS_JitSetBytecodeEntry(void *bc, QJSJitNativeFn fn);
 uint32_t QJS_JitIncCallCount(void *bc);
 uint32_t QJS_JitValueSize(void);
 int QJS_JitCheckValueLayout(void);

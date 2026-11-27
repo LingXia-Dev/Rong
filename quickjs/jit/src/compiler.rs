@@ -84,6 +84,8 @@ pub struct CraneliftBackend {
     fb_ctx: FunctionBuilderContext,
     helpers: Helpers,
     ptr_ty: types::Type,
+    stack_limit_ptr: usize,
+    direct_calls_ptr: usize,
 }
 
 impl Drop for CraneliftBackend {
@@ -99,7 +101,7 @@ impl Drop for CraneliftBackend {
 }
 
 impl CraneliftBackend {
-    pub fn new() -> Result<Self, String> {
+    pub fn new(stack_limit_ptr: usize, direct_calls_ptr: usize) -> Result<Self, String> {
         let mut flag_builder = settings::builder();
         flag_builder
             .set("use_colocated_libcalls", "false")
@@ -296,6 +298,8 @@ impl CraneliftBackend {
             fb_ctx: FunctionBuilderContext::new(),
             helpers,
             ptr_ty,
+            stack_limit_ptr,
+            direct_calls_ptr,
         })
     }
 
@@ -386,6 +390,9 @@ impl CraneliftBackend {
         let f_throw_tdz = self
             .module
             .declare_func_in_func(self.helpers.throw_uninitialized, &mut ctx.func);
+        let f_self = self.module.declare_func_in_func(func_id, &mut ctx.func);
+        let stack_limit_ptr = self.stack_limit_ptr;
+        let direct_calls_ptr = self.direct_calls_ptr;
 
         {
             let mut b = FunctionBuilder::new(&mut ctx.func, &mut self.fb_ctx);
@@ -424,10 +431,23 @@ impl CraneliftBackend {
             let scratch1_off = ((total_slots + 1) * JSVAL_SIZE) as i32;
             let poll_off = ((total_slots + 2) * JSVAL_SIZE) as i32;
 
-            // Stack overflow guard in prologue (leave room for backtrace construction).
+            // Inline stack-overflow guard in prologue (avoids an FFI call on the fast path).
+            let stack_check_slow_block = b.create_block();
             let stack_ok_block = b.create_block();
             let stack_ovf_block = b.create_block();
-            let req_bytes = b.ins().iconst(ptr_ty, (frame_bytes as i64) + 4096);
+            let req_i64 = (frame_bytes as i64) + 4096;
+            let limit_addr = b.ins().iconst(ptr_ty, stack_limit_ptr as i64);
+            let limit = b.ins().load(ptr_ty, MemFlagsData::trusted(), limit_addr, 0);
+            let has_limit = b.ins().icmp_imm_s(IntCC::NotEqual, limit, 0);
+            let sp_approx = b.ins().stack_addr(ptr_ty, frame_slot, 0);
+            let threshold = b.ins().iadd_imm_s(limit, req_i64);
+            let too_low = b.ins().icmp(IntCC::UnsignedLessThan, sp_approx, threshold);
+            let need_check = b.ins().band(has_limit, too_low);
+            b.ins()
+                .brif(need_check, stack_check_slow_block, &[], stack_ok_block, &[]);
+
+            b.switch_to_block(stack_check_slow_block);
+            let req_bytes = b.ins().iconst(ptr_ty, req_i64);
             let ovf_call = b.ins().call(f_check_stack, &[p_ctx, req_bytes]);
             let ovf_res = b.inst_results(ovf_call)[0];
             b.ins()
@@ -1155,11 +1175,23 @@ impl CraneliftBackend {
                         let out_ptr = b.ins().stack_addr(ptr_ty, frame_slot, scratch0_off);
                         let argc_val = b.ins().iconst(types::I32, argc as i64);
 
-                        let c = b.ins().call(
+                        let err = emit_direct_or_generic_call(
+                            &mut b,
+                            f_self,
                             f_call,
-                            &[p_ctx, func_ptr, this_ptr, argc_val, argv_ptr, out_ptr],
+                            ptr_ty,
+                            direct_calls_ptr,
+                            p_ctx,
+                            p_func_obj,
+                            frame_slot,
+                            func_off,
+                            func_ptr,
+                            this_ptr,
+                            argc_val,
+                            argv_ptr,
+                            out_ptr,
+                            scratch0_off,
                         );
-                        let err = b.inst_results(c)[0];
 
                         // Free func and all argument slots.
                         for i in 0..=argc_u {
@@ -1182,11 +1214,23 @@ impl CraneliftBackend {
                         let out_ptr = b.ins().stack_addr(ptr_ty, frame_slot, scratch0_off);
                         let argc_val = b.ins().iconst(types::I32, argc as i64);
 
-                        let c = b.ins().call(
+                        let err = emit_direct_or_generic_call(
+                            &mut b,
+                            f_self,
                             f_call,
-                            &[p_ctx, func_ptr, this_ptr, argc_val, argv_ptr, out_ptr],
+                            ptr_ty,
+                            direct_calls_ptr,
+                            p_ctx,
+                            p_func_obj,
+                            frame_slot,
+                            func_off,
+                            func_ptr,
+                            this_ptr,
+                            argc_val,
+                            argv_ptr,
+                            out_ptr,
+                            scratch0_off,
                         );
-                        let err = b.inst_results(c)[0];
                         emit_check_exc(&mut b, err, exc_block);
 
                         let u = sload(&mut b, frame_slot, scratch0_off);
@@ -2041,4 +2085,73 @@ fn load_as_f64(b: &mut FunctionBuilder, u: Value, is_int: Value) -> Value {
     let from_int = b.ins().fcvt_from_sint(types::F64, i32_v);
     let from_f64 = b.ins().bitcast(types::F64, MemFlagsData::new(), u);
     b.ins().select(is_int, from_int, from_f64)
+}
+
+/// Emits a direct native self-recursive call (`f_self`) when the callee
+/// matches `p_func_obj`, otherwise dispatches via `QJS_JitCall` (which itself
+/// fast-paths inter-JIT calls via `b->jit_entry`).
+#[allow(clippy::too_many_arguments)]
+fn emit_direct_or_generic_call(
+    b: &mut FunctionBuilder,
+    f_self: cranelift_codegen::ir::FuncRef,
+    f_call: cranelift_codegen::ir::FuncRef,
+    ptr_ty: types::Type,
+    direct_calls_ptr: usize,
+    p_ctx: Value,
+    p_func_obj: Value,
+    frame_slot: StackSlot,
+    func_off: i32,
+    func_ptr: Value,
+    this_ptr: Value,
+    argc_val: Value,
+    argv_ptr: Value,
+    out_ptr: Value,
+    scratch0_off: i32,
+) -> Value {
+    let callee_u = sload(b, frame_slot, func_off);
+    let callee_tag = sload(b, frame_slot, func_off + 8);
+    let self_u = b
+        .ins()
+        .load(types::I64, MemFlagsData::trusted(), p_func_obj, 0);
+    let self_tag = b
+        .ins()
+        .load(types::I64, MemFlagsData::trusted(), p_func_obj, 8);
+    let same_u = b.ins().icmp(IntCC::Equal, callee_u, self_u);
+    let same_tag = b.ins().icmp(IntCC::Equal, callee_tag, self_tag);
+    let is_self = b.ins().band(same_u, same_tag);
+
+    let self_blk = b.create_block();
+    let generic_blk = b.create_block();
+    let done_blk = b.create_block();
+    b.append_block_param(done_blk, types::I32);
+
+    b.ins().brif(is_self, self_blk, &[], generic_blk, &[]);
+
+    b.switch_to_block(self_blk);
+    let counter_addr = b.ins().iconst(ptr_ty, direct_calls_ptr as i64);
+    let cur_calls = b
+        .ins()
+        .load(types::I64, MemFlagsData::trusted(), counter_addr, 0);
+    let next_calls = b.ins().iadd_imm_s(cur_calls, 1);
+    b.ins()
+        .store(MemFlagsData::trusted(), next_calls, counter_addr, 0);
+    b.ins().call(
+        f_self,
+        &[p_ctx, p_func_obj, this_ptr, argc_val, argv_ptr, out_ptr],
+    );
+    let out_tag = sload(b, frame_slot, scratch0_off + 8);
+    let is_exc = b.ins().icmp_imm_s(IntCC::Equal, out_tag, TAG_EXCEPTION);
+    let self_err = b.ins().uextend(types::I32, is_exc);
+    b.ins().jump(done_blk, &[self_err.into()]);
+
+    b.switch_to_block(generic_blk);
+    let c = b.ins().call(
+        f_call,
+        &[p_ctx, func_ptr, this_ptr, argc_val, argv_ptr, out_ptr],
+    );
+    let generic_err = b.inst_results(c)[0];
+    b.ins().jump(done_blk, &[generic_err.into()]);
+
+    b.switch_to_block(done_blk);
+    b.block_params(done_blk)[0]
 }

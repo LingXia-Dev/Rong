@@ -80,7 +80,7 @@ mod engine {
     }
 
     impl JitEngine {
-        fn new(config: JitConfig) -> Result<Self, String> {
+        fn new(rt: *mut sys::JSRuntime, config: JitConfig) -> Result<Self, String> {
             let val_size = unsafe { sys::QJS_JitValueSize() };
             let layout_ok = unsafe { sys::QJS_JitCheckValueLayout() };
             if val_size != 16 || layout_ok == 0 {
@@ -88,7 +88,9 @@ mod engine {
                     "unsupported QuickJS JSValue layout (size={val_size}, layout_ok={layout_ok})"
                 ));
             }
-            let backend = CraneliftBackend::new()?;
+            let stack_limit_ptr = unsafe { sys::QJS_JitStackLimitPtr(rt) } as usize;
+            let direct_calls_ptr = unsafe { sys::QJS_JitDirectCallsPtr(rt) } as usize;
+            let backend = CraneliftBackend::new(stack_limit_ptr, direct_calls_ptr)?;
             Ok(Self {
                 config,
                 backend,
@@ -156,7 +158,10 @@ mod engine {
                         func,
                         realm: info.realm,
                     }));
-                    unsafe { sys::QJS_JitSetBytecodeData(bc, entry as *mut c_void) };
+                    unsafe {
+                        sys::QJS_JitSetBytecodeData(bc, entry as *mut c_void);
+                        sys::QJS_JitSetBytecodeEntry(bc, Some(func));
+                    }
                     engine.stats.compiled_functions += 1;
                     entry as *const CompiledEntry
                 }
@@ -229,10 +234,11 @@ mod engine {
             let engine = unsafe { &mut *(existing as *mut JitEngine) };
             engine.config = config;
             engine.enabled = true;
+            unsafe { sys::QJS_SetJitEnabled(rt, 1) };
             return Ok(true);
         }
 
-        let engine = Box::new(JitEngine::new(config)?);
+        let engine = Box::new(JitEngine::new(rt, config)?);
         let opaque = Box::into_raw(engine) as *mut c_void;
         unsafe {
             sys::QJS_SetJitHooks(
@@ -258,6 +264,7 @@ mod engine {
         }
         let engine = unsafe { &mut *(existing as *mut JitEngine) };
         engine.enabled = enabled;
+        unsafe { sys::QJS_SetJitEnabled(rt, enabled as std::ffi::c_int) };
         true
     }
 
@@ -271,7 +278,9 @@ mod engine {
             return None;
         }
         let engine = unsafe { &*(existing as *const JitEngine) };
-        Some(engine.stats)
+        let mut stats = engine.stats;
+        stats.jit_calls += unsafe { sys::QJS_JitGetDirectCalls(rt) };
+        Some(stats)
     }
 }
 

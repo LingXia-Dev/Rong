@@ -128,7 +128,7 @@ fn apply_jit_hooks(src: &mut String) {
     inject_once(
         src,
         "    JSRuntimeFinalizerState *finalizers;\n};",
-        "    JSRuntimeFinalizerState *finalizers;\n#ifdef CONFIG_RONG_JIT\n    void *jit_opaque;\n    QJSJitCallHook jit_call;\n    QJSJitFreeBytecodeHook jit_free_bytecode;\n    QJSJitFreeRuntimeHook jit_free_runtime;\n#endif\n};",
+        "    JSRuntimeFinalizerState *finalizers;\n#ifdef CONFIG_RONG_JIT\n    void *jit_opaque;\n    QJSJitCallHook jit_call;\n    QJSJitFreeBytecodeHook jit_free_bytecode;\n    QJSJitFreeRuntimeHook jit_free_runtime;\n    uint8_t jit_enabled;\n    uint64_t jit_direct_calls;\n#endif\n};",
         "JSRuntime jit fields",
     );
 
@@ -136,7 +136,7 @@ fn apply_jit_hooks(src: &mut String) {
     inject_once(
         src,
         "    char *source;\n} JSFunctionBytecode;",
-        "    char *source;\n#ifdef CONFIG_RONG_JIT\n    void *jit_data;\n    uint32_t jit_call_count;\n#endif\n} JSFunctionBytecode;",
+        "    char *source;\n#ifdef CONFIG_RONG_JIT\n    void *jit_data;\n    QJSJitNativeFn jit_entry;\n    uint32_t jit_call_count;\n#endif\n} JSFunctionBytecode;",
         "JSFunctionBytecode jit fields",
     );
 
@@ -152,7 +152,7 @@ fn apply_jit_hooks(src: &mut String) {
     inject_once(
         src,
         "static void free_function_bytecode(JSRuntime *rt, JSFunctionBytecode *b)\n{\n    int i;",
-        "static void free_function_bytecode(JSRuntime *rt, JSFunctionBytecode *b)\n{\n    int i;\n#ifdef CONFIG_RONG_JIT\n    if (b->jit_data != NULL && rt->jit_free_bytecode != NULL) {\n        rt->jit_free_bytecode(rt->jit_opaque, b, b->jit_data);\n        b->jit_data = NULL;\n    }\n#endif",
+        "static void free_function_bytecode(JSRuntime *rt, JSFunctionBytecode *b)\n{\n    int i;\n#ifdef CONFIG_RONG_JIT\n    b->jit_entry = NULL;\n    if (b->jit_data != NULL && rt->jit_free_bytecode != NULL) {\n        rt->jit_free_bytecode(rt->jit_opaque, b, b->jit_data);\n        b->jit_data = NULL;\n    }\n#endif",
         "free_function_bytecode jit hook",
     );
 
