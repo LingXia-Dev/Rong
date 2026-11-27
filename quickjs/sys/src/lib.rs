@@ -91,7 +91,13 @@ mod tests {
 
         unsafe {
             let rt = JS_NewRuntime();
-            QJS_SetJitHooks(rt, state_ptr, Some(on_call), Some(on_free_bc), Some(on_free_rt));
+            QJS_SetJitHooks(
+                rt,
+                state_ptr,
+                Some(on_call),
+                Some(on_free_bc),
+                Some(on_free_rt),
+            );
             assert_eq!(QJS_GetJitOpaque(rt), state_ptr);
 
             let ctx = JS_NewContext(rt);

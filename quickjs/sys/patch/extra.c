@@ -199,9 +199,11 @@ int QJS_JitBinarySlow(
     case OP_pow:
         ret = js_binary_arith_slow(ctx, sp + 2, (OPCodeEnum)opcode);
         break;
+    case OP_shr:
+        ret = js_shr_slow(ctx, sp + 2);
+        break;
     case OP_shl:
     case OP_sar:
-    case OP_shr:
     case OP_and:
     case OP_or:
     case OP_xor:
