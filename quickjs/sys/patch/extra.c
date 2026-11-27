@@ -100,6 +100,11 @@ uint64_t *QJS_JitDirectCallsPtr(JSRuntime *rt)
     return &rt->jit_direct_calls;
 }
 
+const uint8_t *QJS_JitEnabledPtr(JSRuntime *rt)
+{
+    return &rt->jit_enabled;
+}
+
 const uintptr_t *QJS_JitStackLimitPtr(JSRuntime *rt)
 {
     return &rt->stack_limit;
@@ -151,6 +156,11 @@ uint32_t QJS_JitValueSize(void)
     return (uint32_t)sizeof(JSValue);
 }
 
+uint32_t QJS_JitStackFrameSize(void)
+{
+    return (uint32_t)sizeof(JSStackFrame);
+}
+
 int QJS_JitCheckValueLayout(void)
 {
 #ifdef JS_NAN_BOXING
@@ -158,14 +168,44 @@ int QJS_JitCheckValueLayout(void)
 #else
     return sizeof(JSValue) == 16 &&
            offsetof(JSValue, u) == 0 &&
-           offsetof(JSValue, tag) == 8;
+           offsetof(JSValue, tag) == 8 &&
+           offsetof(JSStackFrame, prev_frame) == 0 &&
+           sizeof(JSStackFrame) >= 8 &&
+           (sizeof(JSStackFrame) % 8) == 0;
 #endif
 }
 
-int QJS_JitInvoke(
+void **QJS_JitCurrentStackFramePtr(JSRuntime *rt)
+{
+    return (void **)&rt->current_stack_frame;
+}
+
+void QJS_JitOnException(JSContext *ctx)
+{
+    JSRuntime *rt = ctx->rt;
+    if (needs_backtrace(rt->current_exception) || JS_IsUndefined(ctx->error_back_trace)) {
+        build_backtrace(ctx, rt->current_exception, JS_UNDEFINED, NULL, 0, 0, 0);
+    }
+}
+
+void QJS_JitInitUndefined(JSValue *slots, uint32_t count)
+{
+    for (uint32_t i = 0; i < count; i++) {
+        slots[i] = JS_UNDEFINED;
+    }
+}
+
+void QJS_JitFreeSlots(JSContext *ctx, const JSValue *slots, uint32_t count)
+{
+    for (uint32_t i = 0; i < count; i++) {
+        JS_FreeValue(ctx, slots[i]);
+    }
+}
+
+static inline int jit_invoke_impl(
     JSContext *ctx,
     QJSJitNativeFn fn,
-    const void *bc,
+    const JSFunctionBytecode *b,
     const JSValue *func_obj,
     const JSValue *this_obj,
     int argc,
@@ -173,7 +213,6 @@ int QJS_JitInvoke(
     JSValue *ret_out
 )
 {
-    const JSFunctionBytecode *b = (const JSFunctionBytecode *)bc;
     JSRuntime *rt = ctx->rt;
     JSStackFrame sf;
     int rc;
@@ -194,13 +233,34 @@ int QJS_JitInvoke(
 
     rc = fn(ctx, func_obj, this_obj, argc, argv, ret_out);
 
-    if (rc == 0 && JS_IsException(*ret_out)) {
-        if (needs_backtrace(rt->current_exception) || JS_IsUndefined(ctx->error_back_trace)) {
-            build_backtrace(ctx, rt->current_exception, JS_UNDEFINED, NULL, 0, 0, 0);
-        }
+    if (unlikely(rc == 0 && JS_IsException(*ret_out))) {
+        QJS_JitOnException(ctx);
     }
     rt->current_stack_frame = sf.prev_frame;
     return rc;
+}
+
+int QJS_JitInvoke(
+    JSContext *ctx,
+    QJSJitNativeFn fn,
+    const void *bc,
+    const JSValue *func_obj,
+    const JSValue *this_obj,
+    int argc,
+    const JSValue *argv,
+    JSValue *ret_out
+)
+{
+    return jit_invoke_impl(
+        ctx,
+        fn,
+        (const JSFunctionBytecode *)bc,
+        func_obj,
+        this_obj,
+        argc,
+        argv,
+        ret_out
+    );
 }
 
 int QJS_JitPollInterrupts(JSContext *ctx)
@@ -286,7 +346,7 @@ int QJS_JitCall(
                     return 1;
                 }
                 JSContext *exec_ctx = b->realm ? b->realm : ctx;
-                int rc = QJS_JitInvoke(exec_ctx, fn, b, func_obj, this_obj, argc, argv, ret_out);
+                int rc = jit_invoke_impl(exec_ctx, fn, b, func_obj, this_obj, argc, argv, ret_out);
                 if (likely(rc == 0)) {
                     return JS_IsException(*ret_out) ? 1 : 0;
                 }
@@ -476,10 +536,16 @@ int QJS_JitGetArrayEl(JSContext *ctx, const JSValue *obj, const JSValue *idx, JS
     if (likely(JS_VALUE_GET_TAG(*obj) == JS_TAG_OBJECT &&
                JS_VALUE_GET_TAG(*idx) == JS_TAG_INT)) {
         JSObject *p = JS_VALUE_GET_OBJ(*obj);
-        uint32_t i = JS_VALUE_GET_INT(*idx);
-        if (likely(p->class_id == JS_CLASS_ARRAY && i < (uint32_t)p->u.array.count)) {
-            *out = js_dup(p->u.array.u.values[i]);
-            return 0;
+        int32_t i = JS_VALUE_GET_INT(*idx);
+        if (likely(i >= 0)) {
+            if (likely(p->class_id == JS_CLASS_ARRAY && (uint32_t)i < (uint32_t)p->u.array.count)) {
+                *out = js_dup(p->u.array.u.values[i]);
+                return 0;
+            }
+            if (js_get_fast_array_element(ctx, p, (uint32_t)i, &val)) {
+                *out = val;
+                return JS_IsException(val) ? 1 : 0;
+            }
         }
     }
     val = JS_GetPropertyValue(ctx, *obj, JS_DupValue(ctx, *idx));
@@ -493,8 +559,8 @@ int QJS_JitPutArrayEl(JSContext *ctx, const JSValue *obj, const JSValue *idx, co
     if (likely(JS_VALUE_GET_TAG(*obj) == JS_TAG_OBJECT &&
                JS_VALUE_GET_TAG(*idx) == JS_TAG_INT)) {
         JSObject *p = JS_VALUE_GET_OBJ(*obj);
-        uint32_t i = JS_VALUE_GET_INT(*idx);
-        if (likely(p->class_id == JS_CLASS_ARRAY && i < (uint32_t)p->u.array.count)) {
+        int32_t i = JS_VALUE_GET_INT(*idx);
+        if (likely(i >= 0 && p->class_id == JS_CLASS_ARRAY && (uint32_t)i < (uint32_t)p->u.array.count)) {
             set_value(ctx, &p->u.array.u.values[i], JS_DupValue(ctx, *val));
             return 0;
         }
@@ -521,7 +587,11 @@ int QJS_JitGetClosureVar(JSContext *ctx, const JSValue *func_obj, uint32_t idx, 
     JSObject *p = JS_VALUE_GET_OBJ(*func_obj);
     JSValue val = *p->u.func.var_refs[idx]->pvalue;
     if (unlikely(JS_IsUninitialized(val))) {
-        JS_ThrowReferenceErrorUninitialized(ctx, p->u.func.function_bytecode->closure_var[idx].var_name);
+        JSFunctionBytecode *b = p->u.func.function_bytecode;
+        JSAtom name = (b->closure_var && idx < b->closure_var_count)
+            ? b->closure_var[idx].var_name
+            : JS_ATOM_NULL;
+        JS_ThrowReferenceErrorUninitialized(ctx, name);
         *out = JS_EXCEPTION;
         return 1;
     }

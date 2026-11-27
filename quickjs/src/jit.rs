@@ -4,6 +4,10 @@
 //! Call [`init`] with a QuickJS context to enable JIT compilation of hot
 //! bytecode functions on its owning runtime. Without the feature, QuickJS runs
 //! purely interpreted with zero JIT hook overhead.
+//!
+//! Compiled native code stays allocated on the owning runtime until that
+//! runtime is dropped; keep `hot_threshold > 1` (the default is `16`) if a
+//! workload dynamically creates and discards many short-lived functions.
 
 use crate::{QJSContext, qjs};
 use rong_core::{HostError, JSContext, JSResult};

@@ -58,6 +58,9 @@ const TAG_FLOAT64: i64 = sys::JS_TAG_FLOAT64 as i64;
 struct Helpers {
     poll_interrupts: FuncId,
     check_stack: FuncId,
+    on_exception: FuncId,
+    init_undefined: FuncId,
+    free_slots: FuncId,
     dup_value: FuncId,
     free_value: FuncId,
     to_bool: FuncId,
@@ -86,6 +89,10 @@ pub struct CraneliftBackend {
     ptr_ty: types::Type,
     stack_limit_ptr: usize,
     direct_calls_ptr: usize,
+    jit_enabled_ptr: usize,
+    stack_frame_size: u32,
+    current_stack_frame_ptr: usize,
+    broken: bool,
 }
 
 impl Drop for CraneliftBackend {
@@ -101,7 +108,13 @@ impl Drop for CraneliftBackend {
 }
 
 impl CraneliftBackend {
-    pub fn new(stack_limit_ptr: usize, direct_calls_ptr: usize) -> Result<Self, String> {
+    pub fn new(
+        stack_limit_ptr: usize,
+        direct_calls_ptr: usize,
+        jit_enabled_ptr: usize,
+        stack_frame_size: u32,
+        current_stack_frame_ptr: usize,
+    ) -> Result<Self, String> {
         let mut flag_builder = settings::builder();
         flag_builder
             .set("use_colocated_libcalls", "false")
@@ -126,6 +139,12 @@ impl CraneliftBackend {
             sys::QJS_JitPollInterrupts as *const u8,
         );
         builder.symbol("QJS_JitCheckStack", sys::QJS_JitCheckStack as *const u8);
+        builder.symbol("QJS_JitOnException", sys::QJS_JitOnException as *const u8);
+        builder.symbol(
+            "QJS_JitInitUndefined",
+            sys::QJS_JitInitUndefined as *const u8,
+        );
+        builder.symbol("QJS_JitFreeSlots", sys::QJS_JitFreeSlots as *const u8);
         builder.symbol("QJS_JitDupValue", sys::QJS_JitDupValue as *const u8);
         builder.symbol("QJS_JitFreeValue", sys::QJS_JitFreeValue as *const u8);
         builder.symbol("QJS_JitToBool", sys::QJS_JitToBool as *const u8);
@@ -186,6 +205,19 @@ impl CraneliftBackend {
                 "QJS_JitCheckStack",
                 &[ptr_ty, ptr_ty],
                 Some(types::I32),
+            )?,
+            on_exception: decl(&mut module, "QJS_JitOnException", &[ptr_ty], None)?,
+            init_undefined: decl(
+                &mut module,
+                "QJS_JitInitUndefined",
+                &[ptr_ty, types::I32],
+                None,
+            )?,
+            free_slots: decl(
+                &mut module,
+                "QJS_JitFreeSlots",
+                &[ptr_ty, ptr_ty, types::I32],
+                None,
             )?,
             dup_value: decl(&mut module, "QJS_JitDupValue", &[ptr_ty, ptr_ty], None)?,
             free_value: decl(&mut module, "QJS_JitFreeValue", &[ptr_ty, ptr_ty], None)?,
@@ -300,6 +332,10 @@ impl CraneliftBackend {
             ptr_ty,
             stack_limit_ptr,
             direct_calls_ptr,
+            jit_enabled_ptr,
+            stack_frame_size,
+            current_stack_frame_ptr,
+            broken: false,
         })
     }
 
@@ -308,6 +344,9 @@ impl CraneliftBackend {
         decoded: &DecodedFunction,
         info: &sys::QJSJitBytecodeInfo,
     ) -> Result<CompiledFn, String> {
+        if self.broken {
+            return Err("cranelift module unavailable after previous compilation error".into());
+        }
         let ptr_ty = self.ptr_ty;
         let mut sig = self.module.make_signature();
         sig.params.push(AbiParam::new(ptr_ty)); // ctx
@@ -333,6 +372,15 @@ impl CraneliftBackend {
         let f_check_stack = self
             .module
             .declare_func_in_func(self.helpers.check_stack, &mut ctx.func);
+        let f_on_exc = self
+            .module
+            .declare_func_in_func(self.helpers.on_exception, &mut ctx.func);
+        let f_init_undef = self
+            .module
+            .declare_func_in_func(self.helpers.init_undefined, &mut ctx.func);
+        let f_free_slots = self
+            .module
+            .declare_func_in_func(self.helpers.free_slots, &mut ctx.func);
         let f_dup = self
             .module
             .declare_func_in_func(self.helpers.dup_value, &mut ctx.func);
@@ -393,6 +441,15 @@ impl CraneliftBackend {
         let f_self = self.module.declare_func_in_func(func_id, &mut ctx.func);
         let stack_limit_ptr = self.stack_limit_ptr;
         let direct_calls_ptr = self.direct_calls_ptr;
+        let jit_enabled_ptr = self.jit_enabled_ptr;
+        let stack_frame_size = self.stack_frame_size;
+        let current_sf_ptr = self.current_stack_frame_ptr;
+        let has_calls = decoded.insns.iter().any(|insn| {
+            matches!(
+                insn.op,
+                Op::Call(_) | Op::TailCall(_) | Op::CallMethod(_) | Op::TailCallMethod(_)
+            )
+        });
 
         {
             let mut b = FunctionBuilder::new(&mut ctx.func, &mut self.fb_ctx);
@@ -414,7 +471,7 @@ impl CraneliftBackend {
             // Allocate one contiguous frame slot:
             //   [args: arg_count] [vars: var_count] [eval_stack: stack_size] [scratch: 2] [poll_counter: 1]
             // Keeping all live JSValues in one contiguous array makes cleanup
-            // on return/exception a single tight loop over `0..total_live`.
+            // on return/exception a single shared epilogue over `0..total_slots`.
             let total_slots = arg_count + var_count + stack_size;
             let frame_slots = (total_slots + 3).max(3);
             let frame_bytes = frame_slots * JSVAL_SIZE;
@@ -423,6 +480,18 @@ impl CraneliftBackend {
                 frame_bytes,
                 3,
             ));
+            let self_sf_slot = has_calls.then(|| {
+                b.create_sized_stack_slot(StackSlotData::new(
+                    StackSlotKind::ExplicitSlot,
+                    stack_frame_size,
+                    3,
+                ))
+            });
+            let extra_sf_bytes = if has_calls {
+                stack_frame_size as i64
+            } else {
+                0
+            };
 
             let args_off = 0i32;
             let vars_off = (arg_count * JSVAL_SIZE) as i32;
@@ -432,16 +501,20 @@ impl CraneliftBackend {
             let poll_off = ((total_slots + 2) * JSVAL_SIZE) as i32;
 
             // Inline stack-overflow guard in prologue (avoids an FFI call on the fast path).
+            // Uses `sp < req || (sp - req) < limit` to stay immune to 64-bit unsigned wraparound.
             let stack_check_slow_block = b.create_block();
             let stack_ok_block = b.create_block();
             let stack_ovf_block = b.create_block();
-            let req_i64 = (frame_bytes as i64) + 4096;
+            let req_i64 = (frame_bytes as i64) + extra_sf_bytes + 4096;
+            let req_val = b.ins().iconst(ptr_ty, req_i64);
             let limit_addr = b.ins().iconst(ptr_ty, stack_limit_ptr as i64);
             let limit = b.ins().load(ptr_ty, MemFlagsData::trusted(), limit_addr, 0);
             let has_limit = b.ins().icmp_imm_s(IntCC::NotEqual, limit, 0);
             let sp_approx = b.ins().stack_addr(ptr_ty, frame_slot, 0);
-            let threshold = b.ins().iadd_imm_s(limit, req_i64);
-            let too_low = b.ins().icmp(IntCC::UnsignedLessThan, sp_approx, threshold);
+            let underflow = b.ins().icmp(IntCC::UnsignedLessThan, sp_approx, req_val);
+            let sp_after = b.ins().isub(sp_approx, req_val);
+            let below_limit = b.ins().icmp(IntCC::UnsignedLessThan, sp_after, limit);
+            let too_low = b.ins().bor(underflow, below_limit);
             let need_check = b.ins().band(has_limit, too_low);
             b.ins()
                 .brif(need_check, stack_check_slow_block, &[], stack_ok_block, &[]);
@@ -491,19 +564,27 @@ impl CraneliftBackend {
             }
 
             // Initialize vars[0..var_count] and eval_stack[0..stack_size] to undefined
-            // so exception cleanup can unconditionally scan all slots safely.
+            // so return/exception cleanup can unconditionally scan all slots safely.
             let zero64 = b.ins().iconst(types::I64, 0);
-            let undef_tag = b.ins().iconst(types::I64, TAG_UNDEFINED);
-            for i in 0..(var_count + stack_size) {
-                let off = vars_off + (i * JSVAL_SIZE) as i32;
-                sstore(&mut b, zero64, frame_slot, off);
-                sstore(&mut b, undef_tag, frame_slot, off + 8);
+            let init_undef_slots = var_count + stack_size;
+            if init_undef_slots <= 16 {
+                let undef_tag = b.ins().iconst(types::I64, TAG_UNDEFINED);
+                for i in 0..init_undef_slots {
+                    let off = vars_off + (i * JSVAL_SIZE) as i32;
+                    sstore(&mut b, zero64, frame_slot, off);
+                    sstore(&mut b, undef_tag, frame_slot, off + 8);
+                }
+            } else {
+                let vars_ptr = b.ins().stack_addr(ptr_ty, frame_slot, vars_off);
+                let cnt_val = b.ins().iconst(types::I32, init_undef_slots as i64);
+                b.ins().call(f_init_undef, &[vars_ptr, cnt_val]);
             }
             // Initialize loop backedge interrupt-poll counter to 0.
             sstore(&mut b, zero64, frame_slot, poll_off);
 
-            // Shared exception epilogue block: frees all refcounted slots in
-            // args + vars + eval_stack, writes JS_EXCEPTION to *ret_out, returns 0.
+            // Shared return and exception epilogue blocks: all exits jump here
+            // instead of duplicating slot-cleanup CFG per `return` / `tail_call`.
+            let ret_block = b.create_block();
             let exc_block = b.create_block();
 
             // Create a Cranelift block for every bytecode basic-block start.
@@ -1179,8 +1260,14 @@ impl CraneliftBackend {
                             &mut b,
                             f_self,
                             f_call,
+                            f_poll,
+                            f_on_exc,
                             ptr_ty,
                             direct_calls_ptr,
+                            jit_enabled_ptr,
+                            stack_frame_size,
+                            current_sf_ptr,
+                            self_sf_slot.expect("self_sf_slot allocated when has_calls"),
                             p_ctx,
                             p_func_obj,
                             frame_slot,
@@ -1218,8 +1305,14 @@ impl CraneliftBackend {
                             &mut b,
                             f_self,
                             f_call,
+                            f_poll,
+                            f_on_exc,
                             ptr_ty,
                             direct_calls_ptr,
+                            jit_enabled_ptr,
+                            stack_frame_size,
+                            current_sf_ptr,
+                            self_sf_slot.expect("self_sf_slot allocated when has_calls"),
                             p_ctx,
                             p_func_obj,
                             frame_slot,
@@ -1237,16 +1330,7 @@ impl CraneliftBackend {
                         let tag = sload(&mut b, frame_slot, scratch0_off + 8);
                         b.ins().store(MemFlagsData::trusted(), u, p_ret_out, 0);
                         b.ins().store(MemFlagsData::trusted(), tag, p_ret_out, 8);
-                        emit_cleanup_slots(
-                            &mut b,
-                            f_free,
-                            ptr_ty,
-                            p_ctx,
-                            frame_slot,
-                            arg_count + var_count + sp,
-                        );
-                        let zero = b.ins().iconst(types::I32, 0);
-                        b.ins().return_(&[zero]);
+                        b.ins().jump(ret_block, &[]);
                         terminated = true;
                     }
                     Op::CallMethod(argc) => {
@@ -1262,11 +1346,29 @@ impl CraneliftBackend {
                         let out_ptr = b.ins().stack_addr(ptr_ty, frame_slot, scratch0_off);
                         let argc_val = b.ins().iconst(types::I32, argc as i64);
 
-                        let c = b.ins().call(
+                        let err = emit_direct_or_generic_call(
+                            &mut b,
+                            f_self,
                             f_call,
-                            &[p_ctx, func_ptr, this_ptr, argc_val, argv_ptr, out_ptr],
+                            f_poll,
+                            f_on_exc,
+                            ptr_ty,
+                            direct_calls_ptr,
+                            jit_enabled_ptr,
+                            stack_frame_size,
+                            current_sf_ptr,
+                            self_sf_slot.expect("self_sf_slot allocated when has_calls"),
+                            p_ctx,
+                            p_func_obj,
+                            frame_slot,
+                            func_off,
+                            func_ptr,
+                            this_ptr,
+                            argc_val,
+                            argv_ptr,
+                            out_ptr,
+                            scratch0_off,
                         );
-                        let err = b.inst_results(c)[0];
 
                         for i in 0..(2 + argc_u) {
                             let s = slot_off(this_depth + i);
@@ -1288,27 +1390,36 @@ impl CraneliftBackend {
                         let out_ptr = b.ins().stack_addr(ptr_ty, frame_slot, scratch0_off);
                         let argc_val = b.ins().iconst(types::I32, argc as i64);
 
-                        let c = b.ins().call(
+                        let err = emit_direct_or_generic_call(
+                            &mut b,
+                            f_self,
                             f_call,
-                            &[p_ctx, func_ptr, this_ptr, argc_val, argv_ptr, out_ptr],
+                            f_poll,
+                            f_on_exc,
+                            ptr_ty,
+                            direct_calls_ptr,
+                            jit_enabled_ptr,
+                            stack_frame_size,
+                            current_sf_ptr,
+                            self_sf_slot.expect("self_sf_slot allocated when has_calls"),
+                            p_ctx,
+                            p_func_obj,
+                            frame_slot,
+                            func_off,
+                            func_ptr,
+                            this_ptr,
+                            argc_val,
+                            argv_ptr,
+                            out_ptr,
+                            scratch0_off,
                         );
-                        let err = b.inst_results(c)[0];
                         emit_check_exc(&mut b, err, exc_block);
 
                         let u = sload(&mut b, frame_slot, scratch0_off);
                         let tag = sload(&mut b, frame_slot, scratch0_off + 8);
                         b.ins().store(MemFlagsData::trusted(), u, p_ret_out, 0);
                         b.ins().store(MemFlagsData::trusted(), tag, p_ret_out, 8);
-                        emit_cleanup_slots(
-                            &mut b,
-                            f_free,
-                            ptr_ty,
-                            p_ctx,
-                            frame_slot,
-                            arg_count + var_count + sp,
-                        );
-                        let zero = b.ins().iconst(types::I32, 0);
-                        b.ins().return_(&[zero]);
+                        b.ins().jump(ret_block, &[]);
                         terminated = true;
                     }
 
@@ -1321,30 +1432,12 @@ impl CraneliftBackend {
                         b.ins().store(MemFlagsData::trusted(), u, p_ret_out, 0);
                         b.ins().store(MemFlagsData::trusted(), tag, p_ret_out, 8);
                         store_slot_const(&mut b, frame_slot, ret_src, 0, TAG_UNDEFINED);
-                        emit_cleanup_slots(
-                            &mut b,
-                            f_free,
-                            ptr_ty,
-                            p_ctx,
-                            frame_slot,
-                            arg_count + var_count + (sp - 1),
-                        );
-                        let zero = b.ins().iconst(types::I32, 0);
-                        b.ins().return_(&[zero]);
+                        b.ins().jump(ret_block, &[]);
                         terminated = true;
                     }
                     Op::ReturnUndef => {
                         store_raw_ptr(&mut b, p_ret_out, 0, TAG_UNDEFINED);
-                        emit_cleanup_slots(
-                            &mut b,
-                            f_free,
-                            ptr_ty,
-                            p_ctx,
-                            frame_slot,
-                            arg_count + var_count + sp,
-                        );
-                        let zero = b.ins().iconst(types::I32, 0);
-                        b.ins().return_(&[zero]);
+                        b.ins().jump(ret_block, &[]);
                         terminated = true;
                     }
                 }
@@ -1352,14 +1445,34 @@ impl CraneliftBackend {
 
             if !terminated {
                 store_raw_ptr(&mut b, p_ret_out, 0, TAG_UNDEFINED);
-                emit_cleanup_slots(&mut b, f_free, ptr_ty, p_ctx, frame_slot, total_slots);
-                let zero = b.ins().iconst(types::I32, 0);
-                b.ins().return_(&[zero]);
+                b.ins().jump(ret_block, &[]);
             }
 
-            // Build exception epilogue block.
+            // Build shared return epilogue block.
+            b.switch_to_block(ret_block);
+            emit_cleanup_slots(
+                &mut b,
+                f_free,
+                f_free_slots,
+                ptr_ty,
+                p_ctx,
+                frame_slot,
+                total_slots,
+            );
+            let zero = b.ins().iconst(types::I32, 0);
+            b.ins().return_(&[zero]);
+
+            // Build shared exception epilogue block.
             b.switch_to_block(exc_block);
-            emit_cleanup_slots(&mut b, f_free, ptr_ty, p_ctx, frame_slot, total_slots);
+            emit_cleanup_slots(
+                &mut b,
+                f_free,
+                f_free_slots,
+                ptr_ty,
+                p_ctx,
+                frame_slot,
+                total_slots,
+            );
             store_raw_ptr(&mut b, p_ret_out, 0, TAG_EXCEPTION);
             let zero = b.ins().iconst(types::I32, 0);
             b.ins().return_(&[zero]);
@@ -1368,13 +1481,16 @@ impl CraneliftBackend {
             b.finalize(self.module.target_config());
         }
 
-        self.module
-            .define_function(func_id, &mut ctx)
-            .map_err(|e| format!("cranelift define_function: {e}"))?;
+        if let Err(e) = self.module.define_function(func_id, &mut ctx) {
+            self.module.clear_context(&mut ctx);
+            self.broken = true;
+            return Err(format!("cranelift define_function: {e}"));
+        }
         self.module.clear_context(&mut ctx);
-        self.module
-            .finalize_definitions()
-            .map_err(|e| format!("cranelift finalize_definitions: {e}"))?;
+        if let Err(e) = self.module.finalize_definitions() {
+            self.broken = true;
+            return Err(format!("cranelift finalize_definitions: {e}"));
+        }
 
         let code_ptr = self.module.get_finalized_function(func_id);
         let compiled: CompiledFn = unsafe { std::mem::transmute(code_ptr) };
@@ -1467,13 +1583,20 @@ fn emit_free_and_undef(
 fn emit_cleanup_slots(
     b: &mut FunctionBuilder,
     f_free: cranelift_codegen::ir::FuncRef,
+    f_free_slots: cranelift_codegen::ir::FuncRef,
     ptr_ty: types::Type,
     p_ctx: Value,
     slot: StackSlot,
     slot_count: u32,
 ) {
-    for i in 0..slot_count {
-        emit_free_slot(b, f_free, ptr_ty, p_ctx, slot, (i * JSVAL_SIZE) as i32);
+    if slot_count <= 8 {
+        for i in 0..slot_count {
+            emit_free_slot(b, f_free, ptr_ty, p_ctx, slot, (i * JSVAL_SIZE) as i32);
+        }
+    } else {
+        let base_ptr = b.ins().stack_addr(ptr_ty, slot, 0);
+        let cnt_val = b.ins().iconst(types::I32, slot_count as i64);
+        b.ins().call(f_free_slots, &[p_ctx, base_ptr, cnt_val]);
     }
 }
 
@@ -1889,10 +2012,7 @@ fn emit_binary_op(
             let fa = b.ins().fcvt_from_sint(types::F64, a32);
             let fb = b.ins().fcvt_from_sint(types::F64, b32);
             let fq = b.ins().fdiv(fa, fb);
-            let fbits = b.ins().bitcast(types::I64, MemFlagsData::new(), fq);
-            let ftag = b.ins().iconst(types::I64, TAG_FLOAT64);
-            b.ins().stack_store(types::I64, fbits, slot, dst_off);
-            b.ins().stack_store(types::I64, ftag, slot, dst_off + 8);
+            store_f64_as_js_number(b, slot, dst_off, fq);
             b.ins().jump(prim_done_blk, &[]);
         }
         Op::Mod => {
@@ -2008,18 +2128,22 @@ fn emit_binary_op(
         let fa = load_as_f64(b, u1, t1_int);
         let fb = load_as_f64(b, u2, t2_int);
         match op {
-            Op::Add | Op::Sub | Op::Mul | Op::Div => {
+            Op::Add | Op::Sub | Op::Mul => {
                 let fr = match op {
                     Op::Add => b.ins().fadd(fa, fb),
                     Op::Sub => b.ins().fsub(fa, fb),
                     Op::Mul => b.ins().fmul(fa, fb),
-                    Op::Div => b.ins().fdiv(fa, fb),
                     _ => unreachable!(),
                 };
                 let fbits = b.ins().bitcast(types::I64, MemFlagsData::new(), fr);
                 let ftag = b.ins().iconst(types::I64, TAG_FLOAT64);
                 b.ins().stack_store(types::I64, fbits, slot, dst_off);
                 b.ins().stack_store(types::I64, ftag, slot, dst_off + 8);
+                b.ins().jump(prim_done_blk, &[]);
+            }
+            Op::Div => {
+                let fq = b.ins().fdiv(fa, fb);
+                store_f64_as_js_number(b, slot, dst_off, fq);
                 b.ins().jump(prim_done_blk, &[]);
             }
             Op::Lt
@@ -2087,16 +2211,42 @@ fn load_as_f64(b: &mut FunctionBuilder, u: Value, is_int: Value) -> Value {
     b.ins().select(is_int, from_int, from_f64)
 }
 
+/// Branchless equivalent of QuickJS `js_number(double d)`: stores `fval` as
+/// `JS_TAG_INT` when it is an exact `int32` (excluding `-0.0`), else `JS_TAG_FLOAT64`.
+fn store_f64_as_js_number(b: &mut FunctionBuilder, slot: StackSlot, dst_off: i32, fval: Value) {
+    let fbits = b.ins().bitcast(types::I64, MemFlagsData::new(), fval);
+    let i32_v = b.ins().fcvt_to_sint_sat(types::I32, fval);
+    let roundtrip = b.ins().fcvt_from_sint(types::F64, i32_v);
+    let eq_roundtrip = b.ins().fcmp(FloatCC::Equal, fval, roundtrip);
+    let not_neg_zero = b.ins().icmp_imm_s(IntCC::NotEqual, fbits, i64::MIN);
+    let is_int32 = b.ins().band(eq_roundtrip, not_neg_zero);
+    let int_u = b.ins().uextend(types::I64, i32_v);
+    let int_tag = b.ins().iconst(types::I64, TAG_INT);
+    let flt_tag = b.ins().iconst(types::I64, TAG_FLOAT64);
+    let res_u = b.ins().select(is_int32, int_u, fbits);
+    let res_tag = b.ins().select(is_int32, int_tag, flt_tag);
+    b.ins().stack_store(types::I64, res_u, slot, dst_off);
+    b.ins().stack_store(types::I64, res_tag, slot, dst_off + 8);
+}
+
 /// Emits a direct native self-recursive call (`f_self`) when the callee
-/// matches `p_func_obj`, otherwise dispatches via `QJS_JitCall` (which itself
-/// fast-paths inter-JIT calls via `b->jit_entry`).
+/// matches `p_func_obj` and JIT execution is still enabled, pushing a real
+/// `JSStackFrame` so stack traces preserve full recursion depth; otherwise
+/// dispatches via `QJS_JitCall` (which fast-paths inter-JIT calls via
+/// `b->jit_entry`).
 #[allow(clippy::too_many_arguments)]
 fn emit_direct_or_generic_call(
     b: &mut FunctionBuilder,
     f_self: cranelift_codegen::ir::FuncRef,
     f_call: cranelift_codegen::ir::FuncRef,
+    f_poll: cranelift_codegen::ir::FuncRef,
+    f_on_exc: cranelift_codegen::ir::FuncRef,
     ptr_ty: types::Type,
     direct_calls_ptr: usize,
+    jit_enabled_ptr: usize,
+    stack_frame_size: u32,
+    current_sf_ptr: usize,
+    self_sf_slot: StackSlot,
     p_ctx: Value,
     p_func_obj: Value,
     frame_slot: StackSlot,
@@ -2118,9 +2268,19 @@ fn emit_direct_or_generic_call(
         .load(types::I64, MemFlagsData::trusted(), p_func_obj, 8);
     let same_u = b.ins().icmp(IntCC::Equal, callee_u, self_u);
     let same_tag = b.ins().icmp(IntCC::Equal, callee_tag, self_tag);
-    let is_self = b.ins().band(same_u, same_tag);
+    let same_fn = b.ins().band(same_u, same_tag);
+    let enabled_addr = b.ins().iconst(ptr_ty, jit_enabled_ptr as i64);
+    let enabled_byte = b
+        .ins()
+        .load(types::I8, MemFlagsData::trusted(), enabled_addr, 0);
+    let is_enabled = b.ins().icmp_imm_s(IntCC::NotEqual, enabled_byte, 0);
+    let is_self = b.ins().band(same_fn, is_enabled);
 
     let self_blk = b.create_block();
+    let poll_blk = b.create_block();
+    let run_self_blk = b.create_block();
+    let self_ok_blk = b.create_block();
+    let self_exc_blk = b.create_block();
     let generic_blk = b.create_block();
     let done_blk = b.create_block();
     b.append_block_param(done_blk, types::I32);
@@ -2135,14 +2295,57 @@ fn emit_direct_or_generic_call(
     let next_calls = b.ins().iadd_imm_s(cur_calls, 1);
     b.ins()
         .store(MemFlagsData::trusted(), next_calls, counter_addr, 0);
+    let masked = b.ins().band_imm_s(next_calls, 1023);
+    let do_poll = b.ins().icmp_imm_s(IntCC::Equal, masked, 0);
+    b.ins().brif(do_poll, poll_blk, &[], run_self_blk, &[]);
+
+    b.switch_to_block(poll_blk);
+    let pc = b.ins().call(f_poll, &[p_ctx]);
+    let interrupted = b.inst_results(pc)[0];
+    let one_i32 = b.ins().iconst(types::I32, 1);
+    b.ins()
+        .brif(interrupted, done_blk, &[one_i32.into()], run_self_blk, &[]);
+
+    b.switch_to_block(run_self_blk);
+    // Clone the current JSStackFrame (which already describes `p_func_obj`),
+    // link `self_sf.prev_frame = parent_sf` at offset 0, and push onto `rt->current_stack_frame`.
+    let sf_slot_addr = b.ins().iconst(ptr_ty, current_sf_ptr as i64);
+    let parent_sf = b
+        .ins()
+        .load(ptr_ty, MemFlagsData::trusted(), sf_slot_addr, 0);
+    b.ins().stack_store(ptr_ty, parent_sf, self_sf_slot, 0);
+    let sf_words = stack_frame_size / 8;
+    for w in 1..sf_words {
+        let off = (w * 8) as i32;
+        let word = b
+            .ins()
+            .load(types::I64, MemFlagsData::trusted(), parent_sf, off);
+        b.ins().stack_store(types::I64, word, self_sf_slot, off);
+    }
+    let child_sf = b.ins().stack_addr(ptr_ty, self_sf_slot, 0);
+    b.ins()
+        .store(MemFlagsData::trusted(), child_sf, sf_slot_addr, 0);
+
     b.ins().call(
         f_self,
         &[p_ctx, p_func_obj, this_ptr, argc_val, argv_ptr, out_ptr],
     );
     let out_tag = sload(b, frame_slot, scratch0_off + 8);
     let is_exc = b.ins().icmp_imm_s(IntCC::Equal, out_tag, TAG_EXCEPTION);
-    let self_err = b.ins().uextend(types::I32, is_exc);
-    b.ins().jump(done_blk, &[self_err.into()]);
+    b.ins().brif(is_exc, self_exc_blk, &[], self_ok_blk, &[]);
+
+    b.switch_to_block(self_ok_blk);
+    b.ins()
+        .store(MemFlagsData::trusted(), parent_sf, sf_slot_addr, 0);
+    let zero_i32 = b.ins().iconst(types::I32, 0);
+    b.ins().jump(done_blk, &[zero_i32.into()]);
+
+    b.switch_to_block(self_exc_blk);
+    b.ins().call(f_on_exc, &[p_ctx]);
+    b.ins()
+        .store(MemFlagsData::trusted(), parent_sf, sf_slot_addr, 0);
+    let err_one = b.ins().iconst(types::I32, 1);
+    b.ins().jump(done_blk, &[err_one.into()]);
 
     b.switch_to_block(generic_blk);
     let c = b.ins().call(

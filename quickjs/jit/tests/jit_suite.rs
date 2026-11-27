@@ -416,3 +416,122 @@ fn tail_call_functions_compile_without_fallback() {
         "after={after:?}, before={before:?}"
     );
 }
+
+#[test]
+fn reentrant_host_callbacks_and_div_jsvalue_identity() {
+    use rong::{JSFunc, JSValue};
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+
+    let (_rt, ctx) = new_jit_runtime(1);
+
+    // Host callback invoked from inside an active JIT frame that inspects stats
+    // and toggles/re-initializes the JIT re-entrantly.
+    let probe = JSFunc::new(&ctx, |ctx: rong::quickjs::JSContext, x: i32| {
+        let s = jit::stats(&ctx).expect("stats available inside callback");
+        if jit::is_supported() {
+            assert!(s.jit_calls >= 1);
+            assert!(jit::set_enabled(&ctx, false));
+            assert!(jit::set_enabled(&ctx, true));
+            jit::init(
+                &ctx,
+                JitConfig {
+                    hot_threshold: 1,
+                    ..JitConfig::default()
+                },
+            )?;
+        }
+        Ok::<i32, rong::RongJSError>(x + 10)
+    })
+    .unwrap();
+    ctx.global().set("hostProbe", probe).unwrap();
+
+    let res: i32 = ctx
+        .eval(Source::from_bytes(
+            r#"
+            function outerJit(a) {
+                return hostProbe(a * 2) + 1;
+            }
+            outerJit(15) + outerJit(20);
+            "#,
+        ))
+        .unwrap();
+    assert_eq!(res, 41 + 51);
+
+    // Exact integer division in JIT must produce `JS_TAG_INT` matching QuickJS `js_number`,
+    // preserving Rust `JSValue` PartialEq and Hash identity.
+    ctx.eval::<()>(Source::from_bytes(
+        "function jitDiv(a, b) { return a / b; } function jitFDiv(a, b) { return (a + 0.5 - 0.5) / b; }",
+    ))
+    .unwrap();
+    let v_lit: JSValue = ctx.eval(Source::from_bytes("2")).unwrap();
+    let v_idiv: JSValue = ctx.eval(Source::from_bytes("jitDiv(4, 2)")).unwrap();
+    let v_fdiv: JSValue = ctx.eval(Source::from_bytes("jitFDiv(9.0, 3.0)")).unwrap();
+    let lit_three: JSValue = ctx.eval(Source::from_bytes("3")).unwrap();
+    assert_eq!(v_idiv, v_lit);
+    assert_eq!(v_fdiv, lit_three);
+
+    let hash_of = |v: &JSValue| {
+        let mut h = DefaultHasher::new();
+        v.hash(&mut h);
+        h.finish()
+    };
+    assert_eq!(hash_of(&v_idiv), hash_of(&v_lit));
+    assert_eq!(hash_of(&v_fdiv), hash_of(&lit_three));
+
+    let neg_zero_ok: bool = ctx
+        .eval(Source::from_bytes(
+            "Object.is(jitDiv(0, -1), -0) && jitDiv(-2147483648, 1) === -2147483648 && jitDiv(-2147483648, -1) === 2147483648",
+        ))
+        .unwrap();
+    assert!(neg_zero_ok);
+}
+
+#[test]
+fn large_frames_use_bulk_helpers_and_oversized_frames_fall_back() {
+    let (_rt, ctx) = new_jit_runtime(1);
+
+    // 40 locals (>16 threshold for QJS_JitInitUndefined & >8 threshold for QJS_JitFreeSlots)
+    // with multiple return paths and heap-allocated strings.
+    let mut medium_vars = String::new();
+    for i in 0..40 {
+        medium_vars.push_str(&format!("let v{i} = 's-' + (x + {i});\n"));
+    }
+    let script = format!(
+        r#"
+        function mediumFrame(x) {{
+            {medium_vars}
+            if (x < 0) return v0.length;
+            if (x === 0) return v19.length;
+            return v39.length;
+        }}
+        mediumFrame(-1) + mediumFrame(0) + mediumFrame(100);
+        "#
+    );
+    let out: i32 = ctx.eval(Source::from_bytes(script.as_bytes())).unwrap();
+    assert_eq!(out, 4 + 4 + 5);
+
+    // >512 locals exceeds MAX_FRAME_SLOTS and must cleanly fall back to interpreter.
+    let mut huge_vars = String::new();
+    for i in 0..530 {
+        huge_vars.push_str(&format!("let h{i} = {i};\n"));
+    }
+    let before = jit::stats(&ctx);
+    let huge_script = format!(
+        r#"
+        function oversizedFrame(x) {{
+            {huge_vars}
+            return x + h0 + h529;
+        }}
+        oversizedFrame(10);
+        "#
+    );
+    let huge_out: i32 = ctx
+        .eval(Source::from_bytes(huge_script.as_bytes()))
+        .unwrap();
+    assert_eq!(huge_out, 539);
+    if jit::is_supported() {
+        let after = jit::stats(&ctx).unwrap();
+        assert!(after.rejected_functions > before.unwrap().rejected_functions);
+    }
+}

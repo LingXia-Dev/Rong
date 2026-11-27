@@ -47,10 +47,10 @@ if [ "${ENGINE}" = "quickjs" ]; then
 elif [ "${ENGINE}" = "jscore" ]; then
   case "${host_target}" in
     *apple*)
-      workspace_args="${workspace_args} --exclude rong_quickjs --exclude rong_quickjs_sys"
+      workspace_args="${workspace_args} --exclude rong_quickjs --exclude rong_quickjs_sys --exclude rong_quickjs_jit"
       ;;
     *)
-      workspace_args="${workspace_args} --exclude rong_quickjs --exclude rong_quickjs_sys"
+      workspace_args="${workspace_args} --exclude rong_quickjs --exclude rong_quickjs_sys --exclude rong_quickjs_jit"
       ;;
   esac
 elif [ "${ENGINE}" = "arkjs" ]; then
@@ -92,7 +92,7 @@ if ($env:ENGINE -eq "quickjs") {
     $workspaceArgs += @("--exclude", "rong_jscore", "--exclude", "rong_jscore_sys")
     & cargo check @workspaceArgs --lib --bins --tests "--no-default-features" "--features=$engineFeatures"
 } elseif ($env:ENGINE -eq "jscore") {
-    $workspaceArgs += @("--exclude", "rong_quickjs", "--exclude", "rong_quickjs_sys")
+    $workspaceArgs += @("--exclude", "rong_quickjs", "--exclude", "rong_quickjs_sys", "--exclude", "rong_quickjs_jit")
     & cargo check @workspaceArgs --lib --bins --tests "--no-default-features" "--features=$engineFeatures"
 } elseif ($env:ENGINE -eq "arkjs") {
     throw "Use 'cargo make check-arkjs-ohos' for ArkJS"
@@ -238,6 +238,7 @@ cargo check \
   --workspace \
   --exclude rong_quickjs \
   --exclude rong_quickjs_sys \
+  --exclude rong_quickjs_jit \
   --exclude rong_jscore \
   --exclude rong_jscore_sys \
   --no-default-features \
@@ -285,6 +286,7 @@ cargo clippy \
   --workspace \
   --exclude rong_quickjs \
   --exclude rong_quickjs_sys \
+  --exclude rong_quickjs_jit \
   --exclude rong_jscore \
   --exclude rong_jscore_sys \
   --no-default-features \

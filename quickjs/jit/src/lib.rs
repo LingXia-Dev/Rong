@@ -90,7 +90,16 @@ mod engine {
             }
             let stack_limit_ptr = unsafe { sys::QJS_JitStackLimitPtr(rt) } as usize;
             let direct_calls_ptr = unsafe { sys::QJS_JitDirectCallsPtr(rt) } as usize;
-            let backend = CraneliftBackend::new(stack_limit_ptr, direct_calls_ptr)?;
+            let jit_enabled_ptr = unsafe { sys::QJS_JitEnabledPtr(rt) } as usize;
+            let stack_frame_size = unsafe { sys::QJS_JitStackFrameSize() };
+            let current_stack_frame_ptr = unsafe { sys::QJS_JitCurrentStackFramePtr(rt) } as usize;
+            let backend = CraneliftBackend::new(
+                stack_limit_ptr,
+                direct_calls_ptr,
+                jit_enabled_ptr,
+                stack_frame_size,
+                current_stack_frame_ptr,
+            )?;
             Ok(Self {
                 config,
                 backend,
@@ -117,74 +126,83 @@ mod engine {
         if opaque.is_null() {
             return 0;
         }
-        let engine = unsafe { &mut *(opaque as *mut JitEngine) };
-        if !engine.enabled {
-            engine.stats.interpreter_fallbacks += 1;
-            return 0;
-        }
 
-        let data = unsafe { sys::QJS_JitGetBytecodeData(bc) };
-        if data == JIT_REJECTED {
-            engine.stats.interpreter_fallbacks += 1;
-            return 0;
-        }
-
-        let entry_ptr = if !data.is_null() {
-            data as *const CompiledEntry
-        } else {
-            let count = unsafe { sys::QJS_JitIncCallCount(bc) };
-            if count < engine.config.hot_threshold.max(1) {
+        // Scope the mutable borrow of `JitEngine` strictly to lookup/compilation
+        // before invoking native code. `QJS_JitInvoke` can re-enter `jit_call_hook`
+        // (or host callbacks calling `stats_raw` / `set_enabled_raw` / `init_raw`),
+        // so no `&JitEngine` or `&mut JitEngine` reference may remain live across it.
+        let (func, exec_ctx) = {
+            let engine = unsafe { &mut *(opaque as *mut JitEngine) };
+            if !engine.enabled {
                 engine.stats.interpreter_fallbacks += 1;
                 return 0;
             }
 
-            let mut info = std::mem::MaybeUninit::<sys::QJSJitBytecodeInfo>::zeroed();
-            unsafe { sys::QJS_JitGetBytecodeInfo(bc, info.as_mut_ptr()) };
-            let info = unsafe { info.assume_init() };
+            let data = unsafe { sys::QJS_JitGetBytecodeData(bc) };
+            if data == JIT_REJECTED {
+                engine.stats.interpreter_fallbacks += 1;
+                return 0;
+            }
 
-            let decoded = match decode_bytecode(&info, engine.config.max_bytecode_bytes) {
-                Ok(d) => d,
-                Err(_) => {
-                    unsafe { sys::QJS_JitSetBytecodeData(bc, JIT_REJECTED) };
-                    engine.stats.rejected_functions += 1;
+            let entry_ptr = if !data.is_null() {
+                data as *const CompiledEntry
+            } else {
+                let count = unsafe { sys::QJS_JitIncCallCount(bc) };
+                if count < engine.config.hot_threshold.max(1) {
                     engine.stats.interpreter_fallbacks += 1;
                     return 0;
+                }
+
+                let mut info = std::mem::MaybeUninit::<sys::QJSJitBytecodeInfo>::zeroed();
+                unsafe { sys::QJS_JitGetBytecodeInfo(bc, info.as_mut_ptr()) };
+                let info = unsafe { info.assume_init() };
+
+                let decoded = match decode_bytecode(&info, engine.config.max_bytecode_bytes) {
+                    Ok(d) => d,
+                    Err(_) => {
+                        unsafe { sys::QJS_JitSetBytecodeData(bc, JIT_REJECTED) };
+                        engine.stats.rejected_functions += 1;
+                        engine.stats.interpreter_fallbacks += 1;
+                        return 0;
+                    }
+                };
+
+                match engine.backend.compile(&decoded, &info) {
+                    Ok(func) => {
+                        let entry = Box::into_raw(Box::new(CompiledEntry {
+                            func,
+                            realm: info.realm,
+                        }));
+                        unsafe {
+                            sys::QJS_JitSetBytecodeData(bc, entry as *mut c_void);
+                            sys::QJS_JitSetBytecodeEntry(bc, Some(func));
+                        }
+                        engine.stats.compiled_functions += 1;
+                        entry as *const CompiledEntry
+                    }
+                    Err(_) => {
+                        unsafe { sys::QJS_JitSetBytecodeData(bc, JIT_REJECTED) };
+                        engine.stats.rejected_functions += 1;
+                        engine.stats.interpreter_fallbacks += 1;
+                        return 0;
+                    }
                 }
             };
 
-            match engine.backend.compile(&decoded, &info) {
-                Ok(func) => {
-                    let entry = Box::into_raw(Box::new(CompiledEntry {
-                        func,
-                        realm: info.realm,
-                    }));
-                    unsafe {
-                        sys::QJS_JitSetBytecodeData(bc, entry as *mut c_void);
-                        sys::QJS_JitSetBytecodeEntry(bc, Some(func));
-                    }
-                    engine.stats.compiled_functions += 1;
-                    entry as *const CompiledEntry
-                }
-                Err(_) => {
-                    unsafe { sys::QJS_JitSetBytecodeData(bc, JIT_REJECTED) };
-                    engine.stats.rejected_functions += 1;
-                    engine.stats.interpreter_fallbacks += 1;
-                    return 0;
-                }
-            }
+            let entry = unsafe { &*entry_ptr };
+            let exec_ctx = if entry.realm.is_null() {
+                caller_ctx
+            } else {
+                entry.realm
+            };
+            engine.stats.jit_calls += 1;
+            (entry.func, exec_ctx)
         };
 
-        let entry = unsafe { &*entry_ptr };
-        let exec_ctx = if entry.realm.is_null() {
-            caller_ctx
-        } else {
-            entry.realm
-        };
-        engine.stats.jit_calls += 1;
         let rc = unsafe {
             sys::QJS_JitInvoke(
                 exec_ctx,
-                Some(entry.func),
+                Some(func),
                 bc,
                 func_obj,
                 this_obj,
@@ -196,6 +214,7 @@ mod engine {
         if rc == 0 {
             1 // handled by JIT
         } else {
+            let engine = unsafe { &mut *(opaque as *mut JitEngine) };
             engine.stats.interpreter_fallbacks += 1;
             0 // bailed out -> fall back to interpreter
         }

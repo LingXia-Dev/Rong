@@ -575,7 +575,27 @@ fn differential_stack_trace_and_tdz_messages() {
                 tdzMsgs.push(e.name + ":" + e.message);
             }
         }
-        [errStack, probeOk, tdzMsgs.join(",")].join("||");
+
+        function selfRecProbe(n) {
+            if (n <= 0) return new Error("rec").stack;
+            return selfRecProbe(n - 1);
+        }
+        function selfRecThrow(n) {
+            if (n <= 0) {
+                let nul = null;
+                return nul.boom;
+            }
+            return selfRecThrow(n - 1);
+        }
+        const recProbeCount = (selfRecProbe(4).match(/selfRecProbe/g) || []).length;
+        let recThrowCount = 0;
+        try {
+            selfRecThrow(3);
+        } catch (e) {
+            recThrowCount = (e.stack.match(/selfRecThrow/g) || []).length;
+        }
+
+        [errStack, probeOk, tdzMsgs.join(","), recProbeCount, recThrowCount].join("||");
         "#,
     );
 }

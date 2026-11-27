@@ -66,6 +66,16 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 - Circular references are found by comparing values along the current path,
   not by hashing them.
 
+### QuickJS
+
+- Opt-in Cranelift baseline JIT compiler behind `rong`'s `quickjs-jit` feature
+  (`rong_quickjs`'s `jit`), exposed at `rong::quickjs::jit` (`init`,
+  `set_enabled`, `stats`, `is_supported`, `JitConfig`, `JitStats`). Hot normal
+  bytecode functions are compiled to native code on `x86_64` and `aarch64`
+  (Windows, macOS, Linux, Android, HarmonyOS); unsupported targets such as iOS
+  report `is_supported() == false` and keep running in the interpreter. Builds
+  without `quickjs-jit` compile QuickJS without JIT hooks or Cranelift.
+
 ## [0.8.0] - 2026-11-22
 
 Crate releases: `rong_core`, `rong`, `rong_quickjs`, `rong_jscore`,

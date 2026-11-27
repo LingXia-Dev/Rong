@@ -160,7 +160,7 @@ fn apply_jit_hooks(src: &mut String) {
     inject_once(
         src,
         "    init_list_head(&rt->job_list);\n\n    JS_RunGC(rt);",
-        "    init_list_head(&rt->job_list);\n\n    JS_RunGC(rt);\n#ifdef CONFIG_RONG_JIT\n    if (rt->jit_free_runtime != NULL) {\n        QJSJitFreeRuntimeHook free_rt = rt->jit_free_runtime;\n        void *opaque = rt->jit_opaque;\n        rt->jit_call = NULL;\n        rt->jit_free_bytecode = NULL;\n        rt->jit_free_runtime = NULL;\n        rt->jit_opaque = NULL;\n        free_rt(opaque);\n    }\n#endif",
+        "    init_list_head(&rt->job_list);\n\n    JS_RunGC(rt);\n#ifdef CONFIG_RONG_JIT\n    rt->jit_enabled = 0;\n    if (rt->jit_free_runtime != NULL) {\n        QJSJitFreeRuntimeHook free_rt = rt->jit_free_runtime;\n        void *opaque = rt->jit_opaque;\n        rt->jit_call = NULL;\n        rt->jit_free_bytecode = NULL;\n        rt->jit_free_runtime = NULL;\n        rt->jit_opaque = NULL;\n        free_rt(opaque);\n    }\n#endif",
         "JS_FreeRuntime jit hook",
     );
 }

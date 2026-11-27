@@ -7,12 +7,17 @@
 use rong_quickjs_sys as sys;
 use std::collections::{BTreeSet, HashMap, VecDeque};
 
+/// Maximum total JSValue slots (`arg_count + var_count + stack_size`) eligible
+/// for JIT compilation, bounding native stack frame size and Cranelift IR size.
+pub const MAX_FRAME_SLOTS: u32 = 512;
+
 /// Reason why a `JSFunctionBytecode` was not compiled by the baseline JIT.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RejectReason {
     NotNormalFunction,
     HasCapturedLocals,
     BytecodeTooLarge,
+    FrameTooLarge,
     EmptyBytecode,
     TruncatedBytecode,
     InvalidBranchTarget,
@@ -284,6 +289,10 @@ pub fn decode_bytecode(
     }
     if len > max_bytecode_len {
         return Err(RejectReason::BytecodeTooLarge);
+    }
+    let total_slots = (info.arg_count as u32) + (info.var_count as u32) + (info.stack_size as u32);
+    if total_slots > MAX_FRAME_SLOTS {
+        return Err(RejectReason::FrameTooLarge);
     }
 
     let buf = unsafe { std::slice::from_raw_parts(info.buf, len) };
@@ -678,6 +687,7 @@ pub fn decode_bytecode(
             insn.op = Op::Nop;
         }
     }
+    block_starts.retain(|pc| pc_to_idx.get(pc).is_some_and(|&i| depths[i].is_some()));
 
     Ok(DecodedFunction {
         insns,
@@ -737,6 +747,13 @@ mod tests {
         assert_eq!(
             decode_bytecode(&info, 0).unwrap_err(),
             RejectReason::BytecodeTooLarge
+        );
+
+        let mut huge_frame = make_info(&code);
+        huge_frame.var_count = (MAX_FRAME_SLOTS as u16) + 1;
+        assert_eq!(
+            decode_bytecode(&huge_frame, 1024).unwrap_err(),
+            RejectReason::FrameTooLarge
         );
     }
 
@@ -875,5 +892,19 @@ mod tests {
         assert_eq!(decoded.insns[3].op, Op::TailCall(0));
         assert_eq!(decoded.insns[3].stack_before, 1);
         assert_eq!(decoded.insns[4].stack_before, 0);
+    }
+
+    #[test]
+    fn excludes_unreachable_block_starts_after_terminal_return() {
+        // pc 0: push_0; pc 1: return; pc 2: nop (dead); pc 3: return_undef (dead)
+        let code = [
+            sys::QJSJitOp_QJS_OP_push_0 as u8,
+            sys::QJSJitOp_QJS_OP_return as u8,
+            sys::QJSJitOp_QJS_OP_nop as u8,
+            sys::QJSJitOp_QJS_OP_return_undef as u8,
+        ];
+        let decoded = decode_bytecode(&make_info(&code), 1024).expect("should decode");
+        assert!(decoded.block_starts.contains(&0));
+        assert!(!decoded.block_starts.contains(&2));
     }
 }
