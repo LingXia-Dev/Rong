@@ -42,6 +42,13 @@ include = [
     "quickjs-ng/quickjs.h",
     "src/**",
 ]
+[features]
+default = []
+# Build-time JIT hooks into QuickJS-NG (`JS_CallInternal`, `JSFunctionBytecode`,
+# `JS_FreeRuntime`) and runtime helpers for `rong_quickjs_jit`. Zero overhead
+# when disabled.
+jit = []
+
 [build-dependencies]
 bindgen = "0.73.2"
 cc = "1"

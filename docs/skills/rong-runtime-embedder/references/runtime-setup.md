@@ -14,6 +14,10 @@ rong = { version = "0.6", default-features = false, features = ["quickjs"] }
 Engine features:
 
 - `quickjs`: bundled QuickJS engine with native hard interruption.
+- `quickjs-intl`: opt-in ECMA-402 `Intl` for QuickJS (`rong::quickjs::intl`).
+- `quickjs-jit`: opt-in Cranelift baseline JIT for QuickJS (`rong::quickjs::jit`,
+  supported on `x86_64` and `aarch64` excluding iOS; activate per runtime via
+  `rong::quickjs::jit::init(&ctx, Default::default())?`).
 - `jscore`: Apple system JavaScriptCore on macOS/iOS; other supported targets
   resolve a source/JSCOnly backend.
 - `jscore-source`: force the source/JSCOnly backend, including mandatory hard

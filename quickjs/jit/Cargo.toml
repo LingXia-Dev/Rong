@@ -1,0 +1,27 @@
+[package]
+name = "rong_quickjs_jit"
+version = "0.8.0"
+edition.workspace = true
+
+description = "Cranelift baseline JIT compiler for RongJS on QuickJS; internal to rong_quickjs, use rong::quickjs::jit"
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
+keywords.workspace = true
+categories.workspace = true
+documentation = "https://docs.rs/rong"
+readme = "README.md"
+
+[dependencies]
+rong_quickjs_sys = { workspace = true, features = ["jit"] }
+
+[target.'cfg(all(any(target_arch = "x86_64", target_arch = "aarch64"), not(target_os = "ios")))'.dependencies]
+cranelift-codegen = "0.135"
+cranelift-frontend = "0.135"
+cranelift-jit = "0.135"
+cranelift-module = "0.135"
+cranelift-native = "0.135"
+
+[dev-dependencies]
+rong = { workspace = true, features = ["quickjs", "quickjs-jit"] }

@@ -163,6 +163,11 @@ Reach for `RongExecutor::builder()` only when you need to:
 cargo run -p rong_cli
 ```
 
+On QuickJS, enable `quickjs-intl` to add ECMA-402 `Intl` (`rong::quickjs::intl`)
+and `quickjs-jit` to add the optional Cranelift baseline JIT compiler
+(`rong::quickjs::jit`, active on `x86_64` and `aarch64` except iOS). Both are
+off by default so pure-interpreter builds carry zero extra code or hook overhead.
+
 Switch to JavaScriptCore explicitly:
 
 ```bash
