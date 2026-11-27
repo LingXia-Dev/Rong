@@ -386,3 +386,39 @@ fn contexts_are_independent() -> Result<(), String> {
     assert_eq!(verdict, "TypeError");
     Ok(())
 }
+
+/// `toLocaleString()` with no arguments reuses its formatter, and a settings change (locale or
+/// time zone) still reaches the next call.
+#[test]
+fn default_to_locale_follows_settings() -> Result<(), String> {
+    let rt = RongJS::runtime();
+    let ctx = rt.context();
+    if !install_intl(&ctx, Some("en-US"))? {
+        log("default to-locale: skipped on the reference, whose Intl is the engine's");
+        return Ok(());
+    }
+    let settings = |locale: &str, zone: &str| rong_quickjs_intl::IntlSettings {
+        locale: Some(locale.to_string()),
+        time_zone: Some(zone.to_string()),
+        hour_cycle: Some(rong_quickjs_intl::HourCycle::H23),
+    };
+    let read = "[(1234.5).toLocaleString(), (1234.5).toLocaleString(), \
+                new Date(Date.UTC(2026, 0, 5, 13, 4, 5)).toLocaleTimeString(), \
+                new Date(Date.UTC(2026, 0, 5, 13, 4, 5)).toLocaleTimeString()].join(' | ')";
+    rong_quickjs_intl::set_settings(&ctx, settings("en-US", "UTC"));
+    assert_eq!(
+        eval::<String>(&ctx, read)?,
+        "1,234.5 | 1,234.5 | 13:04:05 | 13:04:05"
+    );
+    rong_quickjs_intl::set_settings(&ctx, settings("de", "Asia/Tokyo"));
+    assert_eq!(
+        eval::<String>(&ctx, read)?,
+        "1.234,5 | 1.234,5 | 22:04:05 | 22:04:05"
+    );
+    let explicit: String = eval(
+        &ctx,
+        "(1234.5).toLocaleString('en') + ' ' + new Date(0).toLocaleTimeString('de', { timeZone: 'UTC' })",
+    )?;
+    assert_eq!(explicit, "1,234.5 00:00:00");
+    Ok(())
+}
