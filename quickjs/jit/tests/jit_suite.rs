@@ -372,3 +372,47 @@ fn jit_infinite_loop_is_interruptible() {
     timer.join().unwrap();
     assert!(err.is_err(), "infinite JIT loop must be interrupted");
 }
+
+#[test]
+fn tail_call_functions_compile_without_fallback() {
+    if !jit::is_supported() {
+        return;
+    }
+    let (_rt, ctx) = new_jit_runtime(1);
+    ctx.eval::<()>(Source::from_bytes(
+        r#"
+        function helper(x) {
+            return x + 1;
+        }
+        function tailFn(n) {
+            return helper(n * 2);
+        }
+        function tailMethodFn(x) {
+            return Math.round(x + 0.25);
+        }
+        "#,
+    ))
+    .unwrap();
+
+    let before = jit::stats(&ctx).unwrap();
+    let res: i32 = ctx
+        .eval(Source::from_bytes("tailFn(10) + tailMethodFn(20.9);"))
+        .unwrap();
+    assert_eq!(res, 21 + 21);
+
+    let after = jit::stats(&ctx).unwrap();
+    assert_eq!(
+        after.rejected_functions, before.rejected_functions,
+        "after={after:?}, before={before:?}"
+    );
+    assert_eq!(
+        after.compiled_functions - before.compiled_functions,
+        4,
+        "expected eval + tailFn + helper + tailMethodFn to compile; after={after:?}, before={before:?}"
+    );
+    assert_eq!(
+        after.jit_calls - before.jit_calls,
+        4,
+        "after={after:?}, before={before:?}"
+    );
+}

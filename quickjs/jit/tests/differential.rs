@@ -340,3 +340,242 @@ fn multithreaded_concurrent_jit_runtimes_and_gc_stress() {
         h.join().expect("worker thread panicked");
     }
 }
+
+#[test]
+fn differential_tail_calls_and_branching_returns() {
+    assert_jit_matches_interpreter(
+        "tail_calls",
+        r#"
+        function leaf(x, y) {
+            return x * 3 + y;
+        }
+        function tailHelper(a, b) {
+            if (a < 0) {
+                return leaf(-a, b + 1);
+            }
+            return leaf(a, b);
+        }
+        const calculator = {
+            factor: 7,
+            compute(a, b) {
+                return (a + b) * this.factor;
+            },
+        };
+        function tailMethod(o, x) {
+            let tag = "prefix-" + x;
+            if (x % 2 === 0) {
+                return o.compute(tag.length, x);
+            }
+            return Math.round(x * 1.5);
+        }
+        function tailThrow(o) {
+            let tmp = "alloc-" + "val";
+            return o.missingMethod(tmp);
+        }
+
+        const out = [
+            tailHelper(-4, 5),
+            tailHelper(4, 5),
+            tailMethod(calculator, 10),
+            tailMethod(calculator, 9),
+        ];
+        try {
+            tailThrow({});
+            out.push("no-throw");
+        } catch (e) {
+            out.push(e.name);
+        }
+        out.join("|");
+        "#,
+    );
+}
+
+#[test]
+fn differential_strict_vs_sloppy_mode_semantics() {
+    assert_jit_matches_interpreter(
+        "strict_vs_sloppy",
+        r#"
+        const sloppyThis = new Function("return this;");
+        function strictThis() {
+            "use strict";
+            return this;
+        }
+        const sloppyWriteProp = new Function("o", "v", "o.x = v; return o.x;");
+        function strictWriteProp(o, v) {
+            "use strict";
+            o.x = v;
+            return o.x;
+        }
+        const sloppyWriteArr = new Function("a", "v", "a[0] = v; return a[0];");
+        function strictWriteArr(a, v) {
+            "use strict";
+            a[0] = v;
+            return a[0];
+        }
+        const sloppyWriteGlobal = new Function("jitTestSloppyGlobal = 77; return jitTestSloppyGlobal;");
+        function strictWriteGlobal() {
+            "use strict";
+            jitTestStrictGlobal = 88;
+            return jitTestStrictGlobal;
+        }
+        function callFromStrict(fn, a, b) {
+            "use strict";
+            return b === undefined ? fn(a) : fn(a, b);
+        }
+        const callFromSloppy = new Function("fn", "a", "b", "return b === undefined ? fn(a) : fn(a, b);");
+
+        const frozenObj = Object.freeze({ x: 10 });
+        const frozenArr = Object.freeze([20]);
+
+        function catchName(fn) {
+            try {
+                return String(fn());
+            } catch (e) {
+                return e.name;
+            }
+        }
+
+        const res = [
+            sloppyThis() === globalThis,
+            sloppyThis.call(null) === globalThis,
+            typeof sloppyThis.call(42),
+            sloppyThis.call(42) instanceof Number,
+            Number(sloppyThis.call(42)),
+            strictThis() === undefined,
+            strictThis.call(null) === null,
+            typeof strictThis.call(42),
+            strictThis.call(42),
+            // Sloppy callee invoked from strict caller must NOT throw:
+            callFromStrict(sloppyWriteProp, frozenObj, 99),
+            callFromStrict(sloppyWriteArr, frozenArr, 99),
+            callFromStrict(sloppyWriteGlobal, undefined, undefined),
+            globalThis.jitTestSloppyGlobal,
+            // Strict callee invoked from sloppy caller MUST throw:
+            catchName(() => callFromSloppy(strictWriteProp, frozenObj, 99)),
+            catchName(() => callFromSloppy(strictWriteArr, frozenArr, 99)),
+            catchName(() => callFromSloppy(strictWriteGlobal, undefined, undefined)),
+        ];
+        delete globalThis.jitTestSloppyGlobal;
+        res.join("|");
+        "#,
+    );
+}
+
+#[test]
+fn differential_bigint_float_and_post_inc_dec() {
+    assert_jit_matches_interpreter(
+        "bigint_float_post_inc_dec",
+        r#"
+        function postInc(x) {
+            let v = x;
+            let old = v++;
+            return typeof old + ":" + String(old) + ":" + String(v);
+        }
+        function postDec(x) {
+            let v = x;
+            let old = v--;
+            return typeof old + ":" + String(old) + ":" + String(v);
+        }
+        function unaryPlus(x) {
+            return +x;
+        }
+        function floatLoop(n) {
+            let s = 0;
+            for (let i = 0.5; i < n; i++) {
+                s += i;
+            }
+            return s;
+        }
+        function floatEq(a, b) {
+            return [a === b, a !== b, a == b, a != b].join(",");
+        }
+
+        const big = 1n << 80n;
+        const boxBig = { valueOf() { return 5n; } };
+        const res = [
+            postInc(1n),
+            postDec(1n),
+            postInc(big),
+            postDec(big),
+            postInc(boxBig),
+            postInc(1.5),
+            postDec(-2.5),
+            postInc("not-a-num"),
+            floatLoop(5.5),
+            floatEq(NaN, NaN),
+            floatEq(0, -0),
+            floatEq(4 / 2, 2),
+            floatEq(1.5, 1.5),
+            floatEq(1.5, 2.5),
+        ];
+        for (const bad of [1n, Symbol("s")]) {
+            try {
+                unaryPlus(bad);
+                res.push("no-throw");
+            } catch (e) {
+                res.push("plus:" + e.name);
+            }
+        }
+        try {
+            postInc(Symbol("s"));
+            res.push("no-throw");
+        } catch (e) {
+            res.push("postinc:" + e.name);
+        }
+        res.join("|");
+        "#,
+    );
+}
+
+#[test]
+fn differential_stack_trace_and_tdz_messages() {
+    assert_jit_matches_interpreter(
+        "stack_trace_and_tdz",
+        r#"
+        function jitInnerThrow() {
+            let o = null;
+            return o.prop;
+        }
+        function jitMiddleThrow() {
+            return jitInnerThrow();
+        }
+        function jitInnerErrorStack() {
+            return new Error("probe").stack;
+        }
+        function jitOuterErrorStack() {
+            return jitInnerErrorStack();
+        }
+        function tdzGet(flag) {
+            if (flag) return myLexVar;
+            let myLexVar = 1;
+            return myLexVar;
+        }
+        function tdzPut(flag) {
+            if (flag) myLexWrite = 2;
+            let myLexWrite = 1;
+            return myLexWrite;
+        }
+
+        let errStack = "";
+        try {
+            jitMiddleThrow();
+        } catch (e) {
+            errStack = e.name + "|" + e.stack.includes("jitInnerThrow") + "|" + e.stack.includes("jitMiddleThrow");
+        }
+
+        const probe = jitOuterErrorStack();
+        const probeOk = probe.includes("jitInnerErrorStack") + "|" + probe.includes("jitOuterErrorStack");
+
+        const tdzMsgs = [];
+        for (const fn of [tdzGet, tdzPut]) {
+            try {
+                fn(true);
+                tdzMsgs.push("no-throw");
+            } catch (e) {
+                tdzMsgs.push(e.name + ":" + e.message);
+            }
+        }
+        [errStack, probeOk, tdzMsgs.join(",")].join("||");
+        "#,
+    );
+}
