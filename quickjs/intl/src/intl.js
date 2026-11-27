@@ -1088,11 +1088,35 @@
   }
 
   // Date's toLocale*String with CreateDateTimeFormat's required and defaults.
+  // `toLocale*String()` with neither locales nor options formats with the defaults. Making the
+  // formatter is nearly all of its cost, so one per kind is kept until the settings change (or,
+  // for dates, the zone they fall back to).
+  const defaultFormats = $create(null);
+  function defaultFormat(kind, key, make) {
+    const cached = defaultFormats[kind];
+    if (cached !== undefined && cached.key === key) return cached.slots;
+    const slots = make();
+    defaultFormats[kind] = { __proto__: null, key, slots };
+    return slots;
+  }
+
   function dateToLocale(date, locales, options, required, defaults) {
     const x = call($dateGetTime, date);
     if (x !== x) return 'Invalid Date';
-    const dtf = CreateDateTimeFormat(DateTimeFormat, locales, options, required, defaults);
-    return FormatDateTimeParts(call($weakGet, dateTimeFormatSlots, dtf), x, false);
+    const make = () => call($weakGet, dateTimeFormatSlots,
+      CreateDateTimeFormat(DateTimeFormat, locales, options, required, defaults));
+    const slots = locales === undefined && options === undefined
+      ? defaultFormat(required, settingsGeneration() + ' ' + systemTimeZone(), make)
+      : make();
+    return FormatDateTimeParts(slots, x, false);
+  }
+
+  function numberToLocale(x, locales, options) {
+    const make = () => call($weakGet, numberFormatSlots, new NumberFormat(locales, options));
+    const slots = locales === undefined && options === undefined
+      ? defaultFormat('number', settingsGeneration(), make)
+      : make();
+    return FormatParts(slots, x, false);
   }
 
   const localeSensitive = {
@@ -1105,14 +1129,10 @@
       return TransformCase(string, arguments[0], false);
     },
     numberToLocaleString() {
-      const x = call($numberValueOf, this);
-      const nf = new NumberFormat(arguments[0], arguments[1]);
-      return FormatParts(call($weakGet, numberFormatSlots, nf), x, false);
+      return numberToLocale(call($numberValueOf, this), arguments[0], arguments[1]);
     },
     bigIntToLocaleString() {
-      const x = call($bigIntValueOf, this);
-      const nf = new NumberFormat(arguments[0], arguments[1]);
-      return FormatParts(call($weakGet, numberFormatSlots, nf), x, false);
+      return numberToLocale(call($bigIntValueOf, this), arguments[0], arguments[1]);
     },
     dateToLocaleString() {
       return dateToLocale(this, arguments[0], arguments[1], 'any', 'all');
