@@ -1,5 +1,9 @@
 //! QuickJS-NG bytecode decoder and CFG/stack-depth validator for the baseline JIT.
 
+// C enum `QJSJitOp` is `u32` on Unix clang and `i32` on Windows MSVC, so
+// explicit `as u32` casts are required for cross-platform compilation.
+#![allow(clippy::unnecessary_cast)]
+
 use rong_quickjs_sys as sys;
 use std::collections::{BTreeSet, HashMap, VecDeque};
 
