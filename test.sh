@@ -340,18 +340,18 @@ run_all_core_tests() {
         local intl_features
         intl_features="$(tr ',' '\n' <<<"$feature_set" | sed '/\//!s/^/rong\//' | paste -sd, -)"
         log_info "Running Intl tests ($engine)"
-        if run_cargo_test -p rong_quickjs_intl --features="$intl_features" --quiet "${extra[@]}" -- --nocapture; then
+        if run_cargo_test -p rong_intl --features="$intl_features" --quiet "${extra[@]}" -- --nocapture; then
             record_suite_result "Intl tests on $engine" 0
         else
             record_suite_result "Intl tests on $engine" 1 || true
         fi
     fi
     if [[ "$engine" == "quickjs" ]]; then
-        log_info "Running the quickjs-intl feature test"
-        if run_cargo_test -p rong --no-default-features --features="$feature_set,quickjs-intl" --test quickjs_intl --quiet "${extra[@]}"; then
-            record_suite_result "quickjs-intl feature" 0
+        log_info "Running the intl feature test"
+        if run_cargo_test -p rong --no-default-features --features="$feature_set,intl" --test quickjs_intl --quiet "${extra[@]}"; then
+            record_suite_result "intl feature" 0
         else
-            record_suite_result "quickjs-intl feature" 1 || true
+            record_suite_result "intl feature" 1 || true
         fi
         log_info "Running JIT tests (quickjs)"
         if run_cargo_test -p rong_quickjs_jit --quiet "${extra[@]}"; then
@@ -384,17 +384,17 @@ run_all_core_tests() {
 
     # Engine-independent; it backs the Intl that rong provides on QuickJS.
     if [ "$engine" = "quickjs" ]; then
-        log_info "Running rong_quickjs_tz shared zone table"
-        if run_cargo_test -p rong_quickjs_tz --quiet "${extra[@]}" -- --nocapture; then
-            record_suite_result "rong_quickjs_tz zone table" 0
+        log_info "Running rong_tz shared zone table"
+        if run_cargo_test -p rong_tz --quiet "${extra[@]}" -- --nocapture; then
+            record_suite_result "rong_tz zone table" 0
         else
-            record_suite_result "rong_quickjs_tz zone table" 1 || true
+            record_suite_result "rong_tz zone table" 1 || true
         fi
         # Release too: integer overflow wraps there instead of panicking.
-        if run_cargo_test -p rong_quickjs_tz --release --quiet "${extra[@]}"; then
-            record_suite_result "rong_quickjs_tz zone table (release)" 0
+        if run_cargo_test -p rong_tz --release --quiet "${extra[@]}"; then
+            record_suite_result "rong_tz zone table (release)" 0
         else
-            record_suite_result "rong_quickjs_tz zone table (release)" 1 || true
+            record_suite_result "rong_tz zone table (release)" 1 || true
         fi
     fi
 }

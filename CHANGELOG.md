@@ -34,6 +34,21 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 - The rule and its compile-time checks are documented, and tested, on
   `rong::function`.
 
+### Intl
+
+- **Breaking:** `Intl` and its time zones are engine-neutral crates,
+  `rong_intl` (was `rong_quickjs_intl`, under `quickjs/intl`) and `rong_tz`
+  (was `rong_quickjs_tz`), for any engine without an `Intl` of its own.
+  - One `rong` feature, `intl` (was `quickjs-intl-system-tzdb`); the tz copy
+    for Android and HarmonyOS is `intl-bundled-tzdb` (was part of
+    `quickjs-intl`, which is gone).
+  - Data and settings come from `rong::intl` (`configure`, `set_settings`,
+    `settings`, `set_reporter`, `IntlData`, `IntlSettings`, `HourCycle`,
+    `ICU4X_VERSION`); `rong::quickjs::intl` keeps only `init`. No old paths
+    are kept: `rong::quickjs::intl::configure(..)` becomes
+    `rong::intl::configure(..)`.
+  - `rong_quickjs`'s `intl-bundled-tzdb` is gone; ask `rong` for it.
+
 ### ArkJS
 
 - A value Rust keeps past the native call that created it keeps naming the

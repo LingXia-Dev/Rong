@@ -1,9 +1,9 @@
 [package]
-name = "rong_quickjs_intl"
+name = "rong_intl"
 version = "0.8.0"
 edition.workspace = true
 
-description = "ECMA-402 Intl for RongJS on QuickJS; internal to rong_quickjs, use rong::quickjs::intl"
+description = "ECMA-402 Intl for RongJS engines that have none; use it through rong's intl feature"
 license.workspace = true
 repository.workspace = true
 homepage.workspace = true
@@ -36,16 +36,16 @@ writeable = { version = "0.6", default-features = false }
 # To rebuild the range patterns ICU4X loads (date_range.rs).
 zerovec = { version = "0.11", default-features = false, features = ["alloc"] }
 zerofrom = { version = "0.1", default-features = false }
-rong_quickjs_tz = { workspace = true }
+rong_tz = { workspace = true }
 
 [features]
 # The tz database copy on Android and HarmonyOS (207 KB), used when the
-# system's cannot answer; see rong_quickjs_tz's `bundled`.
-bundled-tzdb = ["rong_quickjs_tz/bundled"]
+# system's cannot answer; see rong_tz's `bundled`.
+bundled-tzdb = ["rong_tz/bundled"]
 
 # Tests pick their engine and TLS backend through `rong`, such as
 # `--features rong/quickjs,rong/tls-ring` (or `rong/jscore`, the reference).
 # The crate itself is engine-generic: its one feature is the tz copy above.
 [dev-dependencies]
 rong = { workspace = true }
-rong_test = { path = "../../testing/rong_test" }
+rong_test = { path = "../testing/rong_test" }

@@ -593,7 +593,7 @@ pub(crate) fn zone_offset_seconds(zone: &str, epoch_ms: i64) -> Result<i32, Stri
     if let Some(minutes) = offset_minutes(zone) {
         return Ok(minutes * 60);
     }
-    rong_quickjs_tz::offset_seconds(zone, epoch_ms).map_err(|e| e.to_string())
+    rong_tz::offset_seconds(zone, epoch_ms).map_err(|e| e.to_string())
 }
 
 fn offset_minutes(zone: &str) -> Option<i32> {
@@ -798,7 +798,7 @@ fn build_range(data: &IntlData, format: &Format) -> Result<Range, String> {
         .map_err(|e| format!("the data blob has no date range patterns: {e}"))?;
     if watch.emptied() > 0 {
         log::debug!(
-            "rong_quickjs_intl: {} range pattern entries need names the date patterns do not load",
+            "rong_intl: {} range pattern entries need names the date patterns do not load",
             watch.emptied()
         );
     }
@@ -961,7 +961,7 @@ fn zone_id(data: &IntlData, zone: &str) -> TimeZone {
 /// the system database holds: IANA's canonical name for a link, "UTC" for
 /// UTC's aliases.
 pub(crate) fn primary_zone(data: &IntlData, name: &str) -> Result<String, String> {
-    let spelled = rong_quickjs_tz::canonical_zone(name).map_err(|e| e.to_string())?;
+    let spelled = rong_tz::canonical_zone(name).map_err(|e| e.to_string())?;
     let canonical = IanaParserExtended::<IanaParser>::try_new_unstable(&data.provider())
         .ok()
         .map(|parser| parser.as_borrowed().parse(&spelled).canonical.to_string())

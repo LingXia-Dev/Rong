@@ -1,9 +1,9 @@
 // The conformance suite's harness: each case names the ECMA-402 clause it
 // checks (its spec id) and records a result; conformance.rs reads
 // `__results` after the file runs. Self-contained, so the same files run on
-// QuickJS with rong_quickjs_intl and on JavaScriptCore's own Intl.
+// QuickJS with rong_intl and on JavaScriptCore's own Intl.
 //
-// `ENGINE` is "rong" when rong_quickjs_intl answers and "reference" when the
+// `ENGINE` is "rong" when rong_intl answers and "reference" when the
 // engine's own Intl does. A case that only holds for one says so with
 // `only`, and its reason is logged.
 var __results = [];

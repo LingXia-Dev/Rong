@@ -1,6 +1,6 @@
 //! The same calls on every engine against one table of answers. On
 //! JavaScriptCore the engine's own `Intl` answers, so the table is checked
-//! against the reference; on QuickJS rong_quickjs_intl answers. Each run logs the
+//! against the reference; on QuickJS rong_intl answers. Each run logs the
 //! ICU or ICU4X version behind the answers, so a difference can be traced to
 //! data rather than code.
 
@@ -35,9 +35,9 @@ fn locale_cases_match_on_every_engine() -> Result<(), String> {
         String::from("answers from the engine's own Intl")
     } else {
         format!(
-            "answers from rong_quickjs_intl on ICU4X {}, CLDR {}",
-            rong_quickjs_intl::ICU4X_VERSION,
-            rong_quickjs_intl::CLDR_VERSION
+            "answers from rong_intl on ICU4X {}, CLDR {}",
+            rong_intl::ICU4X_VERSION,
+            rong_intl::CLDR_VERSION
         )
     });
 
@@ -97,9 +97,8 @@ fn install_intl(ctx: &JSContext) -> Result<bool, String> {
     if native {
         return Ok(false);
     }
-    let data =
-        rong_quickjs_intl::IntlData::try_from_static_blob(BLOB).map_err(|e| e.to_string())?;
-    rong_quickjs_intl::configure(ctx, data, rong_quickjs_intl::IntlSettings::default());
-    rong_quickjs_intl::init::<RongJS>(ctx).map_err(|e| e.to_string())?;
+    let data = rong_intl::IntlData::try_from_static_blob(BLOB).map_err(|e| e.to_string())?;
+    rong_intl::configure(ctx, data, rong_intl::IntlSettings::default());
+    rong_intl::init::<RongJS>(ctx).map_err(|e| e.to_string())?;
     Ok(true)
 }

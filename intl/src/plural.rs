@@ -67,7 +67,7 @@ impl Cache {
         });
         if built.is_none() {
             crate::report(&format!(
-                "rong_quickjs_intl: the data blob has no {} plural rules or ranges for {locale} \
+                "rong_intl: the data blob has no {} plural rules or ranges for {locale} \
                  or its fallbacks; Intl.PluralRules answers \"other\"",
                 if ordinal { "ordinal" } else { "cardinal" }
             ));

@@ -1,7 +1,7 @@
-//! Time zones for the `Intl` that rong provides on QuickJS.
+//! Time zones for the `Intl` that rong provides where the engine has none.
 //!
-//! Internal to QuickJS's `Intl` (`rong_quickjs_intl`, behind `rong`'s
-//! `quickjs-intl` feature); not for direct use. An engine with its own `Intl`
+//! Internal to rong's `Intl` (`rong_intl`, behind `rong`'s `intl` feature);
+//! not for direct use. An engine with its own `Intl`
 //! (JavaScriptCore, ArkJS) carries none of it, and embedders reach zones
 //! through the standard `Intl`.
 //!
@@ -25,8 +25,8 @@
 //! A source counts only if it resolves `Etc/UTC` and `America/New_York`.
 //! When no system database answers, the bundled copy is used: Windows always
 //! carries one; Android and HarmonyOS carry one with the `bundled` feature
-//! (207 KB; rong's `quickjs-intl` enables it, `quickjs-intl-system-tzdb` does
-//! not); Linux and Apple builds never do. With no database at all, a named
+//! (207 KB; rong's `intl-bundled-tzdb` enables it, `intl` alone does not);
+//! Linux and Apple builds never do. With no database at all, a named
 //! zone is [`TzError::NoDatabase`], never a wrong offset; UTC and offset
 //! zones still answer. The choice is reported once, through
 //! the reporter set with [`set_reporter`] (the `log` crate otherwise), so it
@@ -272,7 +272,7 @@ impl Registry {
     }
 }
 
-/// Sets where rong_quickjs_tz's one report (which database it chose) goes, such as
+/// Sets where rong_tz's one report (which database it chose) goes, such as
 /// the host's device log. The first call wins; returns whether this one did.
 pub fn set_reporter(report: impl Fn(&str) + Send + Sync + 'static) -> bool {
     REPORTER.set(Box::new(report)).is_ok()
@@ -316,7 +316,7 @@ fn open_source(source: Source, skipped: &mut Vec<String>) -> Result<Database, Co
 }
 
 fn report_line(database: &Database, skipped: &[String]) -> String {
-    let mut line = format!("rong_quickjs_tz: time zone database: {}", database.source);
+    let mut line = format!("rong_tz: time zone database: {}", database.source);
     for note in skipped {
         line.push_str("; skipped ");
         line.push_str(note);

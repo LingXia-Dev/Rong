@@ -1,12 +1,13 @@
-#![cfg(feature = "quickjs-intl")]
-//! The `quickjs-intl` feature gives a QuickJS context the standard `Intl`
-//! through `rong::quickjs::intl`.
+#![cfg(feature = "intl")]
+//! The `intl` feature gives a QuickJS context the standard `Intl`: data from
+//! `rong::intl`, installed by `rong::quickjs::intl::init`.
 
 use rong::JSEngine;
 use rong::Source;
-use rong::quickjs::{RongJS, intl};
+use rong::intl;
+use rong::quickjs::RongJS;
 
-const BLOB: &[u8] = include_bytes!("../quickjs/intl/tests/data/intl-test.postcard");
+const BLOB: &[u8] = include_bytes!("../intl/tests/data/intl-test.postcard");
 
 #[test]
 fn quickjs_gets_intl_only_once_configured() {
@@ -17,12 +18,12 @@ fn quickjs_gets_intl_only_once_configured() {
             .unwrap()
     };
     assert!(!has_intl(&ctx));
-    intl::init(&ctx).unwrap();
+    rong::quickjs::intl::init(&ctx).unwrap();
     assert!(!has_intl(&ctx), "init without data installs nothing");
 
     let data = intl::IntlData::try_from_static_blob(BLOB).unwrap();
     intl::configure(&ctx, data, intl::IntlSettings::default());
-    intl::init(&ctx).unwrap();
+    rong::quickjs::intl::init(&ctx).unwrap();
     let canonical: String = ctx
         .eval(Source::from_bytes("Intl.getCanonicalLocales('EN-us')[0]"))
         .unwrap();

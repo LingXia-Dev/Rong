@@ -32,8 +32,8 @@ CRATES=(
   "rong_core"
 
   "rong_quickjs_sys"
-  "rong_quickjs_tz"
-  "rong_quickjs_intl"
+  "rong_tz"
+  "rong_intl"
   "rong_quickjs_jit"
   "rong_jscore_sys"
   "rong_arkjs_sys"
@@ -82,8 +82,8 @@ CORE_CRATES=(
 
 ENGINE_CRATES=(
   "rong_quickjs_sys"
-  "rong_quickjs_tz"
-  "rong_quickjs_intl"
+  "rong_tz"
+  "rong_intl"
   "rong_quickjs_jit"
   "rong_jscore_sys"
   "rong_arkjs_sys"

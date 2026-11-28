@@ -150,7 +150,7 @@ fi
 cargo clippy ${workspace_args} --lib --bins --tests --no-default-features --features "${engine_features}" -- -D warnings
 if [ "${ENGINE}" = "quickjs" ]; then
   # The opt-in QuickJS Intl adds code paths the default feature set skips.
-  cargo clippy -p rong -p rong_quickjs --lib --tests --no-default-features --features "${engine_features},quickjs-intl" -- -D warnings
+  cargo clippy -p rong -p rong_quickjs --lib --tests --no-default-features --features "${engine_features},intl" -- -D warnings
   # The opt-in QuickJS JIT adds code paths the default feature set skips.
   cargo clippy -p rong -p rong_quickjs -p rong_quickjs_jit --lib --tests --no-default-features --features "${engine_features},quickjs-jit" -- -D warnings
 fi
@@ -190,7 +190,7 @@ if ($env:ENGINE -eq "quickjs") {
     & cargo clippy @workspaceArgs --lib --bins --tests "--no-default-features" "--features=$engineFeatures" -- -D warnings
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     # The opt-in QuickJS Intl adds code paths the default feature set skips.
-    & cargo clippy -p rong -p rong_quickjs --lib --tests "--no-default-features" "--features=$engineFeatures,quickjs-intl" -- -D warnings
+    & cargo clippy -p rong -p rong_quickjs --lib --tests "--no-default-features" "--features=$engineFeatures,intl" -- -D warnings
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     # The opt-in QuickJS JIT adds code paths the default feature set skips.
     & cargo clippy -p rong -p rong_quickjs -p rong_quickjs_jit --lib --tests "--no-default-features" "--features=$engineFeatures,quickjs-jit" -- -D warnings

@@ -2,7 +2,8 @@
 members = [
     "core",
     "rong_macro",
-    "quickjs", "quickjs/sys", "quickjs/intl", "quickjs/tz", "quickjs/jit",
+    "quickjs", "quickjs/sys", "quickjs/jit",
+    "intl", "tz",
     "javascriptcore", "javascriptcore/sys",
     "arkjs", "arkjs/sys",
     "testing/rong_test",
@@ -44,8 +45,8 @@ rong = { path = ".", default-features = false      , version = "0.8.0" }
 rong_core = { path = "core"      , version = "0.8.0" }
 rong_quickjs = { path = "quickjs"      , version = "0.8.0" }
 rong_quickjs_sys = { path = "quickjs/sys"      , version = "0.7.0" }
-rong_quickjs_intl = { path = "quickjs/intl"      , version = "0.8.0" }
-rong_quickjs_tz = { path = "quickjs/tz"      , version = "0.8.0" }
+rong_intl = { path = "intl"      , version = "0.8.0" }
+rong_tz = { path = "tz"      , version = "0.8.0" }
 rong_quickjs_jit = { path = "quickjs/jit"      , version = "0.8.0" }
 rong_jscore = { path = "javascriptcore"      , version = "0.8.0" }
 rong_jscore_sys = { path = "javascriptcore/sys"      , version = "0.6.1" }
@@ -150,6 +151,7 @@ include = [
 rong_core = { workspace = true }
 rong_rt = { workspace = true }
 rong_quickjs = { workspace = true, optional = true }
+rong_intl = { workspace = true, optional = true }
 rong_jscore = { workspace = true, optional = true }
 rong_arkjs = { workspace = true, optional = true }
 rong_macro = { workspace = true }
@@ -161,14 +163,15 @@ futures = { workspace = true }
 # The CLI/examples keep desktop-friendly defaults for out-of-the-box runs.
 default = []
 quickjs = ["dep:rong_quickjs"]
-# ECMA-402 `Intl` for QuickJS, which has none (`rong::quickjs::intl`). Needs
-# `quickjs`; JavaScriptCore and ArkJS have their own and never carry this.
-# On Android and HarmonyOS it carries a tz database copy (207 KB) for when the
-# system's cannot answer.
-quickjs-intl = ["quickjs-intl-system-tzdb", "rong_quickjs?/intl-bundled-tzdb"]
-# `quickjs-intl` without that copy: Android 10+ and HarmonyOS always ship a
-# database; without one, named zones throw an error naming the cause.
-quickjs-intl-system-tzdb = ["rong_quickjs?/intl"]
+# ECMA-402 `Intl` for the engines that have none (QuickJS): `rong::intl`
+# gives a context its data and settings, the engine's `intl::init` installs
+# it. JavaScriptCore has its own and never carries this. Zones come from the
+# system's tz database; without one, named zones throw an error naming the
+# cause.
+intl = ["dep:rong_intl", "rong_quickjs?/intl"]
+# With `intl`: a tz database copy (207 KB) on Android and HarmonyOS for when
+# the system's cannot answer.
+intl-bundled-tzdb = ["intl", "rong_intl?/bundled-tzdb"]
 # Cranelift baseline JIT compiler for QuickJS (`rong::quickjs::jit`). Needs
 # `quickjs`; enabled on x86_64 and aarch64 (excluding iOS, where it is a no-op).
 quickjs-jit = ["rong_quickjs?/jit"]

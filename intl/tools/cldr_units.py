@@ -10,8 +10,8 @@ sanctioned unit comes from this one table.
 The CLDR release is cldr_numbers.py's. Only locales that change a lookup
 are kept, as there; strings are stored once.
 
-    python3 quickjs/intl/tools/cldr_units.py          # rewrite the table
-    python3 quickjs/intl/tools/cldr_units.py --check  # fail if it is stale
+    python3 intl/tools/cldr_units.py          # rewrite the table
+    python3 intl/tools/cldr_units.py --check  # fail if it is stale
 """
 
 import json

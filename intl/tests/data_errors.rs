@@ -14,7 +14,7 @@ const TEST_BLOB: &[u8] = include_bytes!("data/intl-test.postcard");
 fn reported() -> &'static Mutex<Vec<String>> {
     static LINES: OnceLock<Mutex<Vec<String>>> = OnceLock::new();
     LINES.get_or_init(|| {
-        rong_quickjs_intl::set_reporter(|line| reported().lock().unwrap().push(line.to_string()));
+        rong_intl::set_reporter(|line| reported().lock().unwrap().push(line.to_string()));
         Mutex::new(Vec::new())
     })
 }
@@ -29,10 +29,10 @@ fn lines_with(text: &str) -> Vec<String> {
         .collect()
 }
 
-/// A context with rong_quickjs_intl, or `None` on an engine with its own Intl.
+/// A context with rong_intl, or `None` on an engine with its own Intl.
 fn context(
     rt: &JSRuntime,
-    data: rong_quickjs_intl::IntlData,
+    data: rong_intl::IntlData,
     locale: &str,
 ) -> Result<Option<JSContext>, String> {
     let ctx = rt.context();
@@ -43,12 +43,12 @@ fn context(
         return Ok(None);
     }
     reported();
-    let settings = rong_quickjs_intl::IntlSettings {
+    let settings = rong_intl::IntlSettings {
         locale: Some(locale.to_string()),
         ..Default::default()
     };
-    rong_quickjs_intl::configure(&ctx, data, settings);
-    rong_quickjs_intl::init::<RongJS>(&ctx).map_err(|e| e.to_string())?;
+    rong_intl::configure(&ctx, data, settings);
+    rong_intl::init::<RongJS>(&ctx).map_err(|e| e.to_string())?;
     Ok(Some(ctx))
 }
 
@@ -60,8 +60,7 @@ fn eval(ctx: &JSContext, source: &str) -> Result<String, String> {
 #[test]
 fn missing_plural_data_is_reported_once() -> Result<(), String> {
     let rt = RongJS::runtime();
-    let data =
-        rong_quickjs_intl::IntlData::try_from_static_blob(NO_PLURALS).map_err(|e| e.to_string())?;
+    let data = rong_intl::IntlData::try_from_static_blob(NO_PLURALS).map_err(|e| e.to_string())?;
     let Some(ctx) = context(&rt, data, "en-US")? else {
         return Ok(());
     };
@@ -80,8 +79,7 @@ fn missing_plural_data_is_reported_once() -> Result<(), String> {
 #[test]
 fn a_host_locale_missing_from_the_blob_defaults_to_one_it_holds() -> Result<(), String> {
     let rt = RongJS::runtime();
-    let data =
-        rong_quickjs_intl::IntlData::try_from_static_blob(TEST_BLOB).map_err(|e| e.to_string())?;
+    let data = rong_intl::IntlData::try_from_static_blob(TEST_BLOB).map_err(|e| e.to_string())?;
     let Some(ctx) = context(&rt, data, "sw-KE")? else {
         return Ok(());
     };
@@ -100,7 +98,7 @@ fn a_host_locale_missing_from_the_blob_defaults_to_one_it_holds() -> Result<(), 
     assert_eq!(lines.len(), 1, "{lines:?}");
 
     // The blob's declared fallback wins over its first locale.
-    let data = rong_quickjs_intl::IntlData::try_from_static_blob(TEST_BLOB)
+    let data = rong_intl::IntlData::try_from_static_blob(TEST_BLOB)
         .and_then(|d| d.with_fallback_locale("fr"))
         .map_err(|e| e.to_string())?;
     let ctx = context(&rt, data, "sw-KE")?.ok_or("engine changed")?;
@@ -108,8 +106,7 @@ fn a_host_locale_missing_from_the_blob_defaults_to_one_it_holds() -> Result<(), 
     assert_eq!(locale, "fr");
 
     // A host locale the blob holds through fallback is used as such.
-    let data =
-        rong_quickjs_intl::IntlData::try_from_static_blob(TEST_BLOB).map_err(|e| e.to_string())?;
+    let data = rong_intl::IntlData::try_from_static_blob(TEST_BLOB).map_err(|e| e.to_string())?;
     let ctx = context(&rt, data, "fr-CA")?.ok_or("engine changed")?;
     let locale = eval(&ctx, "new Intl.PluralRules().resolvedOptions().locale")?;
     assert_eq!(locale, "fr-CA");
@@ -119,8 +116,7 @@ fn a_host_locale_missing_from_the_blob_defaults_to_one_it_holds() -> Result<(), 
 #[test]
 fn constructors_given_no_locale_agree_when_the_blob_holds_the_host_locale() -> Result<(), String> {
     let rt = RongJS::runtime();
-    let data =
-        rong_quickjs_intl::IntlData::try_from_static_blob(TEST_BLOB).map_err(|e| e.to_string())?;
+    let data = rong_intl::IntlData::try_from_static_blob(TEST_BLOB).map_err(|e| e.to_string())?;
     let Some(ctx) = context(&rt, data, "de-AT")? else {
         return Ok(());
     };
@@ -139,8 +135,7 @@ fn constructors_given_no_locale_agree_when_the_blob_holds_the_host_locale() -> R
 #[test]
 fn missing_number_data_throws_and_is_reported() -> Result<(), String> {
     let rt = RongJS::runtime();
-    let data =
-        rong_quickjs_intl::IntlData::try_from_static_blob(NO_PLURALS).map_err(|e| e.to_string())?;
+    let data = rong_intl::IntlData::try_from_static_blob(NO_PLURALS).map_err(|e| e.to_string())?;
     let Some(ctx) = context(&rt, data, "en-US")? else {
         return Ok(());
     };

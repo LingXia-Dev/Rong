@@ -1,5 +1,5 @@
 //! The conformance suite in `tests/conformance/`: each file runs in a fresh
-//! context, on QuickJS with rong_quickjs_intl and on JavaScriptCore's own
+//! context, on QuickJS with rong_intl and on JavaScriptCore's own
 //! Intl as the reference. Every case names the ECMA-402 clause it checks;
 //! the log carries a count per file and clause. The checks JavaScript alone
 //! cannot make (collection after drop, several contexts) are here.
@@ -53,14 +53,13 @@ fn install_intl(ctx: &JSContext, locale: Option<&str>) -> Result<bool, String> {
     if native {
         return Ok(false);
     }
-    let data =
-        rong_quickjs_intl::IntlData::try_from_static_blob(BLOB).map_err(|e| e.to_string())?;
-    let settings = rong_quickjs_intl::IntlSettings {
+    let data = rong_intl::IntlData::try_from_static_blob(BLOB).map_err(|e| e.to_string())?;
+    let settings = rong_intl::IntlSettings {
         locale: locale.map(str::to_string),
         ..Default::default()
     };
-    rong_quickjs_intl::configure(ctx, data, settings);
-    rong_quickjs_intl::init::<RongJS>(ctx).map_err(|e| e.to_string())?;
+    rong_intl::configure(ctx, data, settings);
+    rong_intl::init::<RongJS>(ctx).map_err(|e| e.to_string())?;
     Ok(true)
 }
 
@@ -397,20 +396,20 @@ fn default_to_locale_follows_settings() -> Result<(), String> {
         log("default to-locale: skipped on the reference, whose Intl is the engine's");
         return Ok(());
     }
-    let settings = |locale: &str, zone: &str| rong_quickjs_intl::IntlSettings {
+    let settings = |locale: &str, zone: &str| rong_intl::IntlSettings {
         locale: Some(locale.to_string()),
         time_zone: Some(zone.to_string()),
-        hour_cycle: Some(rong_quickjs_intl::HourCycle::H23),
+        hour_cycle: Some(rong_intl::HourCycle::H23),
     };
     let read = "[(1234.5).toLocaleString(), (1234.5).toLocaleString(), \
                 new Date(Date.UTC(2026, 0, 5, 13, 4, 5)).toLocaleTimeString(), \
                 new Date(Date.UTC(2026, 0, 5, 13, 4, 5)).toLocaleTimeString()].join(' | ')";
-    rong_quickjs_intl::set_settings(&ctx, settings("en-US", "UTC"));
+    rong_intl::set_settings(&ctx, settings("en-US", "UTC"));
     assert_eq!(
         eval::<String>(&ctx, read)?,
         "1,234.5 | 1,234.5 | 13:04:05 | 13:04:05"
     );
-    rong_quickjs_intl::set_settings(&ctx, settings("de", "Asia/Tokyo"));
+    rong_intl::set_settings(&ctx, settings("de", "Asia/Tokyo"));
     assert_eq!(
         eval::<String>(&ctx, read)?,
         "1.234,5 | 1.234,5 | 22:04:05 | 22:04:05"

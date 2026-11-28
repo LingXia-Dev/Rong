@@ -9,7 +9,7 @@ const COMMON: &[u8] = include_bytes!("data/likely-common.postcard");
 /// The same plus `LocaleLikelySubtagsExtendedV1`.
 const EXTENDED: &[u8] = include_bytes!("data/likely-extended.postcard");
 
-/// Evaluates `source` with rong_quickjs_intl on `blob`; `None` on an engine
+/// Evaluates `source` with rong_intl on `blob`; `None` on an engine
 /// with its own Intl.
 fn eval(blob: &'static [u8], source: &str) -> Result<Option<String>, String> {
     let rt = RongJS::runtime();
@@ -20,14 +20,13 @@ fn eval(blob: &'static [u8], source: &str) -> Result<Option<String>, String> {
     if native {
         return Ok(None);
     }
-    let data =
-        rong_quickjs_intl::IntlData::try_from_static_blob(blob).map_err(|e| e.to_string())?;
-    let settings = rong_quickjs_intl::IntlSettings {
+    let data = rong_intl::IntlData::try_from_static_blob(blob).map_err(|e| e.to_string())?;
+    let settings = rong_intl::IntlSettings {
         locale: Some("en-US".to_string()),
         ..Default::default()
     };
-    rong_quickjs_intl::configure(&ctx, data, settings);
-    rong_quickjs_intl::init::<RongJS>(&ctx).map_err(|e| e.to_string())?;
+    rong_intl::configure(&ctx, data, settings);
+    rong_intl::init::<RongJS>(&ctx).map_err(|e| e.to_string())?;
     ctx.eval(Source::from_bytes(source))
         .map(Some)
         .map_err(|e| e.to_string())
