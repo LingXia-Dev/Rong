@@ -31,11 +31,11 @@ jobs:
             exit 1
           fi
 
-      - name: ArkJS OHOS check
-        run: cargo make check-arkjs-ohos
+      - name: JSVM OHOS check
+        run: cargo make check-jsvm-ohos
 
-      - name: ArkJS OHOS clippy
-        run: cargo make clippy-arkjs-ohos
+      - name: JSVM OHOS clippy
+        run: cargo make clippy-jsvm-ohos
 
       - name: Harmony Rust build
         shell: bash

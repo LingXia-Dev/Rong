@@ -5,7 +5,7 @@ members = [
     "quickjs", "quickjs/sys", "quickjs/jit",
     "intl", "tz",
     "javascriptcore", "javascriptcore/sys",
-    "arkjs", "arkjs/sys",
+    "jsvm", "jsvm/sys",
     "testing/rong_test",
     "testing/rong_test_harness",
     "testing/rong_test_device",
@@ -50,8 +50,8 @@ rong_tz = { path = "tz"      , version = "0.8.0" }
 rong_quickjs_jit = { path = "quickjs/jit"      , version = "0.8.0" }
 rong_jscore = { path = "javascriptcore"      , version = "0.8.0" }
 rong_jscore_sys = { path = "javascriptcore/sys"      , version = "0.6.1" }
-rong_arkjs = { path = "arkjs"      , version = "0.8.0" }
-rong_arkjs_sys = { path = "arkjs/sys"      , version = "0.6.1" }
+rong_jsvm = { path = "jsvm"      , version = "0.8.0" }
+rong_jsvm_sys = { path = "jsvm/sys"      , version = "0.6.1" }
 rong_macro = { path = "rong_macro"      , version = "0.7.0" }
 rong_test = { path = "testing/rong_test", default-features = false   , version = "0.4.0" }
 rong_test_harness = { path = "testing/rong_test_harness"   , version = "0.4.0" }
@@ -153,7 +153,7 @@ rong_rt = { workspace = true }
 rong_quickjs = { workspace = true, optional = true }
 rong_intl = { workspace = true, optional = true }
 rong_jscore = { workspace = true, optional = true }
-rong_arkjs = { workspace = true, optional = true }
+rong_jsvm = { workspace = true, optional = true }
 rong_macro = { workspace = true }
 tokio = { workspace = true }
 futures = { workspace = true }
@@ -169,7 +169,7 @@ quickjs = ["dep:rong_quickjs"]
 # it. JavaScriptCore has its own and never carries this. Zones come from the
 # system's tz database; without one, named zones throw an error naming the
 # cause.
-intl = ["dep:rong_intl", "rong_quickjs?/intl", "rong_arkjs?/intl"]
+intl = ["dep:rong_intl", "rong_quickjs?/intl", "rong_jsvm?/intl"]
 # With `intl`: a tz database copy (207 KB) on Android and HarmonyOS for when
 # the system's cannot answer.
 intl-bundled-tzdb = ["intl", "rong_intl?/bundled-tzdb"]
@@ -182,13 +182,13 @@ jscore-source = ["jscore", "rong_jscore/source"]
 # Opt in when linking Apple's system framework; source builds do not need this
 # extra feature. See rong_jscore's App Store caveat.
 jscore-interrupt = ["jscore", "rong_jscore/interrupt-spi"]
-arkjs = ["dep:rong_arkjs"]
+jsvm = ["dep:rong_jsvm"]
 # Engine features are additive. The root aliases (`rong::JSContext`, ...),
-# `#[js_class]` and module crates bind one primary engine: jscore, else arkjs,
+# `#[js_class]` and module crates bind one primary engine: jscore, else jsvm,
 # else quickjs. Pin it explicitly with at most one `primary-*`.
 primary-quickjs = []
 primary-jscore = []
-primary-arkjs = []
+primary-jsvm = []
 tls-aws-lc = ["rong_rt/tls-aws-lc"]
 tls-ring = ["rong_rt/tls-ring"]
 

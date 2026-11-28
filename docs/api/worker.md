@@ -67,7 +67,7 @@ worker.terminate();
 
 `terminate()` returns immediately and permanently closes the worker to new
 messages. QuickJS and preemptive JavaScriptCore builds also stop currently
-running non-yielding JavaScript. ArkJS and cooperative JavaScriptCore builds can
+running non-yielding JavaScript. JSVM and cooperative JavaScriptCore builds can
 stop running code only at the next engine yield; if code never yields, its
 isolated worker thread may remain active. Expected termination does not emit
 `onerror`.

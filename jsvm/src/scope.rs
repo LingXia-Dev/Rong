@@ -3,7 +3,7 @@
 //! base scope. Values leaving an operation survive it: each holds a
 //! persistent reference or keeps its primitive by value.
 
-use crate::arkjs;
+use crate::jsvm;
 use std::cell::RefCell;
 use std::marker::PhantomData;
 use std::ptr;
@@ -23,23 +23,23 @@ thread_local! {
 /// [`OpScope::enter_new`] bounds a long batch there. Lives on the stack of one synchronous backend
 /// function: not `Send`, never held across an await.
 pub(crate) struct OpScope {
-    env: arkjs::JSVM_Env,
-    scope: arkjs::JSVM_HandleScope,
+    env: jsvm::JSVM_Env,
+    scope: jsvm::JSVM_HandleScope,
     _not_send: PhantomData<*const ()>,
 }
 
 impl OpScope {
-    pub(crate) fn enter(env: arkjs::JSVM_Env) -> Self {
+    pub(crate) fn enter(env: jsvm::JSVM_Env) -> Self {
         Self::open(env, false)
     }
 
     /// Opens a scope even inside an operation in progress, so an embedder can
     /// bound the handles of each step of a long batch within one native call.
-    pub(crate) fn enter_new(env: arkjs::JSVM_Env) -> Self {
+    pub(crate) fn enter_new(env: jsvm::JSVM_Env) -> Self {
         Self::open(env, true)
     }
 
-    fn open(env: arkjs::JSVM_Env, always: bool) -> Self {
+    fn open(env: jsvm::JSVM_Env, always: bool) -> Self {
         let key = env as usize;
         let outermost = DEPTH.with(|depth| {
             let mut depth = depth.borrow_mut();
@@ -54,10 +54,10 @@ impl OpScope {
                 }
             }
         });
-        let mut scope: arkjs::JSVM_HandleScope = ptr::null_mut();
+        let mut scope: jsvm::JSVM_HandleScope = ptr::null_mut();
         if (outermost || always) && !env.is_null() {
-            let status = unsafe { arkjs::OH_JSVM_OpenHandleScope(env, &mut scope) };
-            if status != arkjs::JSVM_Status_JSVM_OK {
+            let status = unsafe { jsvm::OH_JSVM_OpenHandleScope(env, &mut scope) };
+            if status != jsvm::JSVM_Status_JSVM_OK {
                 scope = ptr::null_mut();
             }
         }
@@ -75,7 +75,7 @@ impl Drop for OpScope {
             // A pending exception lives on the VM, not in the scope; callers
             // read it into a kept value before the scope closes.
             unsafe {
-                arkjs::OH_JSVM_CloseHandleScope(self.env, self.scope);
+                jsvm::OH_JSVM_CloseHandleScope(self.env, self.scope);
             }
         }
         DEPTH.with(|depth| {

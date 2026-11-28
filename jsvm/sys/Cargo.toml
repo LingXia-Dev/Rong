@@ -1,13 +1,13 @@
 [package]
-name = "rong_arkjs_sys"
+name = "rong_jsvm_sys"
 version = "0.6.1"
 edition.workspace = true
 
-description = "ArkJS FFI bindings for RongJS"
+description = "JSVM FFI bindings for RongJS"
 license.workspace = true
 repository.workspace = true
 homepage.workspace = true
-documentation = "https://docs.rs/rong_arkjs_sys"
+documentation = "https://docs.rs/rong_jsvm_sys"
 rust-version.workspace = true
 readme.workspace = true
 keywords.workspace = true

@@ -12,8 +12,8 @@
 - [ ] `npm --prefix packages/rong_types run build` (if Rong TypeScript package changed)
 - [ ] `npm --prefix packages/skill run check` (if `docs/skills`, `docs/api`, or the skill package changed)
 - [ ] `npm --prefix packages/test run check` (if the JavaScript test package changed)
-- [ ] `cargo make check-arkjs-ohos` (if ArkJS / OHOS code changed)
-- [ ] `cargo make clippy-arkjs-ohos` (if ArkJS / OHOS code changed)
+- [ ] `cargo make check-jsvm-ohos` (if JSVM / OHOS code changed)
+- [ ] `cargo make clippy-jsvm-ohos` (if JSVM / OHOS code changed)
 - [ ] `./testing/harmony/dev.sh test` on a device or local Harmony runner (if Harmony runtime behavior changed)
 - [ ] Relied on GitHub Actions host CI for platform coverage
 - [ ] Not run locally

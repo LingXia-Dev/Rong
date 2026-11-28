@@ -1,6 +1,6 @@
 {
   "modelVersion": "5.0.5",
-  "description": "Minimal HarmonyOS shell for Rong ArkJS smoke tests.",
+  "description": "Minimal HarmonyOS shell for Rong JSVM smoke tests.",
   "dependencies": {
   },
   "devDependencies": {

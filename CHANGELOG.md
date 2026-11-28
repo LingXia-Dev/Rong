@@ -52,12 +52,25 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
   the app sandbox hides `/system/etc/zoneinfo`; before, every named zone,
   the host's own included, threw `no time zone database` unless the tz copy
   was bundled. The host's zone follows the device setting through ICU.
-- HarmonyOS's JSVM gets the same `Intl` with `rong::arkjs::intl::init` under
+- HarmonyOS's JSVM gets the same `Intl` with `rong::jsvm::intl::init` under
   `intl`. Its V8 is built without ICU: no `Intl`, `toLocaleString` ignores
   the locale, `localeCompare` compares code units. `init` leaves a JSVM with
   its own `Intl` alone.
 
-### ArkJS
+### JSVM
+
+- **Breaking:** the HarmonyOS backend is named for what it binds, the
+  `OH_JSVM_*` API (`libjsvm`, a V8), not ArkJS, ArkTS's own runtime, whose
+  name stays free for real bindings. No aliases are kept:
+  - crates `rong_arkjs` → `rong_jsvm`, `rong_arkjs_sys` → `rong_jsvm_sys`
+    (directory `arkjs/` → `jsvm/`);
+  - features `arkjs` → `jsvm` and `primary-arkjs` → `primary-jsvm`, in `rong`,
+    `rong_test` and every module crate, and `rong::arkjs` → `rong::jsvm`;
+  - types `HarmonyArkJS` → `JSVM`, `ArkJSRuntime` → `JSVMRuntime`,
+    `ArkJSContext` → `JSVMContext`, `ArkJSValue` → `JSVMValue`,
+    `ArkJSValueType` → `JSVMValueType`;
+  - `cargo make check-arkjs-ohos` / `clippy-arkjs-ohos` → `check-jsvm-ohos` /
+    `clippy-jsvm-ohos`, `ENGINE=arkjs` → `ENGINE=jsvm`.
 
 - A value Rust keeps past the native call that created it keeps naming the
   same value. Values the backend created itself (every `JSFunc::new`

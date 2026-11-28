@@ -52,7 +52,7 @@ The same workflow is available through `Worker::call_with_timeout`,
 
 QuickJS and JSC source/JSCOnly builds are preemptive. Apple's system JSC
 framework is preemptive with `jscore-interrupt`; without that feature it is
-cooperative. ArkJS is cooperative because the exposed JSVM API has no runtime
+cooperative. JSVM is cooperative because the exposed JSVM API has no runtime
 termination primitive.
 
 On a cooperative engine, a timeout still returns `E_TIMEOUT` and aborts a

@@ -1,10 +1,10 @@
 #![cfg(target_env = "ohos")]
-//! Asks the device's JSVM what `ArkJSValue` relies on: that a persistent
+//! Asks the device's JSVM what `JSVMValue` relies on: that a persistent
 //! reference holds every kind of primitive past the native call that made it,
 //! and that closing a handle scope leaves a pending exception readable.
 
-use rong_arkjs_sys as sys;
 use rong_core::JSContextImpl;
+use rong_jsvm_sys as sys;
 use rong_test::*;
 use std::cell::RefCell;
 use std::ffi::CStr;
@@ -172,7 +172,7 @@ fn expected(name: &str) -> String {
 #[test]
 fn a_reference_holds_every_primitive_past_its_native_call() -> Result<(), String> {
     let info = vm_info();
-    log::info!("[arkjs_reference_probe] JSVM {info}");
+    log::info!("[jsvm_reference_probe] JSVM {info}");
 
     let rt = RongJS::runtime();
     let ctx = rt.context();
@@ -228,8 +228,8 @@ fn a_reference_holds_every_primitive_past_its_native_call() -> Result<(), String
         ok = false;
         report.push_str("; probe did not run");
     }
-    log::info!("[arkjs_reference_probe] {report}");
-    rong_arkjs::hilog_probe("[arkjs_reference_probe] backend HiLog reporter reached");
+    log::info!("[jsvm_reference_probe] {report}");
+    rong_jsvm::hilog_probe("[jsvm_reference_probe] backend HiLog reporter reached");
     if ok { Ok(()) } else { Err(report) }
 }
 
@@ -270,7 +270,7 @@ fn closing_a_scope_keeps_its_pending_exception() -> Result<(), String> {
             "open {open}, throw {thrown}, close {close}, pending after close {pending}, \
              take {take}, message {text:?}"
         );
-        log::info!("[arkjs_reference_probe] {report}");
+        log::info!("[jsvm_reference_probe] {report}");
         let ok =
             close == sys::JSVM_Status_JSVM_OK && pending && text.as_deref() == Some(THROWN_TEXT);
         if ok { Ok(()) } else { Err(report) }

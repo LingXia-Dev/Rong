@@ -358,7 +358,7 @@ const ENGINE_STRINGIFIES_EXCEPTIONS: bool = cfg!(any(
     all(
         feature = "jscore",
         not(feature = "primary-quickjs"),
-        not(feature = "primary-arkjs")
+        not(feature = "primary-jsvm")
     )
 ));
 
@@ -500,7 +500,7 @@ fn describing_a_thrown_error_runs_no_script() {
         } else {
             assert_eq!(ran, "");
         }
-        // JavaScriptCore and ArkJS drain promise jobs themselves as an
+        // JavaScriptCore and JSVM drain promise jobs themselves as an
         // evaluation ends, before Rong sees its result.
         if !(ENGINE_STRINGIFIES_EXCEPTIONS || cfg!(target_env = "ohos")) {
             assert_eq!(ctx.eval::<i32>(Source::from_bytes("globalThis.jobs"))?, 0);

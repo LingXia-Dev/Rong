@@ -3,17 +3,17 @@ use rong_test::*;
 // Primary engine configurations where `JSRuntime::memory_usage` is backed by a
 // native heap-statistics API:
 // - QuickJS (all targets)
-// - HarmonyOS ArkJS (`target_env = "ohos"`)
+// - HarmonyOS JSVM (`target_env = "ohos"`)
 // - JavaScriptCore source/JSCOnly builds (`jscore-source`, or `jscore` on
 //   non-Apple targets)
 #[cfg(any(
     feature = "primary-quickjs",
-    all(feature = "quickjs", not(feature = "jscore"), not(feature = "arkjs")),
+    all(feature = "quickjs", not(feature = "jscore"), not(feature = "jsvm")),
     all(
         target_env = "ohos",
         any(
-            feature = "primary-arkjs",
-            all(feature = "arkjs", not(feature = "jscore"))
+            feature = "primary-jsvm",
+            all(feature = "jsvm", not(feature = "jscore"))
         )
     ),
     all(
@@ -22,7 +22,7 @@ use rong_test::*;
             all(
                 feature = "jscore",
                 not(feature = "primary-quickjs"),
-                not(feature = "primary-arkjs")
+                not(feature = "primary-jsvm")
             )
         ),
         any(
@@ -72,7 +72,7 @@ fn configured_engine_reports_memory_usage() {
         all(
             feature = "jscore",
             not(feature = "primary-quickjs"),
-            not(feature = "primary-arkjs")
+            not(feature = "primary-jsvm")
         )
     ),
     not(feature = "jscore-source")
@@ -121,15 +121,15 @@ fn memory_usage_grows_with_live_allocations() {
     }
 }
 
-// QuickJS and HarmonyOS ArkJS perform synchronous full collection in `run_gc()`.
+// QuickJS and HarmonyOS JSVM perform synchronous full collection in `run_gc()`.
 #[cfg(any(
     feature = "primary-quickjs",
-    all(feature = "quickjs", not(feature = "jscore"), not(feature = "arkjs")),
+    all(feature = "quickjs", not(feature = "jscore"), not(feature = "jsvm")),
     all(
         target_env = "ohos",
         any(
-            feature = "primary-arkjs",
-            all(feature = "arkjs", not(feature = "jscore"))
+            feature = "primary-jsvm",
+            all(feature = "jsvm", not(feature = "jscore"))
         )
     )
 ))]

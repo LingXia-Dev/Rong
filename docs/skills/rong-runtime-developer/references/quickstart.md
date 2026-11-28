@@ -1,7 +1,7 @@
 # Rong Runtime Quick Start
 
 Rong is a JavaScript runtime for Rust with a unified API over QuickJS,
-JavaScriptCore, and ArkJS. For JavaScript script authors, the practical entry
+JavaScriptCore, and JSVM. For JavaScript script authors, the practical entry
 point is `rong_cli`.
 
 ## Run a Script

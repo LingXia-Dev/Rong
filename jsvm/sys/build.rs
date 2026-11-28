@@ -34,7 +34,7 @@ fn main() {
     let docs_rs = env::var_os("DOCS_RS").is_some();
 
     if docs_rs {
-        println!("cargo:warning=Generating placeholder ArkJS bindings for docs.rs");
+        println!("cargo:warning=Generating placeholder JSVM bindings for docs.rs");
         write_placeholder_bindings();
         return;
     }
@@ -46,10 +46,10 @@ fn main() {
 
     // This binding is only for HarmonyOS Ark JS.
     harmony_setup();
-    build_harmony_arkjs();
+    build_harmony_jsvm();
 }
 
-fn build_harmony_arkjs() {
+fn build_harmony_jsvm() {
     let ohos_ndk_home = env::var("OHOS_NDK_HOME")
         .expect("OHOS_NDK_HOME environment variable must be set for HarmonyOS builds");
 

@@ -31,7 +31,7 @@ pub use rong_core::{JsInvokePriority, enqueue_js_invoke};
 
 // The examples name the engine-typed aliases, so they exist with an engine.
 #[cfg_attr(
-    any(feature = "quickjs", feature = "jscore", feature = "arkjs"),
+    any(feature = "quickjs", feature = "jscore", feature = "jsvm"),
     doc = include_str!("host_functions.md")
 )]
 pub mod function {
@@ -40,21 +40,21 @@ pub mod function {
         KAsyncFnOnce, KFn, KFnOnce, Optional, ParamsAccessor, Rest, This,
     };
 
-    #[cfg(any(feature = "quickjs", feature = "jscore", feature = "arkjs"))]
+    #[cfg(any(feature = "quickjs", feature = "jscore", feature = "jsvm"))]
     pub type ThisMut<T> = rong_core::function::ThisMut<T, crate::JSEngineValue>;
 
-    #[cfg(any(feature = "quickjs", feature = "jscore", feature = "arkjs"))]
+    #[cfg(any(feature = "quickjs", feature = "jscore", feature = "jsvm"))]
     pub type JSClassRef<T> = rong_core::function::JSClassRef<T, crate::JSEngineValue>;
 
-    #[cfg(not(any(feature = "quickjs", feature = "jscore", feature = "arkjs")))]
+    #[cfg(not(any(feature = "quickjs", feature = "jscore", feature = "jsvm")))]
     pub type ThisMut<T> = rong_core::function::ThisMut<T, ()>;
 
-    #[cfg(not(any(feature = "quickjs", feature = "jscore", feature = "arkjs")))]
+    #[cfg(not(any(feature = "quickjs", feature = "jscore", feature = "jsvm")))]
     pub type JSClassRef<T> = rong_core::function::JSClassRef<T, ()>;
 }
 
 /// The engine-typed API for one engine; `rong::quickjs::JSContext` and so on.
-#[cfg(any(feature = "quickjs", feature = "jscore", feature = "arkjs"))]
+#[cfg(any(feature = "quickjs", feature = "jscore", feature = "jsvm"))]
 macro_rules! engine_api {
     ($engine:ty) => {
         pub type RongJS = $engine;
@@ -101,7 +101,7 @@ pub mod quickjs {
 
 /// ECMA-402 `Intl` for the engines that have none (the `intl` feature): its
 /// locale data and settings. Each engine's `intl::init` installs it:
-/// `rong::quickjs::intl::init`, `rong::arkjs::intl::init`.
+/// `rong::quickjs::intl::init`, `rong::jsvm::intl::init`.
 #[cfg(feature = "intl")]
 pub mod intl {
     pub use rong_intl::{
@@ -110,9 +110,9 @@ pub mod intl {
     };
 }
 
-#[cfg(all(feature = "intl", not(any(feature = "quickjs", feature = "arkjs"))))]
+#[cfg(all(feature = "intl", not(any(feature = "quickjs", feature = "jsvm"))))]
 compile_error!(
-    "the `rong` feature `intl` gives QuickJS and JSVM an `Intl`; enable `quickjs` or `arkjs` too. JavaScriptCore has its own."
+    "the `rong` feature `intl` gives QuickJS and JSVM an `Intl`; enable `quickjs` or `jsvm` too. JavaScriptCore has its own."
 );
 
 #[cfg(all(feature = "quickjs-jit", not(feature = "quickjs")))]
@@ -126,14 +126,14 @@ pub mod jscore {
     engine_api!(rong_jscore::JavaScriptCore);
 }
 
-/// ArkJS, usable beside another engine in the same binary.
-#[cfg(feature = "arkjs")]
-pub mod arkjs {
-    engine_api!(rong_arkjs::HarmonyArkJS);
+/// JSVM, usable beside another engine in the same binary.
+#[cfg(feature = "jsvm")]
+pub mod jsvm {
+    engine_api!(rong_jsvm::JSVM);
 
     /// Installs `Intl` on a JSVM context (the `intl` feature).
     #[cfg(all(feature = "intl", target_env = "ohos"))]
-    pub use rong_arkjs::intl;
+    pub use rong_jsvm::intl;
 }
 
 // The root aliases, `#[js_class]` and the module crates use one primary engine.
@@ -142,50 +142,50 @@ pub mod arkjs {
 // move the app's primary engine.
 #[cfg(any(
     all(feature = "primary-quickjs", feature = "primary-jscore"),
-    all(feature = "primary-quickjs", feature = "primary-arkjs"),
-    all(feature = "primary-jscore", feature = "primary-arkjs"),
+    all(feature = "primary-quickjs", feature = "primary-jsvm"),
+    all(feature = "primary-jscore", feature = "primary-jsvm"),
 ))]
 compile_error!(
-    "`rong` primary engine features are mutually exclusive: enable at most one of `primary-quickjs`, `primary-jscore`, or `primary-arkjs`."
+    "`rong` primary engine features are mutually exclusive: enable at most one of `primary-quickjs`, `primary-jscore`, or `primary-jsvm`."
 );
 #[cfg(any(
     all(feature = "primary-quickjs", not(feature = "quickjs")),
     all(feature = "primary-jscore", not(feature = "jscore")),
-    all(feature = "primary-arkjs", not(feature = "arkjs")),
+    all(feature = "primary-jsvm", not(feature = "jsvm")),
 ))]
 compile_error!("a `rong` `primary-*` feature needs its engine feature enabled too.");
 
-#[cfg(all(feature = "primary-arkjs", feature = "arkjs"))]
-use arkjs as primary;
 #[cfg(all(feature = "primary-jscore", feature = "jscore"))]
 use jscore as primary;
+#[cfg(all(feature = "primary-jsvm", feature = "jsvm"))]
+use jsvm as primary;
 #[cfg(all(feature = "primary-quickjs", feature = "quickjs"))]
 use quickjs as primary;
 
 #[cfg(not(any(
     feature = "primary-quickjs",
     feature = "primary-jscore",
-    feature = "primary-arkjs"
+    feature = "primary-jsvm"
 )))]
 mod default_primary {
-    #[cfg(all(feature = "arkjs", not(feature = "jscore")))]
-    pub use crate::arkjs::*;
     #[cfg(feature = "jscore")]
     pub use crate::jscore::*;
-    #[cfg(all(feature = "quickjs", not(feature = "jscore"), not(feature = "arkjs")))]
+    #[cfg(all(feature = "jsvm", not(feature = "jscore")))]
+    pub use crate::jsvm::*;
+    #[cfg(all(feature = "quickjs", not(feature = "jscore"), not(feature = "jsvm")))]
     pub use crate::quickjs::*;
 }
 #[cfg(all(
-    any(feature = "quickjs", feature = "jscore", feature = "arkjs"),
+    any(feature = "quickjs", feature = "jscore", feature = "jsvm"),
     not(any(
         feature = "primary-quickjs",
         feature = "primary-jscore",
-        feature = "primary-arkjs"
+        feature = "primary-jsvm"
     ))
 ))]
 use default_primary as primary;
 
-#[cfg(any(feature = "quickjs", feature = "jscore", feature = "arkjs"))]
+#[cfg(any(feature = "quickjs", feature = "jscore", feature = "jsvm"))]
 pub use primary::{
     AnyJSTypedArray, Class, JSArray, JSArrayBuffer, JSBytes, JSContext, JSDate, JSEngineContext,
     JSEngineValue, JSException, JSFunc, JSObject, JSProxy, JSRuntime, JSSymbol, JSTypedArray,
@@ -198,7 +198,7 @@ pub use rong_macro::{
 };
 
 /// A Trait for conversion from JavaScript values.
-#[cfg(any(feature = "quickjs", feature = "jscore", feature = "arkjs"))]
+#[cfg(any(feature = "quickjs", feature = "jscore", feature = "jsvm"))]
 pub trait TryFromJSValue: Sized {
     fn try_from_js(_value: JSValue) -> JSResult<Self>;
 }

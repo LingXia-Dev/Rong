@@ -274,7 +274,7 @@ fn each_engine_reports_what_it_can() {
         all(
             feature = "jscore",
             not(feature = "primary-quickjs"),
-            not(feature = "primary-arkjs")
+            not(feature = "primary-jsvm")
         )
     ));
     let expected = if jscore && cfg!(feature = "jscore-source") {

@@ -40,13 +40,13 @@ jscore = [
     "rong_event/jscore",
     "rong_stream/jscore",
 ]
-arkjs = [
-    "rong/arkjs",
-    "rong_abort/arkjs",
-    "rong_buffer/arkjs",
-    "rong_encoding/arkjs",
-    "rong_event/arkjs",
-    "rong_stream/arkjs",
+jsvm = [
+    "rong/jsvm",
+    "rong_abort/jsvm",
+    "rong_buffer/jsvm",
+    "rong_encoding/jsvm",
+    "rong_event/jsvm",
+    "rong_stream/jsvm",
 ]
 tls-aws-lc = ["rong/tls-aws-lc"]
 tls-ring = ["rong/tls-ring"]

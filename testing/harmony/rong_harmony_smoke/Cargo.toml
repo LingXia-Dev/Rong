@@ -7,7 +7,7 @@ repository = "https://github.com/LingXia-Dev/Rong"
 homepage = "https://github.com/LingXia-Dev/Rong"
 rust-version = "1.90"
 publish = false
-description = "Thin NAPI glue: exposes an HTTP control plane for HarmonyOS ArkJS smoke runs"
+description = "Thin NAPI glue: exposes an HTTP control plane for HarmonyOS JSVM smoke runs"
 
 [lib]
 name = "rong_harmony_smoke"
@@ -15,7 +15,7 @@ crate-type = ["cdylib", "rlib"]
 
 [features]
 default = []
-arkjs = []
+jsvm = []
 tls-aws-lc = ["rong_test_device/tls-aws-lc"]
 tls-ring = ["rong_test_device/tls-ring"]
 

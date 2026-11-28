@@ -21,7 +21,7 @@ tracing-subscriber = "0.3"
 default = ["quickjs", "tls-aws-lc"]
 quickjs = ["rong/quickjs", "rong_modules/quickjs", "rong_modules/all"]
 jscore = ["rong/jscore", "rong_modules/jscore", "rong_modules/all"]
-arkjs = ["rong/arkjs", "rong_modules/arkjs", "rong_modules/all"]
+jsvm = ["rong/jsvm", "rong_modules/jsvm", "rong_modules/all"]
 tls-aws-lc = ["rong/tls-aws-lc", "rong_modules/tls-aws-lc"]
 tls-ring = ["rong/tls-ring", "rong_modules/tls-ring"]
 

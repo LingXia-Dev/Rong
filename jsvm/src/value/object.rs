@@ -1,15 +1,15 @@
-use crate::{ArkJSValue, arkjs};
+use crate::{JSVMValue, jsvm};
 use rong_core::engine::JSObjectOps;
 use rong_core::{JSValueImpl, PropertyAttributes};
 
-impl JSObjectOps for ArkJSValue {
+impl JSObjectOps for JSVMValue {
     fn new_object(ctx: &Self::Context) -> Self {
         let _scope = crate::scope::OpScope::enter(ctx.to_raw());
         unsafe {
-            let mut obj: arkjs::JSVM_Value = std::ptr::null_mut();
-            let status = arkjs::OH_JSVM_CreateObject(ctx.to_raw(), &mut obj);
-            if status == arkjs::JSVM_Status_JSVM_OK {
-                ArkJSValue::from_owned_raw(ctx.to_raw(), obj).with_object()
+            let mut obj: jsvm::JSVM_Value = std::ptr::null_mut();
+            let status = jsvm::OH_JSVM_CreateObject(ctx.to_raw(), &mut obj);
+            if status == jsvm::JSVM_Status_JSVM_OK {
+                JSVMValue::from_owned_raw(ctx.to_raw(), obj).with_object()
             } else {
                 Self::create_undefined(ctx)
             }
@@ -41,8 +41,8 @@ impl JSObjectOps for ArkJSValue {
                 // Called from Rust (not from a JS constructor). Create a new instance.
                 crate::class::MAKE_INSTANCE.set(true);
 
-                let mut inst: arkjs::JSVM_Value = std::ptr::null_mut();
-                let status = arkjs::OH_JSVM_NewInstance(
+                let mut inst: jsvm::JSVM_Value = std::ptr::null_mut();
+                let status = jsvm::OH_JSVM_NewInstance(
                     ctx.to_raw(),
                     constructor.resolve_handle(),
                     0,
@@ -52,7 +52,7 @@ impl JSObjectOps for ArkJSValue {
 
                 crate::class::MAKE_INSTANCE.set(false);
 
-                if status != arkjs::JSVM_Status_JSVM_OK || inst.is_null() {
+                if status != jsvm::JSVM_Status_JSVM_OK || inst.is_null() {
                     crate::class::finalize_native_data(ctx.to_raw(), finalizer, data);
                     return Self::create_undefined(ctx);
                 }
@@ -62,7 +62,7 @@ impl JSObjectOps for ArkJSValue {
             // Wrap native data for get_opaque / OH_JSVM_Unwrap
             if !data.is_null() {
                 let finalizer_fn = finalizer;
-                let status = arkjs::OH_JSVM_Wrap(
+                let status = jsvm::OH_JSVM_Wrap(
                     ctx.to_raw(),
                     instance,
                     data as *mut std::ffi::c_void,
@@ -70,22 +70,22 @@ impl JSObjectOps for ArkJSValue {
                     std::ptr::null_mut(),
                     std::ptr::null_mut(),
                 );
-                if status != arkjs::JSVM_Status_JSVM_OK {
+                if status != jsvm::JSVM_Status_JSVM_OK {
                     crate::class::finalize_native_data(ctx.to_raw(), finalizer_fn, data);
-                    let mut stale: arkjs::JSVM_Value = std::ptr::null_mut();
-                    let _ = arkjs::OH_JSVM_GetAndClearLastException(ctx.to_raw(), &mut stale);
+                    let mut stale: jsvm::JSVM_Value = std::ptr::null_mut();
+                    let _ = jsvm::OH_JSVM_GetAndClearLastException(ctx.to_raw(), &mut stale);
                     return Self::create_undefined(ctx);
                 }
 
                 // Tag the instance for type checking via instance_of
                 if let Some(meta) = meta {
-                    arkjs::OH_JSVM_TypeTagObject(ctx.to_raw(), instance, &meta.type_tag);
+                    jsvm::OH_JSVM_TypeTagObject(ctx.to_raw(), instance, &meta.type_tag);
                 }
             }
 
             // Rust keeps instances (a field, a registry), so hold a reference:
             // a bare local handle goes stale when this callback's scope closes.
-            ArkJSValue::from_borrowed_raw(ctx.to_raw(), instance).with_object()
+            JSVMValue::from_borrowed_raw(ctx.to_raw(), instance).with_object()
         }
     }
 
@@ -101,9 +101,9 @@ impl JSObjectOps for ArkJSValue {
         unsafe {
             let obj = self.resolve_handle();
             let mut data: *mut std::ffi::c_void = std::ptr::null_mut();
-            let status = arkjs::OH_JSVM_Unwrap(self.env, obj, &mut data);
+            let status = jsvm::OH_JSVM_Unwrap(self.env, obj, &mut data);
 
-            if status == arkjs::JSVM_Status_JSVM_OK {
+            if status == jsvm::JSVM_Status_JSVM_OK {
                 data as *mut ()
             } else {
                 std::ptr::null_mut()
@@ -117,13 +117,13 @@ impl JSObjectOps for ArkJSValue {
             let obj = self.resolve_handle();
             let mut result = false;
             let status =
-                arkjs::OH_JSVM_DeleteProperty(self.env, obj, key.raw_value_for_api(), &mut result);
-            if status == arkjs::JSVM_Status_JSVM_OK {
+                jsvm::OH_JSVM_DeleteProperty(self.env, obj, key.raw_value_for_api(), &mut result);
+            if status == jsvm::JSVM_Status_JSVM_OK {
                 Ok(result)
             } else {
-                let mut exception: arkjs::JSVM_Value = std::ptr::null_mut();
-                arkjs::OH_JSVM_GetAndClearLastException(self.env, &mut exception);
-                Err(ArkJSValue::from_owned_raw(self.env, exception).with_exception())
+                let mut exception: jsvm::JSVM_Value = std::ptr::null_mut();
+                jsvm::OH_JSVM_GetAndClearLastException(self.env, &mut exception);
+                Err(JSVMValue::from_owned_raw(self.env, exception).with_exception())
             }
         }
     }
@@ -133,18 +133,18 @@ impl JSObjectOps for ArkJSValue {
         unsafe {
             let obj = self.resolve_handle();
             let mut has_property = false;
-            let status = arkjs::OH_JSVM_HasProperty(
+            let status = jsvm::OH_JSVM_HasProperty(
                 self.env,
                 obj,
                 key.raw_value_for_api(),
                 &mut has_property,
             );
-            if status == arkjs::JSVM_Status_JSVM_OK {
+            if status == jsvm::JSVM_Status_JSVM_OK {
                 Ok(has_property)
             } else {
-                let mut exception: arkjs::JSVM_Value = std::ptr::null_mut();
-                arkjs::OH_JSVM_GetAndClearLastException(self.env, &mut exception);
-                Err(ArkJSValue::from_owned_raw(self.env, exception).with_exception())
+                let mut exception: jsvm::JSVM_Value = std::ptr::null_mut();
+                jsvm::OH_JSVM_GetAndClearLastException(self.env, &mut exception);
+                Err(JSVMValue::from_owned_raw(self.env, exception).with_exception())
             }
         }
     }
@@ -164,8 +164,8 @@ impl JSObjectOps for ArkJSValue {
         unsafe {
             let obj = self.resolve_handle();
             let status =
-                arkjs::OH_JSVM_ObjectSetPrototypeOf(self.env, obj, prototype.raw_value_for_api());
-            status == arkjs::JSVM_Status_JSVM_OK
+                jsvm::OH_JSVM_ObjectSetPrototypeOf(self.env, obj, prototype.raw_value_for_api());
+            status == jsvm::JSVM_Status_JSVM_OK
         }
     }
 
@@ -186,29 +186,29 @@ impl JSObjectOps for ArkJSValue {
                 // For accessor properties, use Object.defineProperty via JS
                 // because JSVM_PropertyDescriptor expects JSVM_Callback (native fn ptr),
                 // not JSVM_Value (JS function objects).
-                let mut global: arkjs::JSVM_Value = std::ptr::null_mut();
-                arkjs::OH_JSVM_GetGlobal(self.env, &mut global);
+                let mut global: jsvm::JSVM_Value = std::ptr::null_mut();
+                jsvm::OH_JSVM_GetGlobal(self.env, &mut global);
 
-                let mut object_ctor: arkjs::JSVM_Value = std::ptr::null_mut();
-                arkjs::OH_JSVM_GetNamedProperty(
+                let mut object_ctor: jsvm::JSVM_Value = std::ptr::null_mut();
+                jsvm::OH_JSVM_GetNamedProperty(
                     self.env,
                     global,
                     c"Object".as_ptr() as _,
                     &mut object_ctor,
                 );
-                let mut define_prop_fn: arkjs::JSVM_Value = std::ptr::null_mut();
-                arkjs::OH_JSVM_GetNamedProperty(
+                let mut define_prop_fn: jsvm::JSVM_Value = std::ptr::null_mut();
+                jsvm::OH_JSVM_GetNamedProperty(
                     self.env,
                     object_ctor,
                     c"defineProperty".as_ptr() as _,
                     &mut define_prop_fn,
                 );
 
-                let mut desc_obj: arkjs::JSVM_Value = std::ptr::null_mut();
-                arkjs::OH_JSVM_CreateObject(self.env, &mut desc_obj);
+                let mut desc_obj: jsvm::JSVM_Value = std::ptr::null_mut();
+                jsvm::OH_JSVM_CreateObject(self.env, &mut desc_obj);
 
                 if has_getter {
-                    arkjs::OH_JSVM_SetNamedProperty(
+                    jsvm::OH_JSVM_SetNamedProperty(
                         self.env,
                         desc_obj,
                         c"get".as_ptr() as _,
@@ -216,7 +216,7 @@ impl JSObjectOps for ArkJSValue {
                     );
                 }
                 if has_setter {
-                    arkjs::OH_JSVM_SetNamedProperty(
+                    jsvm::OH_JSVM_SetNamedProperty(
                         self.env,
                         desc_obj,
                         c"set".as_ptr() as _,
@@ -224,9 +224,9 @@ impl JSObjectOps for ArkJSValue {
                     );
                 }
                 if attributes.is_enumerable() {
-                    let mut bool_val: arkjs::JSVM_Value = std::ptr::null_mut();
-                    arkjs::OH_JSVM_GetBoolean(self.env, true, &mut bool_val);
-                    arkjs::OH_JSVM_SetNamedProperty(
+                    let mut bool_val: jsvm::JSVM_Value = std::ptr::null_mut();
+                    jsvm::OH_JSVM_GetBoolean(self.env, true, &mut bool_val);
+                    jsvm::OH_JSVM_SetNamedProperty(
                         self.env,
                         desc_obj,
                         c"enumerable".as_ptr() as _,
@@ -234,9 +234,9 @@ impl JSObjectOps for ArkJSValue {
                     );
                 }
                 if attributes.is_configurable() {
-                    let mut bool_val: arkjs::JSVM_Value = std::ptr::null_mut();
-                    arkjs::OH_JSVM_GetBoolean(self.env, true, &mut bool_val);
-                    arkjs::OH_JSVM_SetNamedProperty(
+                    let mut bool_val: jsvm::JSVM_Value = std::ptr::null_mut();
+                    jsvm::OH_JSVM_GetBoolean(self.env, true, &mut bool_val);
+                    jsvm::OH_JSVM_SetNamedProperty(
                         self.env,
                         desc_obj,
                         c"configurable".as_ptr() as _,
@@ -245,8 +245,8 @@ impl JSObjectOps for ArkJSValue {
                 }
 
                 let args = [self.resolve_handle(), key.raw_value_for_api(), desc_obj];
-                let mut result: arkjs::JSVM_Value = std::ptr::null_mut();
-                let status = arkjs::OH_JSVM_CallFunction(
+                let mut result: jsvm::JSVM_Value = std::ptr::null_mut();
+                let status = jsvm::OH_JSVM_CallFunction(
                     self.env,
                     object_ctor,
                     define_prop_fn,
@@ -254,15 +254,15 @@ impl JSObjectOps for ArkJSValue {
                     args.as_ptr(),
                     &mut result,
                 );
-                if status == arkjs::JSVM_Status_JSVM_OK {
+                if status == jsvm::JSVM_Status_JSVM_OK {
                     Ok(())
                 } else {
-                    let mut exception: arkjs::JSVM_Value = std::ptr::null_mut();
-                    arkjs::OH_JSVM_GetAndClearLastException(self.env, &mut exception);
-                    Err(ArkJSValue::from_owned_raw(self.env, exception).with_exception())
+                    let mut exception: jsvm::JSVM_Value = std::ptr::null_mut();
+                    jsvm::OH_JSVM_GetAndClearLastException(self.env, &mut exception);
+                    Err(JSVMValue::from_owned_raw(self.env, exception).with_exception())
                 }
             } else {
-                let descriptor = arkjs::JSVM_PropertyDescriptor {
+                let descriptor = jsvm::JSVM_PropertyDescriptor {
                     utf8name: std::ptr::null(),
                     name: key.raw_value_for_api(),
                     method: std::ptr::null_mut(),
@@ -273,17 +273,17 @@ impl JSObjectOps for ArkJSValue {
                     } else {
                         std::ptr::null_mut()
                     },
-                    attributes: to_arkjs_attributes(attributes),
+                    attributes: to_jsvm_attributes(attributes),
                 };
 
                 let obj = self.resolve_handle();
-                let status = arkjs::OH_JSVM_DefineProperties(self.env, obj, 1, &descriptor);
-                if status == arkjs::JSVM_Status_JSVM_OK {
+                let status = jsvm::OH_JSVM_DefineProperties(self.env, obj, 1, &descriptor);
+                if status == jsvm::JSVM_Status_JSVM_OK {
                     Ok(())
                 } else {
-                    let mut exception: arkjs::JSVM_Value = std::ptr::null_mut();
-                    arkjs::OH_JSVM_GetAndClearLastException(self.env, &mut exception);
-                    Err(ArkJSValue::from_owned_raw(self.env, exception).with_exception())
+                    let mut exception: jsvm::JSVM_Value = std::ptr::null_mut();
+                    jsvm::OH_JSVM_GetAndClearLastException(self.env, &mut exception);
+                    Err(JSVMValue::from_owned_raw(self.env, exception).with_exception())
                 }
             }
         }
@@ -293,18 +293,18 @@ impl JSObjectOps for ArkJSValue {
         let _scope = crate::scope::OpScope::enter(self.env);
         unsafe {
             let obj = self.resolve_handle();
-            let mut result: arkjs::JSVM_Value = std::ptr::null_mut();
+            let mut result: jsvm::JSVM_Value = std::ptr::null_mut();
             let status =
-                arkjs::OH_JSVM_GetProperty(self.env, obj, key.raw_value_for_api(), &mut result);
+                jsvm::OH_JSVM_GetProperty(self.env, obj, key.raw_value_for_api(), &mut result);
 
-            if status == arkjs::JSVM_Status_JSVM_OK && !result.is_null() {
-                Ok(Some(ArkJSValue::from_owned_raw(self.env, result)))
-            } else if status == arkjs::JSVM_Status_JSVM_OK {
+            if status == jsvm::JSVM_Status_JSVM_OK && !result.is_null() {
+                Ok(Some(JSVMValue::from_owned_raw(self.env, result)))
+            } else if status == jsvm::JSVM_Status_JSVM_OK {
                 Ok(None)
             } else {
-                let mut exception: arkjs::JSVM_Value = std::ptr::null_mut();
-                arkjs::OH_JSVM_GetAndClearLastException(self.env, &mut exception);
-                Err(ArkJSValue::from_owned_raw(self.env, exception).with_exception())
+                let mut exception: jsvm::JSVM_Value = std::ptr::null_mut();
+                jsvm::OH_JSVM_GetAndClearLastException(self.env, &mut exception);
+                Err(JSVMValue::from_owned_raw(self.env, exception).with_exception())
             }
         }
     }
@@ -315,8 +315,8 @@ impl JSObjectOps for ArkJSValue {
             let self_handle = self.resolve_handle();
             let ctor_handle = constructor.resolve_handle();
             let mut result = false;
-            let status = arkjs::OH_JSVM_Instanceof(self.env, self_handle, ctor_handle, &mut result);
-            if status == arkjs::JSVM_Status_JSVM_OK && result {
+            let status = jsvm::OH_JSVM_Instanceof(self.env, self_handle, ctor_handle, &mut result);
+            if status == jsvm::JSVM_Status_JSVM_OK && result {
                 return true;
             }
             let Some(meta) = crate::class::class_meta(&constructor) else {
@@ -324,13 +324,13 @@ impl JSObjectOps for ArkJSValue {
             };
             // Fallback: check type tag for regular (non-callable) class instances
             let mut matches = false;
-            let status = arkjs::OH_JSVM_CheckObjectTypeTag(
+            let status = jsvm::OH_JSVM_CheckObjectTypeTag(
                 self.env,
                 self_handle,
                 &meta.type_tag,
                 &mut matches,
             );
-            if status == arkjs::JSVM_Status_JSVM_OK && matches {
+            if status == jsvm::JSVM_Status_JSVM_OK && matches {
                 return true;
             }
             // Fallback for callable instances: check if the object has native data
@@ -343,40 +343,40 @@ impl JSObjectOps for ArkJSValue {
         let _scope = crate::scope::OpScope::enter(self.env);
         unsafe {
             let obj = self.resolve_handle();
-            let mut property_names: arkjs::JSVM_Value = std::ptr::null_mut();
-            let status = arkjs::OH_JSVM_GetAllPropertyNames(
+            let mut property_names: jsvm::JSVM_Value = std::ptr::null_mut();
+            let status = jsvm::OH_JSVM_GetAllPropertyNames(
                 self.env,
                 obj,
-                arkjs::JSVM_KeyCollectionMode_JSVM_KEY_OWN_ONLY,
-                arkjs::JSVM_KeyFilter_JSVM_KEY_ENUMERABLE
-                    | arkjs::JSVM_KeyFilter_JSVM_KEY_SKIP_SYMBOLS,
-                arkjs::JSVM_KeyConversion_JSVM_KEY_NUMBERS_TO_STRINGS,
+                jsvm::JSVM_KeyCollectionMode_JSVM_KEY_OWN_ONLY,
+                jsvm::JSVM_KeyFilter_JSVM_KEY_ENUMERABLE
+                    | jsvm::JSVM_KeyFilter_JSVM_KEY_SKIP_SYMBOLS,
+                jsvm::JSVM_KeyConversion_JSVM_KEY_NUMBERS_TO_STRINGS,
                 &mut property_names,
             );
 
-            if status != arkjs::JSVM_Status_JSVM_OK {
-                let mut exception: arkjs::JSVM_Value = std::ptr::null_mut();
-                arkjs::OH_JSVM_GetAndClearLastException(self.env, &mut exception);
-                return Err(ArkJSValue::from_owned_raw(self.env, exception).with_exception());
+            if status != jsvm::JSVM_Status_JSVM_OK {
+                let mut exception: jsvm::JSVM_Value = std::ptr::null_mut();
+                jsvm::OH_JSVM_GetAndClearLastException(self.env, &mut exception);
+                return Err(JSVMValue::from_owned_raw(self.env, exception).with_exception());
             }
 
             let mut length: u32 = 0;
-            let status = arkjs::OH_JSVM_GetArrayLength(self.env, property_names, &mut length);
+            let status = jsvm::OH_JSVM_GetArrayLength(self.env, property_names, &mut length);
 
-            if status != arkjs::JSVM_Status_JSVM_OK {
-                let mut exception: arkjs::JSVM_Value = std::ptr::null_mut();
-                arkjs::OH_JSVM_GetAndClearLastException(self.env, &mut exception);
-                return Err(ArkJSValue::from_owned_raw(self.env, exception).with_exception());
+            if status != jsvm::JSVM_Status_JSVM_OK {
+                let mut exception: jsvm::JSVM_Value = std::ptr::null_mut();
+                jsvm::OH_JSVM_GetAndClearLastException(self.env, &mut exception);
+                return Err(JSVMValue::from_owned_raw(self.env, exception).with_exception());
             }
 
             let mut properties = Vec::with_capacity(length as usize);
 
             for i in 0..length {
-                let mut element: arkjs::JSVM_Value = std::ptr::null_mut();
-                let status = arkjs::OH_JSVM_GetElement(self.env, property_names, i, &mut element);
+                let mut element: jsvm::JSVM_Value = std::ptr::null_mut();
+                let status = jsvm::OH_JSVM_GetElement(self.env, property_names, i, &mut element);
 
-                if status == arkjs::JSVM_Status_JSVM_OK {
-                    properties.push(ArkJSValue::from_owned_raw(self.env, element));
+                if status == jsvm::JSVM_Status_JSVM_OK {
+                    properties.push(JSVMValue::from_owned_raw(self.env, element));
                 }
             }
 
@@ -385,17 +385,17 @@ impl JSObjectOps for ArkJSValue {
     }
 }
 
-fn to_arkjs_attributes(attr: PropertyAttributes) -> arkjs::JSVM_PropertyAttributes {
-    let mut flags = arkjs::JSVM_PropertyAttributes_JSVM_DEFAULT;
+fn to_jsvm_attributes(attr: PropertyAttributes) -> jsvm::JSVM_PropertyAttributes {
+    let mut flags = jsvm::JSVM_PropertyAttributes_JSVM_DEFAULT;
 
     if attr.is_writable() {
-        flags |= arkjs::JSVM_PropertyAttributes_JSVM_WRITABLE;
+        flags |= jsvm::JSVM_PropertyAttributes_JSVM_WRITABLE;
     }
     if attr.is_enumerable() {
-        flags |= arkjs::JSVM_PropertyAttributes_JSVM_ENUMERABLE;
+        flags |= jsvm::JSVM_PropertyAttributes_JSVM_ENUMERABLE;
     }
     if attr.is_configurable() {
-        flags |= arkjs::JSVM_PropertyAttributes_JSVM_CONFIGURABLE;
+        flags |= jsvm::JSVM_PropertyAttributes_JSVM_CONFIGURABLE;
     }
 
     flags

@@ -1,6 +1,6 @@
 # Harmony Test App
 
-This folder contains the minimum pieces needed for on-device ArkJS testing:
+This folder contains the minimum pieces needed for on-device JSVM testing:
 
 - `rong_harmony_smoke/`: Rust cdylib that exposes `startHttpServer()`
 - `app/`: minimal HarmonyOS app that loads the `.so` and starts the HTTP server on launch

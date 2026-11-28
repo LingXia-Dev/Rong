@@ -1,9 +1,9 @@
-use crate::{ArkJSValue, arkjs};
+use crate::{JSVMValue, jsvm};
 use rong_core::JSTypeOf;
 
-impl JSTypeOf for ArkJSValue {
+impl JSTypeOf for JSVMValue {
     fn is_exception(&self) -> bool {
-        // Limitation: can not verify exception as ArkJSValue is from JS
+        // Limitation: can not verify exception as JSVMValue is from JS
         self._is_exception()
     }
 
@@ -19,8 +19,8 @@ impl JSTypeOf for ArkJSValue {
         let value = self.resolve_handle();
         unsafe {
             let mut result = false;
-            let status = arkjs::OH_JSVM_IsError(self.env, value, &mut result);
-            status == arkjs::JSVM_Status_JSVM_OK && result
+            let status = jsvm::OH_JSVM_IsError(self.env, value, &mut result);
+            status == jsvm::JSVM_Status_JSVM_OK && result
         }
     }
 
@@ -35,8 +35,8 @@ impl JSTypeOf for ArkJSValue {
         let value = self.resolve_handle();
         unsafe {
             let mut result = false;
-            let status = arkjs::OH_JSVM_IsArray(self.env, value, &mut result);
-            status == arkjs::JSVM_Status_JSVM_OK && result
+            let status = jsvm::OH_JSVM_IsArray(self.env, value, &mut result);
+            status == jsvm::JSVM_Status_JSVM_OK && result
         }
     }
 
@@ -51,8 +51,8 @@ impl JSTypeOf for ArkJSValue {
         let value = self.resolve_handle();
         unsafe {
             let mut result = false;
-            let status = arkjs::OH_JSVM_IsArraybuffer(self.env, value, &mut result);
-            status == arkjs::JSVM_Status_JSVM_OK && result
+            let status = jsvm::OH_JSVM_IsArraybuffer(self.env, value, &mut result);
+            status == jsvm::JSVM_Status_JSVM_OK && result
         }
     }
 
@@ -68,8 +68,8 @@ impl JSTypeOf for ArkJSValue {
         let value = self.resolve_handle();
         unsafe {
             let mut result = false;
-            let status = arkjs::OH_JSVM_IsPromise(self.env, value, &mut result);
-            status == arkjs::JSVM_Status_JSVM_OK && result
+            let status = jsvm::OH_JSVM_IsPromise(self.env, value, &mut result);
+            status == jsvm::JSVM_Status_JSVM_OK && result
         }
     }
 
@@ -85,41 +85,41 @@ impl JSTypeOf for ArkJSValue {
         let value = self.resolve_handle();
         unsafe {
             let mut result = false;
-            let status = arkjs::OH_JSVM_IsDate(self.env, value, &mut result);
-            status == arkjs::JSVM_Status_JSVM_OK && result
+            let status = jsvm::OH_JSVM_IsDate(self.env, value, &mut result);
+            status == jsvm::JSVM_Status_JSVM_OK && result
         }
     }
 
     fn is_undefined(&self) -> bool {
-        self.type_is(arkjs::JSVM_ValueType_JSVM_UNDEFINED)
+        self.type_is(jsvm::JSVM_ValueType_JSVM_UNDEFINED)
     }
 
     fn is_null(&self) -> bool {
-        self.type_is(arkjs::JSVM_ValueType_JSVM_NULL)
+        self.type_is(jsvm::JSVM_ValueType_JSVM_NULL)
     }
 
     fn is_boolean(&self) -> bool {
-        self.type_is(arkjs::JSVM_ValueType_JSVM_BOOLEAN)
+        self.type_is(jsvm::JSVM_ValueType_JSVM_BOOLEAN)
     }
 
     fn is_number(&self) -> bool {
-        self.type_is(arkjs::JSVM_ValueType_JSVM_NUMBER)
+        self.type_is(jsvm::JSVM_ValueType_JSVM_NUMBER)
     }
 
     fn is_bigint(&self) -> bool {
-        self.type_is(arkjs::JSVM_ValueType_JSVM_BIGINT)
+        self.type_is(jsvm::JSVM_ValueType_JSVM_BIGINT)
     }
 
     fn is_string(&self) -> bool {
-        self.type_is(arkjs::JSVM_ValueType_JSVM_STRING)
+        self.type_is(jsvm::JSVM_ValueType_JSVM_STRING)
     }
 
     fn is_symbol(&self) -> bool {
-        self.type_is(arkjs::JSVM_ValueType_JSVM_SYMBOL)
+        self.type_is(jsvm::JSVM_ValueType_JSVM_SYMBOL)
     }
 
     fn is_function(&self) -> bool {
-        self.type_is(arkjs::JSVM_ValueType_JSVM_FUNCTION)
+        self.type_is(jsvm::JSVM_ValueType_JSVM_FUNCTION)
     }
 
     fn is_object(&self) -> bool {
@@ -128,7 +128,7 @@ impl JSTypeOf for ArkJSValue {
         }
         matches!(
             self.js_type(),
-            Some(arkjs::JSVM_ValueType_JSVM_OBJECT | arkjs::JSVM_ValueType_JSVM_FUNCTION)
+            Some(jsvm::JSVM_ValueType_JSVM_OBJECT | jsvm::JSVM_ValueType_JSVM_FUNCTION)
         )
     }
 
@@ -144,8 +144,8 @@ impl JSTypeOf for ArkJSValue {
         let value = self.resolve_handle();
         unsafe {
             let mut result = false;
-            let status = arkjs::OH_JSVM_IsConstructor(self.env, value, &mut result);
-            status == arkjs::JSVM_Status_JSVM_OK && result
+            let status = jsvm::OH_JSVM_IsConstructor(self.env, value, &mut result);
+            status == jsvm::JSVM_Status_JSVM_OK && result
         }
     }
 
@@ -157,27 +157,27 @@ impl JSTypeOf for ArkJSValue {
         let value = self.resolve_handle();
         unsafe {
             let mut result = false;
-            let status = arkjs::OH_JSVM_IsProxy(self.env, value, &mut result);
-            status == arkjs::JSVM_Status_JSVM_OK && result
+            let status = jsvm::OH_JSVM_IsProxy(self.env, value, &mut result);
+            status == jsvm::JSVM_Status_JSVM_OK && result
         }
     }
 }
 
-impl ArkJSValue {
+impl JSVMValue {
     /// `typeof` as JSVM reports it; a primitive kept by value answers without
     /// a JSVM call or a handle scope.
-    fn js_type(&self) -> Option<arkjs::JSVM_ValueType> {
+    fn js_type(&self) -> Option<jsvm::JSVM_ValueType> {
         if let Some(kind) = self.primitive_type() {
             return Some(kind);
         }
         let _scope = crate::scope::OpScope::enter(self.env);
         let value = self.resolve_handle();
-        let mut value_type: arkjs::JSVM_ValueType = arkjs::JSVM_ValueType_JSVM_UNDEFINED;
-        let status = unsafe { arkjs::OH_JSVM_Typeof(self.env, value, &mut value_type) };
-        (status == arkjs::JSVM_Status_JSVM_OK).then_some(value_type)
+        let mut value_type: jsvm::JSVM_ValueType = jsvm::JSVM_ValueType_JSVM_UNDEFINED;
+        let status = unsafe { jsvm::OH_JSVM_Typeof(self.env, value, &mut value_type) };
+        (status == jsvm::JSVM_Status_JSVM_OK).then_some(value_type)
     }
 
-    fn type_is(&self, kind: arkjs::JSVM_ValueType) -> bool {
+    fn type_is(&self, kind: jsvm::JSVM_ValueType) -> bool {
         self.js_type() == Some(kind)
     }
 }

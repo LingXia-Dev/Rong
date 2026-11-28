@@ -1,13 +1,13 @@
 [package]
-name = "rong_arkjs"
+name = "rong_jsvm"
 version = "0.8.0"
 edition.workspace = true
 
-description = "ArkJS backend for RongJS"
+description = "JSVM backend for RongJS"
 license.workspace = true
 repository.workspace = true
 homepage.workspace = true
-documentation = "https://docs.rs/rong_arkjs"
+documentation = "https://docs.rs/rong_jsvm"
 rust-version.workspace = true
 readme = "README.md"
 keywords.workspace = true
@@ -23,12 +23,12 @@ test = false
 doctest = false
 
 [dependencies]
-rong_arkjs_sys = { workspace = true }
+rong_jsvm_sys = { workspace = true }
 rong_core = { workspace = true }
 rong_intl = { workspace = true, optional = true }
 
 [features]
 default = []
-# Installs rong's ECMA-402 `Intl` (`rong_intl`) with `rong_arkjs::intl::init`:
+# Installs rong's ECMA-402 `Intl` (`rong_intl`) with `rong_jsvm::intl::init`:
 # HarmonyOS's JSVM is built without one. Off by default; pulls in ICU4X.
 intl = ["dep:rong_intl"]

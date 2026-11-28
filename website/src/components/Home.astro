@@ -96,8 +96,8 @@ cargo run -p rong_cli
 # Switch to JavaScriptCore explicitly
 cargo run -p rong_cli --no-default-features --features jscore,tls-aws-lc
 
-# Build for ArkJS on OpenHarmony targets
-cargo build --no-default-features --features arkjs,tls-ring \\
+# Build for JSVM on OpenHarmony targets
+cargo build --no-default-features --features jsvm,tls-ring \\
   --target aarch64-unknown-linux-ohos`;
 
 const codeSamples = [
@@ -138,7 +138,7 @@ const codeSamples = [
       <ul class="hero-engines" aria-label={t.hero.enginesLabel}>
         <li><span style="--c:var(--jade)"></span>QuickJS</li>
         <li><span style="--c:var(--celadon)"></span>JavaScriptCore</li>
-        <li><span style="--c:var(--gold)"></span>ArkJS</li>
+        <li><span style="--c:var(--gold)"></span>JSVM</li>
       </ul>
     </div>
   </section>
@@ -216,7 +216,7 @@ const codeSamples = [
         <div class="arch-layer arch-row arch-engines">
           <span style="--c:var(--jade)">QuickJS</span>
           <span style="--c:var(--celadon)">JavaScriptCore</span>
-          <span style="--c:var(--gold)">ArkJS</span>
+          <span style="--c:var(--gold)">JSVM</span>
         </div>
         <div class="arch-layer arch-modules">
           <span class="arch-modules-title">{t.arch.modulesTitle}</span>

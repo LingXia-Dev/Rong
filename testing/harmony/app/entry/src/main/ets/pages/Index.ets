@@ -43,12 +43,12 @@ struct Index {
   build() {
     Scroll() {
       Column({ space: 18 }) {
-        Text('Rong ArkJS Harmony Test App')
+        Text('Rong JSVM Harmony Test App')
           .fontSize(28)
           .fontWeight(FontWeight.Bold)
           .width('100%')
 
-        Text('This app is a thin HarmonyOS shell for device-side ArkJS tests. The PC forwards a local port, triggers tests over HTTP, and reads the JSON report directly.')
+        Text('This app is a thin HarmonyOS shell for device-side JSVM tests. The PC forwards a local port, triggers tests over HTTP, and reads the JSON report directly.')
           .fontSize(16)
           .lineHeight(24)
           .fontColor('#334155')

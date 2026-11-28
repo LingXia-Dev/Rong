@@ -1,5 +1,5 @@
-use crate::context::{ArkJSContextInner, context_guard_from_env};
-use crate::{ArkJSContext, arkjs};
+use crate::context::{JSVMContextInner, context_guard_from_env};
+use crate::{JSVMContext, jsvm};
 use rong_core::{
     JSContextImpl, JSErrorFactory, JSRawContext, JSTypeOf, JSValueImpl, RongJSError,
     impl_js_converter,
@@ -16,7 +16,7 @@ mod typed_array;
 mod valuetype;
 
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
-pub(crate) enum ArkJSValueType {
+pub(crate) enum JSVMValueType {
     Object,
     Error,
     Exception,
@@ -29,32 +29,32 @@ pub(crate) enum ArkJSValueType {
 /// call returns, its slot is reused for other values. Every read therefore
 /// goes through `reference`, taken at creation while the handle is still valid,
 /// or, for a primitive kept by value, makes a fresh handle from `primitive`.
-pub struct ArkJSValue {
-    value: arkjs::JSVM_Value,
-    env: arkjs::JSVM_Env,
-    value_type: ArkJSValueType,
-    reference: Option<arkjs::JSVM_Ref>,
+pub struct JSVMValue {
+    value: jsvm::JSVM_Value,
+    env: jsvm::JSVM_Env,
+    value_type: JSVMValueType,
+    reference: Option<jsvm::JSVM_Ref>,
     primitive: Option<Primitive>,
     // Keeps the env alive until this value has deleted its reference.
-    _context_guard: Option<Rc<ArkJSContextInner>>,
+    _context_guard: Option<Rc<JSVMContextInner>>,
 }
 
-impl PartialEq for ArkJSValue {
+impl PartialEq for JSVMValue {
     fn eq(&self, other: &Self) -> bool {
         let _scope = crate::scope::OpScope::enter(self.env);
         unsafe {
             let lhs = self.resolve_handle();
             let rhs = other.resolve_handle();
             let mut result = false;
-            let status = arkjs::OH_JSVM_StrictEquals(self.env, lhs, rhs, &mut result);
-            status == arkjs::JSVM_Status_JSVM_OK && result
+            let status = jsvm::OH_JSVM_StrictEquals(self.env, lhs, rhs, &mut result);
+            status == jsvm::JSVM_Status_JSVM_OK && result
         }
     }
 }
 
 // JSVM has no identity hash and handles differ per read, so only the env is
 // stable across values that `eq` (StrictEquals) treats as equal.
-impl Hash for ArkJSValue {
+impl Hash for JSVMValue {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         (self.env as usize).hash(state);
     }
@@ -71,27 +71,26 @@ enum Primitive {
 }
 
 impl Primitive {
-    fn of(env: arkjs::JSVM_Env, value: arkjs::JSVM_Value) -> Option<Self> {
+    fn of(env: jsvm::JSVM_Env, value: jsvm::JSVM_Value) -> Option<Self> {
         if value.is_null() {
             return None;
         }
         unsafe {
-            let mut kind: arkjs::JSVM_ValueType = arkjs::JSVM_ValueType_JSVM_UNDEFINED;
-            if arkjs::OH_JSVM_Typeof(env, value, &mut kind) != arkjs::JSVM_Status_JSVM_OK {
+            let mut kind: jsvm::JSVM_ValueType = jsvm::JSVM_ValueType_JSVM_UNDEFINED;
+            if jsvm::OH_JSVM_Typeof(env, value, &mut kind) != jsvm::JSVM_Status_JSVM_OK {
                 return None;
             }
             match kind {
-                arkjs::JSVM_ValueType_JSVM_UNDEFINED => Some(Self::Undefined),
-                arkjs::JSVM_ValueType_JSVM_NULL => Some(Self::Null),
-                arkjs::JSVM_ValueType_JSVM_BOOLEAN => {
+                jsvm::JSVM_ValueType_JSVM_UNDEFINED => Some(Self::Undefined),
+                jsvm::JSVM_ValueType_JSVM_NULL => Some(Self::Null),
+                jsvm::JSVM_ValueType_JSVM_BOOLEAN => {
                     let mut b = false;
-                    (arkjs::OH_JSVM_GetValueBool(env, value, &mut b) == arkjs::JSVM_Status_JSVM_OK)
+                    (jsvm::OH_JSVM_GetValueBool(env, value, &mut b) == jsvm::JSVM_Status_JSVM_OK)
                         .then_some(Self::Bool(b))
                 }
-                arkjs::JSVM_ValueType_JSVM_NUMBER => {
+                jsvm::JSVM_ValueType_JSVM_NUMBER => {
                     let mut n = 0.0;
-                    (arkjs::OH_JSVM_GetValueDouble(env, value, &mut n)
-                        == arkjs::JSVM_Status_JSVM_OK)
+                    (jsvm::OH_JSVM_GetValueDouble(env, value, &mut n) == jsvm::JSVM_Status_JSVM_OK)
                         .then_some(Self::Number(n))
                 }
                 _ => None,
@@ -99,26 +98,26 @@ impl Primitive {
         }
     }
 
-    fn handle(self, env: arkjs::JSVM_Env) -> arkjs::JSVM_Value {
-        let mut value: arkjs::JSVM_Value = ptr::null_mut();
+    fn handle(self, env: jsvm::JSVM_Env) -> jsvm::JSVM_Value {
+        let mut value: jsvm::JSVM_Value = ptr::null_mut();
         unsafe {
             match self {
-                Self::Undefined => arkjs::OH_JSVM_GetUndefined(env, &mut value),
-                Self::Null => arkjs::OH_JSVM_GetNull(env, &mut value),
-                Self::Bool(b) => arkjs::OH_JSVM_GetBoolean(env, b, &mut value),
-                Self::Number(n) => arkjs::OH_JSVM_CreateDouble(env, n, &mut value),
+                Self::Undefined => jsvm::OH_JSVM_GetUndefined(env, &mut value),
+                Self::Null => jsvm::OH_JSVM_GetNull(env, &mut value),
+                Self::Bool(b) => jsvm::OH_JSVM_GetBoolean(env, b, &mut value),
+                Self::Number(n) => jsvm::OH_JSVM_CreateDouble(env, n, &mut value),
             };
         }
         value
     }
 }
 
-impl ArkJSValue {
-    pub(crate) fn new(env: arkjs::JSVM_Env, value: arkjs::JSVM_Value) -> Self {
+impl JSVMValue {
+    pub(crate) fn new(env: jsvm::JSVM_Env, value: jsvm::JSVM_Value) -> Self {
         Self {
             env,
             value,
-            value_type: ArkJSValueType::Other,
+            value_type: JSVMValueType::Other,
             reference: None,
             primitive: Primitive::of(env, value),
             _context_guard: context_guard_from_env(env),
@@ -127,83 +126,83 @@ impl ArkJSValue {
     }
 
     pub(crate) fn with_exception(mut self) -> Self {
-        self.value_type = ArkJSValueType::Exception;
+        self.value_type = JSVMValueType::Exception;
         self
     }
 
     pub(crate) fn with_object(mut self) -> Self {
-        self.value_type = ArkJSValueType::Object;
+        self.value_type = JSVMValueType::Object;
         self
     }
 
     pub(crate) fn with_error(mut self) -> Self {
-        self.value_type = ArkJSValueType::Error;
+        self.value_type = JSVMValueType::Error;
         self
     }
 
     pub(crate) fn _is_err(&self) -> bool {
-        self.value_type == ArkJSValueType::Error
+        self.value_type == JSVMValueType::Error
     }
 
     pub(crate) fn _is_exception(&self) -> bool {
-        self.value_type == ArkJSValueType::Exception
+        self.value_type == JSVMValueType::Exception
     }
 
     pub(crate) fn _is_object(&self) -> bool {
-        self.value_type == ArkJSValueType::Object
+        self.value_type == JSVMValueType::Object
     }
 
     /// The JS type of a primitive kept by value, known without a JSVM call.
-    pub(crate) fn primitive_type(&self) -> Option<arkjs::JSVM_ValueType> {
+    pub(crate) fn primitive_type(&self) -> Option<jsvm::JSVM_ValueType> {
         self.primitive.map(|p| match p {
-            Primitive::Undefined => arkjs::JSVM_ValueType_JSVM_UNDEFINED,
-            Primitive::Null => arkjs::JSVM_ValueType_JSVM_NULL,
-            Primitive::Bool(_) => arkjs::JSVM_ValueType_JSVM_BOOLEAN,
-            Primitive::Number(_) => arkjs::JSVM_ValueType_JSVM_NUMBER,
+            Primitive::Undefined => jsvm::JSVM_ValueType_JSVM_UNDEFINED,
+            Primitive::Null => jsvm::JSVM_ValueType_JSVM_NULL,
+            Primitive::Bool(_) => jsvm::JSVM_ValueType_JSVM_BOOLEAN,
+            Primitive::Number(_) => jsvm::JSVM_ValueType_JSVM_NUMBER,
         })
     }
 
     fn pending_exception_or_type_error(&self, message: &str) -> Self {
         unsafe {
-            let mut exception: arkjs::JSVM_Value = ptr::null_mut();
-            arkjs::OH_JSVM_GetAndClearLastException(self.env, &mut exception);
+            let mut exception: jsvm::JSVM_Value = ptr::null_mut();
+            jsvm::OH_JSVM_GetAndClearLastException(self.env, &mut exception);
             if !exception.is_null() {
                 return Self::from_owned_raw(self.env, exception).with_exception();
             }
         }
 
-        let ctx = <ArkJSContext as JSContextImpl>::from_borrowed_raw(self.env);
+        let ctx = <JSVMContext as JSContextImpl>::from_borrowed_raw(self.env);
         ctx.new_error("TypeError", message, None).with_exception()
     }
 
-    pub(crate) fn reflect_set(&self, key: arkjs::JSVM_Value, value: arkjs::JSVM_Value) -> Self {
+    pub(crate) fn reflect_set(&self, key: jsvm::JSVM_Value, value: jsvm::JSVM_Value) -> Self {
         unsafe {
-            let mut global: arkjs::JSVM_Value = ptr::null_mut();
-            let mut reflect: arkjs::JSVM_Value = ptr::null_mut();
-            let mut set: arkjs::JSVM_Value = ptr::null_mut();
+            let mut global: jsvm::JSVM_Value = ptr::null_mut();
+            let mut reflect: jsvm::JSVM_Value = ptr::null_mut();
+            let mut set: jsvm::JSVM_Value = ptr::null_mut();
 
-            let status = arkjs::OH_JSVM_GetGlobal(self.env, &mut global);
-            if status != arkjs::JSVM_Status_JSVM_OK {
+            let status = jsvm::OH_JSVM_GetGlobal(self.env, &mut global);
+            if status != jsvm::JSVM_Status_JSVM_OK {
                 return self.pending_exception_or_type_error("Failed to get global object");
             }
-            let status = arkjs::OH_JSVM_GetNamedProperty(
+            let status = jsvm::OH_JSVM_GetNamedProperty(
                 self.env,
                 global,
                 c"Reflect".as_ptr() as _,
                 &mut reflect,
             );
-            if status != arkjs::JSVM_Status_JSVM_OK {
+            if status != jsvm::JSVM_Status_JSVM_OK {
                 return self.pending_exception_or_type_error("Failed to get Reflect");
             }
             let status =
-                arkjs::OH_JSVM_GetNamedProperty(self.env, reflect, c"set".as_ptr() as _, &mut set);
-            if status != arkjs::JSVM_Status_JSVM_OK {
+                jsvm::OH_JSVM_GetNamedProperty(self.env, reflect, c"set".as_ptr() as _, &mut set);
+            if status != jsvm::JSVM_Status_JSVM_OK {
                 return self.pending_exception_or_type_error("Failed to get Reflect.set");
             }
 
             let args = [self.resolve_handle(), key, value];
-            let mut result: arkjs::JSVM_Value = ptr::null_mut();
-            let status = arkjs::OH_JSVM_CallFunction(
+            let mut result: jsvm::JSVM_Value = ptr::null_mut();
+            let status = jsvm::OH_JSVM_CallFunction(
                 self.env,
                 reflect,
                 set,
@@ -211,13 +210,13 @@ impl ArkJSValue {
                 args.as_ptr(),
                 &mut result,
             );
-            if status != arkjs::JSVM_Status_JSVM_OK {
+            if status != jsvm::JSVM_Status_JSVM_OK {
                 return self.pending_exception_or_type_error("Failed to set JavaScript property");
             }
 
             let mut was_set = false;
-            let status = arkjs::OH_JSVM_GetValueBool(self.env, result, &mut was_set);
-            if status != arkjs::JSVM_Status_JSVM_OK {
+            let status = jsvm::OH_JSVM_GetValueBool(self.env, result, &mut was_set);
+            if status != jsvm::JSVM_Status_JSVM_OK {
                 return self
                     .pending_exception_or_type_error("Failed to read JavaScript property result");
             }
@@ -225,9 +224,7 @@ impl ArkJSValue {
                 return self.pending_exception_or_type_error("Failed to set JavaScript property");
             }
 
-            Self::create_undefined(&<ArkJSContext as JSContextImpl>::from_borrowed_raw(
-                self.env,
-            ))
+            Self::create_undefined(&<JSVMContext as JSContextImpl>::from_borrowed_raw(self.env))
         }
     }
 
@@ -237,9 +234,9 @@ impl ArkJSValue {
             return self;
         }
         unsafe {
-            let mut ref_value: arkjs::JSVM_Ref = ptr::null_mut();
-            let status = arkjs::OH_JSVM_CreateReference(self.env, self.value, 1, &mut ref_value);
-            if status == arkjs::JSVM_Status_JSVM_OK {
+            let mut ref_value: jsvm::JSVM_Ref = ptr::null_mut();
+            let status = jsvm::OH_JSVM_CreateReference(self.env, self.value, 1, &mut ref_value);
+            if status == jsvm::JSVM_Status_JSVM_OK {
                 self.reference = Some(ref_value);
             } else {
                 report_refused_reference(status);
@@ -251,15 +248,15 @@ impl ArkJSValue {
     /// Returns a handle valid in the current scope, read through the reference.
     /// Only a value JSVM refused a reference for falls back to its creation
     /// handle, which is valid only inside the native call that created it.
-    pub(crate) fn resolve_handle(&self) -> arkjs::JSVM_Value {
+    pub(crate) fn resolve_handle(&self) -> jsvm::JSVM_Value {
         if let Some(primitive) = self.primitive {
             return primitive.handle(self.env);
         }
         if let Some(reference) = self.reference {
             unsafe {
-                let mut value: arkjs::JSVM_Value = ptr::null_mut();
-                let status = arkjs::OH_JSVM_GetReferenceValue(self.env, reference, &mut value);
-                if status == arkjs::JSVM_Status_JSVM_OK && !value.is_null() {
+                let mut value: jsvm::JSVM_Value = ptr::null_mut();
+                let status = jsvm::OH_JSVM_GetReferenceValue(self.env, reference, &mut value);
+                if status == jsvm::JSVM_Status_JSVM_OK && !value.is_null() {
                     return value;
                 }
             }
@@ -271,34 +268,34 @@ impl ArkJSValue {
 /// Without a reference a value reads its creation handle, which is reused
 /// once its native call returns. JSVM (V8 13.2) references every value type,
 /// so say so loudly if some JSVM version does not.
-fn report_refused_reference(status: arkjs::JSVM_Status) {
+fn report_refused_reference(status: jsvm::JSVM_Status) {
     static REPORTED: std::sync::Once = std::sync::Once::new();
     REPORTED.call_once(|| {
         crate::hilog::warn(&format!(
-            "[ArkJS] OH_JSVM_CreateReference refused a value (status {status}); \
+            "[JSVM] OH_JSVM_CreateReference refused a value (status {status}); \
              it is readable only inside the native call that created it"
         ));
     });
 }
 
-impl Drop for ArkJSValue {
+impl Drop for JSVMValue {
     fn drop(&mut self) {
         // Release the reference if we have one
         if let Some(reference) = self.reference {
             unsafe {
-                arkjs::OH_JSVM_DeleteReference(self.env, reference);
+                jsvm::OH_JSVM_DeleteReference(self.env, reference);
             }
         }
     }
 }
 
-impl JSRawContext for ArkJSValue {
-    type RawContext = arkjs::JSVM_Env;
+impl JSRawContext for JSVMValue {
+    type RawContext = jsvm::JSVM_Env;
 }
 
-impl JSValueImpl for ArkJSValue {
-    type RawValue = arkjs::JSVM_Value;
-    type Context = ArkJSContext;
+impl JSValueImpl for JSVMValue {
+    type RawValue = jsvm::JSVM_Value;
+    type Context = JSVMContext;
 
     fn in_handle_scope<R>(
         ctx: &<Self::Context as JSContextImpl>::RawContext,
@@ -320,7 +317,7 @@ impl JSValueImpl for ArkJSValue {
         ctx: <Self::Context as JSContextImpl>::RawContext,
         value: Self::RawValue,
     ) -> Self {
-        ArkJSValue::new(ctx, value)
+        JSVMValue::new(ctx, value)
     }
 
     // A JSVM handle dies with the native call that made it, so an owned value
@@ -329,7 +326,7 @@ impl JSValueImpl for ArkJSValue {
         ctx: <Self::Context as JSContextImpl>::RawContext,
         value: Self::RawValue,
     ) -> Self {
-        ArkJSValue::new(ctx, value)
+        JSVMValue::new(ctx, value)
     }
 
     fn into_raw_value(self) -> Self::RawValue {
@@ -358,8 +355,8 @@ impl JSValueImpl for ArkJSValue {
         let _scope = crate::scope::OpScope::enter(ctx.to_raw());
         let env = ctx.to_raw();
         unsafe {
-            let mut null_value: arkjs::JSVM_Value = ptr::null_mut();
-            arkjs::OH_JSVM_GetNull(env, &mut null_value);
+            let mut null_value: jsvm::JSVM_Value = ptr::null_mut();
+            jsvm::OH_JSVM_GetNull(env, &mut null_value);
             Self::from_owned_raw(env, null_value)
         }
     }
@@ -368,8 +365,8 @@ impl JSValueImpl for ArkJSValue {
         let _scope = crate::scope::OpScope::enter(ctx.to_raw());
         let env = ctx.to_raw();
         unsafe {
-            let mut undefined_value: arkjs::JSVM_Value = ptr::null_mut();
-            arkjs::OH_JSVM_GetUndefined(env, &mut undefined_value);
+            let mut undefined_value: jsvm::JSVM_Value = ptr::null_mut();
+            jsvm::OH_JSVM_GetUndefined(env, &mut undefined_value);
             Self::from_owned_raw(env, undefined_value)
         }
     }
@@ -378,27 +375,27 @@ impl JSValueImpl for ArkJSValue {
         let _scope = crate::scope::OpScope::enter(ctx.to_raw());
         let env = ctx.to_raw();
         unsafe {
-            let mut json_string: arkjs::JSVM_Value = ptr::null_mut();
-            let status = arkjs::OH_JSVM_CreateStringUtf8(
+            let mut json_string: jsvm::JSVM_Value = ptr::null_mut();
+            let status = jsvm::OH_JSVM_CreateStringUtf8(
                 env,
                 str.as_ptr().cast(),
                 str.len(),
                 &mut json_string,
             );
 
-            if status == arkjs::JSVM_Status_JSVM_OK {
-                let mut result: arkjs::JSVM_Value = ptr::null_mut();
-                let status = arkjs::OH_JSVM_JsonParse(env, json_string, &mut result);
+            if status == jsvm::JSVM_Status_JSVM_OK {
+                let mut result: jsvm::JSVM_Value = ptr::null_mut();
+                let status = jsvm::OH_JSVM_JsonParse(env, json_string, &mut result);
 
-                if status == arkjs::JSVM_Status_JSVM_OK {
+                if status == jsvm::JSVM_Status_JSVM_OK {
                     Self::from_owned_raw(env, result)
                 } else {
                     // JSON parse failed — retrieve and return the pending exception
                     // so the caller can handle it as an error.
-                    let mut exception: arkjs::JSVM_Value = ptr::null_mut();
-                    arkjs::OH_JSVM_GetAndClearLastException(env, &mut exception);
+                    let mut exception: jsvm::JSVM_Value = ptr::null_mut();
+                    jsvm::OH_JSVM_GetAndClearLastException(env, &mut exception);
                     if !exception.is_null() {
-                        ArkJSValue::from_owned_raw(env, exception).with_exception()
+                        JSVMValue::from_owned_raw(env, exception).with_exception()
                     } else {
                         Self::create_undefined(ctx)
                     }
@@ -414,19 +411,19 @@ impl JSValueImpl for ArkJSValue {
         let env = ctx.to_raw();
         unsafe {
             // First create a string for the description
-            let mut desc_string: arkjs::JSVM_Value = ptr::null_mut();
-            let status = arkjs::OH_JSVM_CreateStringUtf8(
+            let mut desc_string: jsvm::JSVM_Value = ptr::null_mut();
+            let status = jsvm::OH_JSVM_CreateStringUtf8(
                 env,
                 description.as_ptr().cast(),
                 description.len(),
                 &mut desc_string,
             );
 
-            if status == arkjs::JSVM_Status_JSVM_OK {
-                let mut symbol_value: arkjs::JSVM_Value = ptr::null_mut();
-                let status = arkjs::OH_JSVM_CreateSymbol(env, desc_string, &mut symbol_value);
+            if status == jsvm::JSVM_Status_JSVM_OK {
+                let mut symbol_value: jsvm::JSVM_Value = ptr::null_mut();
+                let status = jsvm::OH_JSVM_CreateSymbol(env, desc_string, &mut symbol_value);
 
-                if status == arkjs::JSVM_Status_JSVM_OK {
+                if status == jsvm::JSVM_Status_JSVM_OK {
                     Self::from_owned_raw(env, symbol_value)
                 } else {
                     Self::create_undefined(ctx)
@@ -441,9 +438,9 @@ impl JSValueImpl for ArkJSValue {
         let _scope = crate::scope::OpScope::enter(ctx.to_raw());
         let env = ctx.to_raw();
         unsafe {
-            let mut date_value: arkjs::JSVM_Value = ptr::null_mut();
-            let status = arkjs::OH_JSVM_CreateDate(env, epoch_ms, &mut date_value);
-            if status == arkjs::JSVM_Status_JSVM_OK {
+            let mut date_value: jsvm::JSVM_Value = ptr::null_mut();
+            let status = jsvm::OH_JSVM_CreateDate(env, epoch_ms, &mut date_value);
+            if status == jsvm::JSVM_Status_JSVM_OK {
                 Self::from_owned_raw(env, date_value).with_object()
             } else {
                 Self::create_undefined(ctx)
@@ -452,10 +449,10 @@ impl JSValueImpl for ArkJSValue {
     }
 }
 
-impl Clone for ArkJSValue {
+impl Clone for JSVMValue {
     fn clone(&self) -> Self {
         if self.primitive.is_some() {
-            return ArkJSValue {
+            return JSVMValue {
                 value: self.value,
                 env: self.env,
                 value_type: self.value_type,
@@ -466,19 +463,19 @@ impl Clone for ArkJSValue {
         }
         let _scope = crate::scope::OpScope::enter(self.env);
         // Each clone owns its own reference to the value the original reads now.
-        let mut cloned = ArkJSValue::new(self.env, self.resolve_handle());
+        let mut cloned = JSVMValue::new(self.env, self.resolve_handle());
         cloned.value_type = self.value_type;
         cloned
     }
 }
 
 impl_js_converter!(
-    ArkJSValue,
+    JSVMValue,
     bool,
     |ctx, value| unsafe {
-        let mut bool_value: arkjs::JSVM_Value = ptr::null_mut();
-        let status = arkjs::OH_JSVM_GetBoolean(ctx, value, &mut bool_value);
-        if status == arkjs::JSVM_Status_JSVM_OK {
+        let mut bool_value: jsvm::JSVM_Value = ptr::null_mut();
+        let status = jsvm::OH_JSVM_GetBoolean(ctx, value, &mut bool_value);
+        if status == jsvm::JSVM_Status_JSVM_OK {
             bool_value
         } else {
             ptr::null_mut()
@@ -486,8 +483,8 @@ impl_js_converter!(
     },
     |env, value, result: *mut bool| unsafe {
         let mut bool_result = false;
-        let status = arkjs::OH_JSVM_GetValueBool(env, value, &mut bool_result);
-        if status == arkjs::JSVM_Status_JSVM_OK {
+        let status = jsvm::OH_JSVM_GetValueBool(env, value, &mut bool_result);
+        if status == jsvm::JSVM_Status_JSVM_OK {
             *result = bool_result;
             0
         } else {
@@ -497,12 +494,12 @@ impl_js_converter!(
 );
 
 impl_js_converter!(
-    ArkJSValue,
+    JSVMValue,
     i32,
     |ctx, value| unsafe {
-        let mut number_value: arkjs::JSVM_Value = ptr::null_mut();
-        let status = arkjs::OH_JSVM_CreateInt32(ctx, value, &mut number_value);
-        if status == arkjs::JSVM_Status_JSVM_OK {
+        let mut number_value: jsvm::JSVM_Value = ptr::null_mut();
+        let status = jsvm::OH_JSVM_CreateInt32(ctx, value, &mut number_value);
+        if status == jsvm::JSVM_Status_JSVM_OK {
             number_value
         } else {
             ptr::null_mut()
@@ -510,8 +507,8 @@ impl_js_converter!(
     },
     |env, value, result: &mut i32| unsafe {
         let mut int_result = 0i32;
-        let status = arkjs::OH_JSVM_GetValueInt32(env, value, &mut int_result);
-        if status == arkjs::JSVM_Status_JSVM_OK {
+        let status = jsvm::OH_JSVM_GetValueInt32(env, value, &mut int_result);
+        if status == jsvm::JSVM_Status_JSVM_OK {
             *result = int_result;
             0
         } else {
@@ -521,12 +518,12 @@ impl_js_converter!(
 );
 
 impl_js_converter!(
-    ArkJSValue,
+    JSVMValue,
     f64,
     |ctx, value| unsafe {
-        let mut number_value: arkjs::JSVM_Value = ptr::null_mut();
-        let status = arkjs::OH_JSVM_CreateDouble(ctx, value, &mut number_value);
-        if status == arkjs::JSVM_Status_JSVM_OK {
+        let mut number_value: jsvm::JSVM_Value = ptr::null_mut();
+        let status = jsvm::OH_JSVM_CreateDouble(ctx, value, &mut number_value);
+        if status == jsvm::JSVM_Status_JSVM_OK {
             number_value
         } else {
             ptr::null_mut()
@@ -534,8 +531,8 @@ impl_js_converter!(
     },
     |env, value, result: &mut f64| unsafe {
         let mut double_result = 0.0f64;
-        let status = arkjs::OH_JSVM_GetValueDouble(env, value, &mut double_result);
-        if status == arkjs::JSVM_Status_JSVM_OK {
+        let status = jsvm::OH_JSVM_GetValueDouble(env, value, &mut double_result);
+        if status == jsvm::JSVM_Status_JSVM_OK {
             *result = double_result;
             0
         } else {
@@ -545,18 +542,18 @@ impl_js_converter!(
 );
 
 impl_js_converter!(
-    ArkJSValue,
+    JSVMValue,
     &str,
     String,
     |ctx, value: &str| unsafe {
-        let mut string_value: arkjs::JSVM_Value = ptr::null_mut();
-        let status = arkjs::OH_JSVM_CreateStringUtf8(
+        let mut string_value: jsvm::JSVM_Value = ptr::null_mut();
+        let status = jsvm::OH_JSVM_CreateStringUtf8(
             ctx,
             value.as_ptr() as *const std::ffi::c_char,
             value.len(),
             &mut string_value,
         );
-        if status == arkjs::JSVM_Status_JSVM_OK {
+        if status == jsvm::JSVM_Status_JSVM_OK {
             string_value
         } else {
             ptr::null_mut()
@@ -564,19 +561,19 @@ impl_js_converter!(
     },
     |env, value, result: *mut String| unsafe {
         // Coerce to string first so non-string values (numbers, booleans, etc.) work
-        let mut string_value: arkjs::JSVM_Value = value;
-        let mut value_type: arkjs::JSVM_ValueType = arkjs::JSVM_ValueType_JSVM_UNDEFINED;
-        arkjs::OH_JSVM_Typeof(env, value, &mut value_type);
-        if value_type != arkjs::JSVM_ValueType_JSVM_STRING {
-            let status = arkjs::OH_JSVM_CoerceToString(env, value, &mut string_value);
-            if status != arkjs::JSVM_Status_JSVM_OK {
+        let mut string_value: jsvm::JSVM_Value = value;
+        let mut value_type: jsvm::JSVM_ValueType = jsvm::JSVM_ValueType_JSVM_UNDEFINED;
+        jsvm::OH_JSVM_Typeof(env, value, &mut value_type);
+        if value_type != jsvm::JSVM_ValueType_JSVM_STRING {
+            let status = jsvm::OH_JSVM_CoerceToString(env, value, &mut string_value);
+            if status != jsvm::JSVM_Status_JSVM_OK {
                 // `ToString` threw (a Symbol, a throwing `toString`): fail like the
                 // other engines, and clear the exception so later JSVM calls work.
                 let mut is_pending = false;
-                arkjs::OH_JSVM_IsExceptionPending(env, &mut is_pending);
+                jsvm::OH_JSVM_IsExceptionPending(env, &mut is_pending);
                 if is_pending {
-                    let mut exception: arkjs::JSVM_Value = ptr::null_mut();
-                    arkjs::OH_JSVM_GetAndClearLastException(env, &mut exception);
+                    let mut exception: jsvm::JSVM_Value = ptr::null_mut();
+                    jsvm::OH_JSVM_GetAndClearLastException(env, &mut exception);
                 }
                 return -1;
             }
@@ -584,12 +581,12 @@ impl_js_converter!(
 
         let mut length: usize = 0;
         let status =
-            arkjs::OH_JSVM_GetValueStringUtf8(env, string_value, ptr::null_mut(), 0, &mut length);
+            jsvm::OH_JSVM_GetValueStringUtf8(env, string_value, ptr::null_mut(), 0, &mut length);
 
-        if status == arkjs::JSVM_Status_JSVM_OK && length > 0 {
+        if status == jsvm::JSVM_Status_JSVM_OK && length > 0 {
             let mut buffer = vec![0u8; length + 1];
             let mut written: usize = 0;
-            let status = arkjs::OH_JSVM_GetValueStringUtf8(
+            let status = jsvm::OH_JSVM_GetValueStringUtf8(
                 env,
                 string_value,
                 buffer.as_mut_ptr() as *mut std::ffi::c_char,
@@ -597,7 +594,7 @@ impl_js_converter!(
                 &mut written,
             );
 
-            if status == arkjs::JSVM_Status_JSVM_OK {
+            if status == jsvm::JSVM_Status_JSVM_OK {
                 buffer.truncate(written);
                 match String::from_utf8(buffer) {
                     Ok(s) => {
@@ -617,12 +614,12 @@ impl_js_converter!(
 );
 
 impl_js_converter!(
-    ArkJSValue,
+    JSVMValue,
     u32,
     |ctx, value| unsafe {
-        let mut number_value: arkjs::JSVM_Value = ptr::null_mut();
-        let status = arkjs::OH_JSVM_CreateUint32(ctx, value, &mut number_value);
-        if status == arkjs::JSVM_Status_JSVM_OK {
+        let mut number_value: jsvm::JSVM_Value = ptr::null_mut();
+        let status = jsvm::OH_JSVM_CreateUint32(ctx, value, &mut number_value);
+        if status == jsvm::JSVM_Status_JSVM_OK {
             number_value
         } else {
             ptr::null_mut()
@@ -630,8 +627,8 @@ impl_js_converter!(
     },
     |env, value, result: &mut u32| unsafe {
         let mut uint_result = 0u32;
-        let status = arkjs::OH_JSVM_GetValueUint32(env, value, &mut uint_result);
-        if status == arkjs::JSVM_Status_JSVM_OK {
+        let status = jsvm::OH_JSVM_GetValueUint32(env, value, &mut uint_result);
+        if status == jsvm::JSVM_Status_JSVM_OK {
             *result = uint_result;
             0
         } else {
@@ -641,7 +638,7 @@ impl_js_converter!(
 );
 
 impl_js_converter!(
-    ArkJSValue,
+    JSVMValue,
     i64,
     |ctx, value| unsafe {
         // For values within JavaScript safe integer range, use regular number
@@ -650,17 +647,17 @@ impl_js_converter!(
         const JS_MIN_SAFE_INTEGER: i64 = -JS_MAX_SAFE_INTEGER;
 
         if (JS_MIN_SAFE_INTEGER..=JS_MAX_SAFE_INTEGER).contains(&value) {
-            let mut result: arkjs::JSVM_Value = ptr::null_mut();
-            let status = arkjs::OH_JSVM_CreateDouble(ctx, value as f64, &mut result);
-            if status == arkjs::JSVM_Status_JSVM_OK {
+            let mut result: jsvm::JSVM_Value = ptr::null_mut();
+            let status = jsvm::OH_JSVM_CreateDouble(ctx, value as f64, &mut result);
+            if status == jsvm::JSVM_Status_JSVM_OK {
                 result
             } else {
                 ptr::null_mut()
             }
         } else {
-            let mut bigint_value: arkjs::JSVM_Value = ptr::null_mut();
-            let status = arkjs::OH_JSVM_CreateBigintInt64(ctx, value, &mut bigint_value);
-            if status == arkjs::JSVM_Status_JSVM_OK {
+            let mut bigint_value: jsvm::JSVM_Value = ptr::null_mut();
+            let status = jsvm::OH_JSVM_CreateBigintInt64(ctx, value, &mut bigint_value);
+            if status == jsvm::JSVM_Status_JSVM_OK {
                 bigint_value
             } else {
                 ptr::null_mut()
@@ -671,15 +668,15 @@ impl_js_converter!(
         let mut int64_result = 0i64;
         let mut lossless = false;
         let status =
-            arkjs::OH_JSVM_GetValueBigintInt64(env, value, &mut int64_result, &mut lossless);
-        if status == arkjs::JSVM_Status_JSVM_OK {
+            jsvm::OH_JSVM_GetValueBigintInt64(env, value, &mut int64_result, &mut lossless);
+        if status == jsvm::JSVM_Status_JSVM_OK {
             *result = int64_result;
             0
         } else {
             // Fallback to number conversion
             let mut double_result = 0.0f64;
-            let status = arkjs::OH_JSVM_GetValueDouble(env, value, &mut double_result);
-            if status == arkjs::JSVM_Status_JSVM_OK {
+            let status = jsvm::OH_JSVM_GetValueDouble(env, value, &mut double_result);
+            if status == jsvm::JSVM_Status_JSVM_OK {
                 *result = double_result as i64;
                 0
             } else {
@@ -690,7 +687,7 @@ impl_js_converter!(
 );
 
 impl_js_converter!(
-    ArkJSValue,
+    JSVMValue,
     u64,
     |ctx, value| unsafe {
         // For values within JavaScript safe integer range, use regular number
@@ -698,17 +695,17 @@ impl_js_converter!(
         const JS_MAX_SAFE_INTEGER: u64 = (1u64 << 53) - 1;
 
         if value <= JS_MAX_SAFE_INTEGER {
-            let mut result: arkjs::JSVM_Value = ptr::null_mut();
-            let status = arkjs::OH_JSVM_CreateDouble(ctx, value as f64, &mut result);
-            if status == arkjs::JSVM_Status_JSVM_OK {
+            let mut result: jsvm::JSVM_Value = ptr::null_mut();
+            let status = jsvm::OH_JSVM_CreateDouble(ctx, value as f64, &mut result);
+            if status == jsvm::JSVM_Status_JSVM_OK {
                 result
             } else {
                 ptr::null_mut()
             }
         } else {
-            let mut bigint_value: arkjs::JSVM_Value = ptr::null_mut();
-            let status = arkjs::OH_JSVM_CreateBigintUint64(ctx, value, &mut bigint_value);
-            if status == arkjs::JSVM_Status_JSVM_OK {
+            let mut bigint_value: jsvm::JSVM_Value = ptr::null_mut();
+            let status = jsvm::OH_JSVM_CreateBigintUint64(ctx, value, &mut bigint_value);
+            if status == jsvm::JSVM_Status_JSVM_OK {
                 bigint_value
             } else {
                 ptr::null_mut()
@@ -719,15 +716,15 @@ impl_js_converter!(
         let mut uint64_result = 0u64;
         let mut lossless = false;
         let status =
-            arkjs::OH_JSVM_GetValueBigintUint64(env, value, &mut uint64_result, &mut lossless);
-        if status == arkjs::JSVM_Status_JSVM_OK {
+            jsvm::OH_JSVM_GetValueBigintUint64(env, value, &mut uint64_result, &mut lossless);
+        if status == jsvm::JSVM_Status_JSVM_OK {
             *result = uint64_result;
             0
         } else {
             // Fallback to number conversion
             let mut double_result = 0.0f64;
-            let status = arkjs::OH_JSVM_GetValueDouble(env, value, &mut double_result);
-            if status == arkjs::JSVM_Status_JSVM_OK {
+            let status = jsvm::OH_JSVM_GetValueDouble(env, value, &mut double_result);
+            if status == jsvm::JSVM_Status_JSVM_OK {
                 *result = double_result as u64;
                 0
             } else {

@@ -58,7 +58,7 @@ export const HOME: Record<Locale, HomeStrings> = {
       title1: "One JavaScript API.",
       title2: "Every engine, in Rust.",
       subHtml:
-        "<strong>Rong</strong> (融) is a JavaScript runtime for Rust with a unified API over QuickJS, JavaScriptCore, and ArkJS — built for embedding, Rust-driven JS APIs, and long-lived worker runtimes.",
+        "<strong>Rong</strong> (融) is a JavaScript runtime for Rust with a unified API over QuickJS, JavaScriptCore, and JSVM — built for embedding, Rust-driven JS APIs, and long-lived worker runtimes.",
       getStarted: "Get started",
       viewOnGitHub: "View on GitHub",
       enginesLabel: "Supported engines",
@@ -79,7 +79,7 @@ export const HOME: Record<Locale, HomeStrings> = {
       {
         icon: FEATURE_ICONS[0],
         title: "Unified API",
-        body: "Write once, run anywhere. The same Rust code drives QuickJS, JavaScriptCore, and ArkJS — engines are selected at build time, with no engine-specific branches in your code.",
+        body: "Write once, run anywhere. The same Rust code drives QuickJS, JavaScriptCore, and JSVM — engines are selected at build time, with no engine-specific branches in your code.",
       },
       {
         icon: FEATURE_ICONS[1],
@@ -126,7 +126,7 @@ export const HOME: Record<Locale, HomeStrings> = {
         accent: ENGINE_ACCENTS[1],
       },
       {
-        name: "ArkJS",
+        name: "JSVM",
         tag: "HarmonyOS / OpenHarmony",
         body: "The HarmonyOS JavaScript engine, for aarch64 OpenHarmony targets with the ring TLS backend.",
         accent: ENGINE_ACCENTS[2],
@@ -200,7 +200,7 @@ export const HOME: Record<Locale, HomeStrings> = {
       title1: "一套 JavaScript API。",
       title2: "贯通所有引擎，尽在 Rust。",
       subHtml:
-        "<strong>Rong</strong>（融）是一个面向 Rust 的 JavaScript 运行时，以统一的 API 覆盖 QuickJS、JavaScriptCore 和 ArkJS —— 专为嵌入式场景、Rust 驱动的 JS API 以及长生命周期的 worker 运行时而设计。",
+        "<strong>Rong</strong>（融）是一个面向 Rust 的 JavaScript 运行时，以统一的 API 覆盖 QuickJS、JavaScriptCore 和 JSVM —— 专为嵌入式场景、Rust 驱动的 JS API 以及长生命周期的 worker 运行时而设计。",
       getStarted: "快速开始",
       viewOnGitHub: "在 GitHub 上查看",
       enginesLabel: "支持的引擎",
@@ -221,7 +221,7 @@ export const HOME: Record<Locale, HomeStrings> = {
       {
         icon: FEATURE_ICONS[0],
         title: "统一 API",
-        body: "一次编写，到处运行。同一份 Rust 代码即可驱动 QuickJS、JavaScriptCore 和 ArkJS —— 引擎在构建时选定，代码中没有任何引擎相关的分支。",
+        body: "一次编写，到处运行。同一份 Rust 代码即可驱动 QuickJS、JavaScriptCore 和 JSVM —— 引擎在构建时选定，代码中没有任何引擎相关的分支。",
       },
       {
         icon: FEATURE_ICONS[1],
@@ -268,7 +268,7 @@ export const HOME: Record<Locale, HomeStrings> = {
         accent: ENGINE_ACCENTS[1],
       },
       {
-        name: "ArkJS",
+        name: "JSVM",
         tag: "HarmonyOS / OpenHarmony",
         body: "HarmonyOS 的 JavaScript 引擎，面向 aarch64 OpenHarmony 目标，搭配 ring TLS 后端。",
         accent: ENGINE_ACCENTS[2],

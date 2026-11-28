@@ -3,11 +3,11 @@
 //!
 //! JavaScriptCore collects from run-loop timers the test harness does not
 //! service (see `tests/gc.rs`), so it does not run this test. `target_env =
-//! "ohos"` is the device build, where the engine is ArkJS.
+//! "ohos"` is the device build, where the engine is JSVM.
 #![cfg(any(
     target_env = "ohos",
     feature = "primary-quickjs",
-    all(feature = "quickjs", not(feature = "jscore"), not(feature = "arkjs"))
+    all(feature = "quickjs", not(feature = "jscore"), not(feature = "jsvm"))
 ))]
 
 use rong_test::*;
@@ -35,8 +35,8 @@ fn log_line(line: &str) {
 
 #[cfg(target_env = "ohos")]
 fn global_handles(ctx: &JSContext) -> usize {
-    use rong_arkjs_sys as sys;
     use rong_core::JSContextImpl;
+    use rong_jsvm_sys as sys;
     unsafe {
         let env: sys::JSVM_Env = *ctx.as_ref().as_raw();
         let mut vm: sys::JSVM_VM = std::ptr::null_mut();

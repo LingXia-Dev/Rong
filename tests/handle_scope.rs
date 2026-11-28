@@ -23,8 +23,8 @@ fn log_line(line: &str) {
 /// Used heap in bytes, where the engine reports it.
 #[cfg(target_env = "ohos")]
 fn used_heap(ctx: &JSContext) -> Option<usize> {
-    use rong_arkjs_sys as sys;
     use rong_core::JSContextImpl;
+    use rong_jsvm_sys as sys;
     unsafe {
         let env: sys::JSVM_Env = *ctx.as_ref().as_raw();
         let mut vm: sys::JSVM_VM = std::ptr::null_mut();

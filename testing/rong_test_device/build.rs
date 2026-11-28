@@ -23,7 +23,7 @@ fn main() {
     // Entire files can be skipped via skip_files.
     let skip_files: std::collections::HashSet<&str> = [].into_iter().collect();
     let skip_fns: std::collections::HashSet<(&str, &str)> = [
-        // ArkJS JSVM: accessing .stack property on thrown Error objects causes SIGABRT.
+        // JSVM JSVM: accessing .stack property on thrown Error objects causes SIGABRT.
         // The JSVM internally aborts when reconstructing the stack trace from a
         // cleared exception. Related tests that don't access .stack pass fine.
         ("error", "test_error_stack"),
@@ -204,7 +204,7 @@ fn transform_source(
             continue;
         }
         // `use rong::` and `use rong_macro::` are left as-is because
-        // both `rong` (with arkjs feature) and `rong_macro` are real
+        // both `rong` (with jsvm feature) and `rong_macro` are real
         // crate dependencies.
 
         // Strip `#[cfg(test)] mod tests { use super::*; ... }` — flatten into

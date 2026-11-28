@@ -123,7 +123,7 @@ build_rust() {
   echo "[1/9] Building Rust library..."
   setup_ohos_env
   cd "$REPO_ROOT"
-  cargo build --release --target "$TARGET" --manifest-path "$CRATE_MANIFEST" --no-default-features --features "arkjs,tls-ring"
+  cargo build --release --target "$TARGET" --manifest-path "$CRATE_MANIFEST" --no-default-features --features "jsvm,tls-ring"
   mkdir -p "$(dirname "$SO_DEST")"
   cp "$SO_SRC" "$SO_DEST"
   echo "  staged $SO_NAME -> $SO_DEST"
