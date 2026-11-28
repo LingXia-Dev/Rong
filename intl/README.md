@@ -4,7 +4,7 @@ ECMA-402 `Intl` for the engines that have none, on rong's engine-generic API.
 Turn it on with `rong`'s `intl` feature: `rong::intl` gives a context its data
 and settings, and each engine's thin `init` installs it (QuickJS:
 `rong::quickjs::intl::init`; JSVM on HarmonyOS, a V8 built without ICU:
-`rong::arkjs::intl::init`). JavaScriptCore has its own `Intl` and never links
+`rong::jsvm::intl::init`). JavaScriptCore has its own `Intl` and never links
 it.
 
 Locale data comes from an ICU4X data blob that the embedder loads per app

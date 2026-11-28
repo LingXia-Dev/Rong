@@ -24,7 +24,7 @@ source transformation:
 1. **Strips** `#[test]` / `#[tokio::test]` attributes (they're cargo-test
    specific).
 2. **Replaces** `use rong_test::*` with `use crate::prelude::*` (binds to the
-   ArkJS engine instead of the desktop default).
+   JSVM engine instead of the desktop default).
 3. **Makes** test functions `pub` so they're callable from the runner.
 4. **Generates** a registry mapping `"file.function_name"` → function pointer.
 

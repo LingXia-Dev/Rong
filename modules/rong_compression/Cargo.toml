@@ -33,6 +33,6 @@ rong_test = { path = "../../testing/rong_test" }
 default = []
 quickjs = ["rong/quickjs"]
 jscore = ["rong/jscore"]
-arkjs = ["rong/arkjs"]
+jsvm = ["rong/jsvm"]
 tls-aws-lc = ["rong/tls-aws-lc"]
 tls-ring = ["rong/tls-ring"]

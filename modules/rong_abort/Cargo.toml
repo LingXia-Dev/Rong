@@ -27,7 +27,7 @@ rong_exception = { workspace = true }
 default = []
 quickjs = ["rong/quickjs", "rong_event/quickjs", "rong_exception/quickjs"]
 jscore = ["rong/jscore", "rong_event/jscore", "rong_exception/jscore"]
-arkjs = ["rong/arkjs", "rong_event/arkjs", "rong_exception/arkjs"]
+jsvm = ["rong/jsvm", "rong_event/jsvm", "rong_exception/jsvm"]
 tls-aws-lc = ["rong/tls-aws-lc"]
 tls-ring = ["rong/tls-ring"]
 

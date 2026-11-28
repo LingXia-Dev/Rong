@@ -1,7 +1,7 @@
 # JavaScript testing with `@rongjs/test`
 
 `@rongjs/test` is Rong's small, engine-neutral JavaScript test framework. It
-works in QuickJS, JavaScriptCore, ArkJS, and other hosts that can evaluate
+works in QuickJS, JavaScriptCore, JSVM, and other hosts that can evaluate
 JavaScript and await promises. The package has no runtime dependencies and
 does not require Node.js APIs, timers, a filesystem, or Rong modules.
 
@@ -201,6 +201,6 @@ which runs the engine's full collection. Call it inside a case while the case
 still holds the objects under test: a class that marks a value it does not own
 crashes QuickJS only when a cycle pass traverses the live object, and objects
 dropped at the end of a case are freed by reference counting before any pass
-sees them. On JavaScriptCore and ArkJS it does nothing. Use the Cargo and engine
+sees them. On JavaScriptCore and JSVM it does nothing. Use the Cargo and engine
 commands in the [repository testing guide](../internals/testing.md) to execute
 those suites.

@@ -36,20 +36,20 @@ pub struct MemoryUsage {
     ///   (includes `extraMemorySize`; updated as `MarkedBlock`s retire or GC cycles mark live
     ///   cells, so a brand-new runtime before its first block fill or Eden GC may report `0`
     ///   while `allocated_bytes` is already positive).
-    /// - **ArkJS**: `JSVM_HeapStatistics::usedHeapSize`.
+    /// - **JSVM**: `JSVM_HeapStatistics::usedHeapSize`.
     pub used_bytes: u64,
     /// Total heap or allocator bytes currently reserved or allocated by the
     /// engine, including free blocks and unused heap capacity.
     ///
     /// - **QuickJS**: `Some(JSMemoryUsage::malloc_size)`.
     /// - **JavaScriptCore (`source` / JSCOnly)**: `Some(heapCapacity)`.
-    /// - **ArkJS**: `Some(JSVM_HeapStatistics::totalHeapSize)`.
+    /// - **JSVM**: `Some(JSVM_HeapStatistics::totalHeapSize)`.
     pub allocated_bytes: Option<u64>,
     /// Configured maximum heap or allocator limit in bytes, when bounded.
     ///
     /// - **QuickJS**: `Some(limit)` when `JS_SetMemoryLimit` is active (`> 0`), else `None`.
     /// - **JavaScriptCore (`source` / JSCOnly)**: `None`.
-    /// - **ArkJS**: `Some(JSVM_HeapStatistics::heapSizeLimit)` when non-zero, else `None`.
+    /// - **JSVM**: `Some(JSVM_HeapStatistics::heapSizeLimit)` when non-zero, else `None`.
     pub limit_bytes: Option<u64>,
     /// Non-GC / external backing memory (in bytes) tracked alongside JS
     /// objects, when reported separately by the engine.
@@ -61,7 +61,7 @@ pub struct MemoryUsage {
     /// - **JavaScriptCore (`source` / JSCOnly)**: `Some(extraMemorySize)`,
     ///   already **inside** `used_bytes` and `allocated_bytes` (`heapSize` /
     ///   `heapCapacity`). Adding it double-counts.
-    /// - **ArkJS**: `Some(JSVM_HeapStatistics::externalMemory)`, **outside**
+    /// - **JSVM**: `Some(JSVM_HeapStatistics::externalMemory)`, **outside**
     ///   `used_bytes`; the total footprint is `used_bytes + external_bytes`.
     pub external_bytes: Option<u64>,
     /// Number of live GC / JavaScript objects on the heap, when reported by the
@@ -69,7 +69,7 @@ pub struct MemoryUsage {
     ///
     /// - **QuickJS**: `Some(JSMemoryUsage::obj_count)`.
     /// - **JavaScriptCore (`source` / JSCOnly)**: `Some(objectCount)`.
-    /// - **ArkJS**: `None`.
+    /// - **JSVM**: `None`.
     pub object_count: Option<u64>,
 }
 
@@ -318,7 +318,7 @@ impl<R: JSRuntimeImpl + 'static> JSRuntime<R> {
     /// - The exact behavior depends on the underlying JavaScript engine implementation.
     /// - Use this judiciously as it may impact performance.
     /// - QuickJS runs a full collection, including its cycle pass. On
-    ///   JavaScriptCore and ArkJS this does nothing: JavaScriptCore has no
+    ///   JavaScriptCore and JSVM this does nothing: JavaScriptCore has no
     ///   public synchronous collection and collects on its own schedule, which
     ///   Rong's workers drive (see [`JSRuntimeImpl::run_engine_timers`]).
     pub fn run_gc(&self) {
@@ -328,13 +328,13 @@ impl<R: JSRuntimeImpl + 'static> JSRuntime<R> {
     /// Samples the runtime's current heap and allocator memory usage.
     ///
     /// Returns `Some(MemoryUsage)` on QuickJS, JavaScriptCore's `source`/JSCOnly
-    /// backend, and HarmonyOS ArkJS. Returns `None` when the backend has no
+    /// backend, and HarmonyOS JSVM. Returns `None` when the backend has no
     /// public heap-statistics API (notably Apple's system
     /// `JavaScriptCore.framework`).
     ///
     /// This is a sampling call for tests, diagnostics, or a periodic gauge,
     /// not something to run per frame or per native call: QuickJS walks every
-    /// object on the heap (O(heap)), and JSC / ArkJS gather VM-wide heap
+    /// object on the heap (O(heap)), and JSC / JSVM gather VM-wide heap
     /// statistics.
     pub fn memory_usage(&self) -> Option<MemoryUsage> {
         self.inner.memory_usage()

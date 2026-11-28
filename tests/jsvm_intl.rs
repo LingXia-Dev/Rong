@@ -16,7 +16,7 @@ fn jsvm_gets_intl_once_configured() {
 
         let data = intl::IntlData::try_from_static_blob(BLOB).unwrap();
         intl::configure(ctx, data, intl::IntlSettings::default());
-        rong::arkjs::intl::init(ctx)?;
+        rong::jsvm::intl::init(ctx)?;
         assert_eq!(eval("Intl.getCanonicalLocales('EN-us')[0]")?, "en-US");
         assert_eq!(
             eval("(1234567.891).toLocaleString('en-US')")?,

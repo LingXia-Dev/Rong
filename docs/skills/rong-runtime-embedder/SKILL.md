@@ -2,7 +2,7 @@
 name: rong-runtime-embedder
 description: >-
   Build, configure, and debug Rust hosts that embed the Rong JavaScript runtime.
-  Use when selecting QuickJS, JavaScriptCore, or ArkJS features; creating
+  Use when selecting QuickJS, JavaScriptCore, or JSVM features; creating
   runtimes and contexts; configuring module subsets and the host executor;
   choosing shared or pinned worker pools; enforcing execution timeouts or hard
   interruption; or reasoning about runtime, context, worker, and shutdown
@@ -34,7 +34,7 @@ non-yielding execution.
 
 ## Core Rules
 
-- Enable exactly one of `quickjs`, `jscore`, or `arkjs` in a host binary.
+- Enable exactly one of `quickjs`, `jscore`, or `jsvm` in a host binary.
 - Keep a raw `JSRuntime` and its contexts on their owning thread. Use Rong
   workers for host-side cross-thread scheduling.
 - Use `shared()` for independent stateless tasks and `pinned::<K, S>()` for
@@ -62,6 +62,6 @@ cargo test -p rong --features quickjs --test interrupt
 ```
 
 For JSC interruption changes, also test system-framework cooperative mode,
-system-framework opt-in preemption, and `jscore-source`. For ArkJS changes, use
+system-framework opt-in preemption, and `jscore-source`. For JSVM changes, use
 the HarmonyOS/OpenHarmony target and device harness rather than assuming desktop
 behavior.

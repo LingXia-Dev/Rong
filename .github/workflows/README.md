@@ -53,7 +53,7 @@
 ## `harmony-self-hosted.yml` (Harmony self-hosted)
 
 - **Trigger:** manual (`workflow_dispatch`)
-- **Runs:** ArkJS/OHOS `check`, `clippy`, and the Rust-side Harmony smoke-library build on a self-hosted runner with `OHOS_NDK_HOME`
+- **Runs:** JSVM/OHOS `check`, `clippy`, and the Rust-side Harmony smoke-library build on a self-hosted runner with `OHOS_NDK_HOME`
 - **Requirements:** runner labels `self-hosted` and `harmony`; intended for future local-runner coverage, not GitHub-hosted CI
 
 ## `release.yml` (manual package publish)

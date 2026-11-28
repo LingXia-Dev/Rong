@@ -1,26 +1,26 @@
-use crate::{ArkJSValue, arkjs};
+use crate::{JSVMValue, jsvm};
 use rong_core::{JSTypedArrayKind, JSTypedArrayOps, JSValueImpl};
 use std::ptr;
 
 /// Raw info returned by OH_JSVM_GetTypedarrayInfo.
 struct TypedArrayInfo {
-    kind: arkjs::JSVM_TypedarrayType,
+    kind: jsvm::JSVM_TypedarrayType,
     length: usize,
     byte_offset: usize,
-    array_buffer: arkjs::JSVM_Value,
+    array_buffer: jsvm::JSVM_Value,
 }
 
-impl ArkJSValue {
+impl JSVMValue {
     /// Single JSVM call that retrieves all typed-array metadata at once.
     fn typed_array_info(&self) -> Option<TypedArrayInfo> {
         unsafe {
-            let mut kind: arkjs::JSVM_TypedarrayType = arkjs::JSVM_TypedarrayType_JSVM_INT8_ARRAY;
+            let mut kind: jsvm::JSVM_TypedarrayType = jsvm::JSVM_TypedarrayType_JSVM_INT8_ARRAY;
             let mut length: usize = 0;
             let mut data: *mut std::ffi::c_void = ptr::null_mut();
-            let mut array_buffer: arkjs::JSVM_Value = ptr::null_mut();
+            let mut array_buffer: jsvm::JSVM_Value = ptr::null_mut();
             let mut byte_offset: usize = 0;
 
-            let status = arkjs::OH_JSVM_GetTypedarrayInfo(
+            let status = jsvm::OH_JSVM_GetTypedarrayInfo(
                 self.env,
                 self.resolve_handle(),
                 &mut kind,
@@ -30,7 +30,7 @@ impl ArkJSValue {
                 &mut byte_offset,
             );
 
-            if status == arkjs::JSVM_Status_JSVM_OK {
+            if status == jsvm::JSVM_Status_JSVM_OK {
                 Some(TypedArrayInfo {
                     kind,
                     length,
@@ -44,40 +44,40 @@ impl ArkJSValue {
     }
 }
 
-fn ark_kind_to_kind(ark: arkjs::JSVM_TypedarrayType) -> Option<JSTypedArrayKind> {
+fn ark_kind_to_kind(ark: jsvm::JSVM_TypedarrayType) -> Option<JSTypedArrayKind> {
     match ark {
-        arkjs::JSVM_TypedarrayType_JSVM_INT8_ARRAY => Some(JSTypedArrayKind::Int8),
-        arkjs::JSVM_TypedarrayType_JSVM_UINT8_ARRAY => Some(JSTypedArrayKind::Uint8),
-        arkjs::JSVM_TypedarrayType_JSVM_UINT8_CLAMPED_ARRAY => Some(JSTypedArrayKind::Uint8Clamped),
-        arkjs::JSVM_TypedarrayType_JSVM_INT16_ARRAY => Some(JSTypedArrayKind::Int16),
-        arkjs::JSVM_TypedarrayType_JSVM_UINT16_ARRAY => Some(JSTypedArrayKind::Uint16),
-        arkjs::JSVM_TypedarrayType_JSVM_INT32_ARRAY => Some(JSTypedArrayKind::Int32),
-        arkjs::JSVM_TypedarrayType_JSVM_UINT32_ARRAY => Some(JSTypedArrayKind::Uint32),
-        arkjs::JSVM_TypedarrayType_JSVM_FLOAT32_ARRAY => Some(JSTypedArrayKind::Float32),
-        arkjs::JSVM_TypedarrayType_JSVM_FLOAT64_ARRAY => Some(JSTypedArrayKind::Float64),
-        arkjs::JSVM_TypedarrayType_JSVM_BIGINT64_ARRAY => Some(JSTypedArrayKind::BigInt64),
-        arkjs::JSVM_TypedarrayType_JSVM_BIGUINT64_ARRAY => Some(JSTypedArrayKind::BigUint64),
+        jsvm::JSVM_TypedarrayType_JSVM_INT8_ARRAY => Some(JSTypedArrayKind::Int8),
+        jsvm::JSVM_TypedarrayType_JSVM_UINT8_ARRAY => Some(JSTypedArrayKind::Uint8),
+        jsvm::JSVM_TypedarrayType_JSVM_UINT8_CLAMPED_ARRAY => Some(JSTypedArrayKind::Uint8Clamped),
+        jsvm::JSVM_TypedarrayType_JSVM_INT16_ARRAY => Some(JSTypedArrayKind::Int16),
+        jsvm::JSVM_TypedarrayType_JSVM_UINT16_ARRAY => Some(JSTypedArrayKind::Uint16),
+        jsvm::JSVM_TypedarrayType_JSVM_INT32_ARRAY => Some(JSTypedArrayKind::Int32),
+        jsvm::JSVM_TypedarrayType_JSVM_UINT32_ARRAY => Some(JSTypedArrayKind::Uint32),
+        jsvm::JSVM_TypedarrayType_JSVM_FLOAT32_ARRAY => Some(JSTypedArrayKind::Float32),
+        jsvm::JSVM_TypedarrayType_JSVM_FLOAT64_ARRAY => Some(JSTypedArrayKind::Float64),
+        jsvm::JSVM_TypedarrayType_JSVM_BIGINT64_ARRAY => Some(JSTypedArrayKind::BigInt64),
+        jsvm::JSVM_TypedarrayType_JSVM_BIGUINT64_ARRAY => Some(JSTypedArrayKind::BigUint64),
         _ => None,
     }
 }
 
-fn kind_to_ark_kind(kind: JSTypedArrayKind) -> arkjs::JSVM_TypedarrayType {
+fn kind_to_ark_kind(kind: JSTypedArrayKind) -> jsvm::JSVM_TypedarrayType {
     match kind {
-        JSTypedArrayKind::Int8 => arkjs::JSVM_TypedarrayType_JSVM_INT8_ARRAY,
-        JSTypedArrayKind::Uint8 => arkjs::JSVM_TypedarrayType_JSVM_UINT8_ARRAY,
-        JSTypedArrayKind::Uint8Clamped => arkjs::JSVM_TypedarrayType_JSVM_UINT8_CLAMPED_ARRAY,
-        JSTypedArrayKind::Int16 => arkjs::JSVM_TypedarrayType_JSVM_INT16_ARRAY,
-        JSTypedArrayKind::Uint16 => arkjs::JSVM_TypedarrayType_JSVM_UINT16_ARRAY,
-        JSTypedArrayKind::Int32 => arkjs::JSVM_TypedarrayType_JSVM_INT32_ARRAY,
-        JSTypedArrayKind::Uint32 => arkjs::JSVM_TypedarrayType_JSVM_UINT32_ARRAY,
-        JSTypedArrayKind::Float32 => arkjs::JSVM_TypedarrayType_JSVM_FLOAT32_ARRAY,
-        JSTypedArrayKind::Float64 => arkjs::JSVM_TypedarrayType_JSVM_FLOAT64_ARRAY,
-        JSTypedArrayKind::BigInt64 => arkjs::JSVM_TypedarrayType_JSVM_BIGINT64_ARRAY,
-        JSTypedArrayKind::BigUint64 => arkjs::JSVM_TypedarrayType_JSVM_BIGUINT64_ARRAY,
+        JSTypedArrayKind::Int8 => jsvm::JSVM_TypedarrayType_JSVM_INT8_ARRAY,
+        JSTypedArrayKind::Uint8 => jsvm::JSVM_TypedarrayType_JSVM_UINT8_ARRAY,
+        JSTypedArrayKind::Uint8Clamped => jsvm::JSVM_TypedarrayType_JSVM_UINT8_CLAMPED_ARRAY,
+        JSTypedArrayKind::Int16 => jsvm::JSVM_TypedarrayType_JSVM_INT16_ARRAY,
+        JSTypedArrayKind::Uint16 => jsvm::JSVM_TypedarrayType_JSVM_UINT16_ARRAY,
+        JSTypedArrayKind::Int32 => jsvm::JSVM_TypedarrayType_JSVM_INT32_ARRAY,
+        JSTypedArrayKind::Uint32 => jsvm::JSVM_TypedarrayType_JSVM_UINT32_ARRAY,
+        JSTypedArrayKind::Float32 => jsvm::JSVM_TypedarrayType_JSVM_FLOAT32_ARRAY,
+        JSTypedArrayKind::Float64 => jsvm::JSVM_TypedarrayType_JSVM_FLOAT64_ARRAY,
+        JSTypedArrayKind::BigInt64 => jsvm::JSVM_TypedarrayType_JSVM_BIGINT64_ARRAY,
+        JSTypedArrayKind::BigUint64 => jsvm::JSVM_TypedarrayType_JSVM_BIGUINT64_ARRAY,
     }
 }
 
-impl JSTypedArrayOps for ArkJSValue {
+impl JSTypedArrayOps for JSVMValue {
     fn from_array_buffer(
         ctx: &Self::Context,
         kind: JSTypedArrayKind,
@@ -87,8 +87,8 @@ impl JSTypedArrayOps for ArkJSValue {
     ) -> Self {
         let _scope = crate::scope::OpScope::enter(ctx.to_raw());
         unsafe {
-            let mut typed_array: arkjs::JSVM_Value = ptr::null_mut();
-            let status = arkjs::OH_JSVM_CreateTypedarray(
+            let mut typed_array: jsvm::JSVM_Value = ptr::null_mut();
+            let status = jsvm::OH_JSVM_CreateTypedarray(
                 ctx.to_raw(),
                 kind_to_ark_kind(kind),
                 length.unwrap_or(0),
@@ -97,8 +97,8 @@ impl JSTypedArrayOps for ArkJSValue {
                 &mut typed_array,
             );
 
-            if status == arkjs::JSVM_Status_JSVM_OK {
-                ArkJSValue::from_owned_raw(ctx.to_raw(), typed_array).with_object()
+            if status == jsvm::JSVM_Status_JSVM_OK {
+                JSVMValue::from_owned_raw(ctx.to_raw(), typed_array).with_object()
             } else {
                 Self::create_undefined(ctx)
             }
@@ -115,7 +115,7 @@ impl JSTypedArrayOps for ArkJSValue {
         let _scope = crate::scope::OpScope::enter(self.env);
         self.typed_array_info()
             .filter(|info| !info.array_buffer.is_null())
-            .map(|info| ArkJSValue::from_owned_raw(self.env, info.array_buffer))
+            .map(|info| JSVMValue::from_owned_raw(self.env, info.array_buffer))
     }
 
     fn get_byte_offset(&self) -> usize {

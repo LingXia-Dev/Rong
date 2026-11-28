@@ -36,11 +36,11 @@ CRATES=(
   "rong_intl"
   "rong_quickjs_jit"
   "rong_jscore_sys"
-  "rong_arkjs_sys"
+  "rong_jsvm_sys"
 
   "rong_quickjs"
   "rong_jscore"
-  "rong_arkjs"
+  "rong_jsvm"
 
   "rong"
 
@@ -86,10 +86,10 @@ ENGINE_CRATES=(
   "rong_intl"
   "rong_quickjs_jit"
   "rong_jscore_sys"
-  "rong_arkjs_sys"
+  "rong_jsvm_sys"
   "rong_quickjs"
   "rong_jscore"
-  "rong_arkjs"
+  "rong_jsvm"
 )
 
 MODULE_CRATES=(

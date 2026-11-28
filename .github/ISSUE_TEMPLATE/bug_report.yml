@@ -25,7 +25,7 @@ body:
         - QuickJS backend
         - JavaScriptCore backend
         - JavaScriptCore source artifacts
-        - ArkJS / Harmony backend
+        - JSVM / Harmony backend
         - Built-in module
         - CLI
         - npm package
@@ -74,7 +74,7 @@ body:
         - QuickJS
         - JavaScriptCore (system framework)
         - JavaScriptCore (source artifact)
-        - ArkJS
+        - JSVM
         - Not engine-specific
         - Unknown
     validations:

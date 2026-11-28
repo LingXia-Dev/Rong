@@ -156,7 +156,7 @@ fn test_option_conversion_from_js() {
     all(
         feature = "jscore",
         not(feature = "primary-quickjs"),
-        not(feature = "primary-arkjs")
+        not(feature = "primary-jsvm")
     )
 ))]
 #[test]

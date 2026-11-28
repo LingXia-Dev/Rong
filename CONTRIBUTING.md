@@ -70,8 +70,8 @@ What these tasks do:
 - `npm --prefix packages/test run check`: syntax-checks and exercises the
   engine-neutral JavaScript test framework without Rong or Node runtime APIs
 
-The shared tasks exclude `rong_arkjs`, `rong_arkjs_sys`, and the device-only
-`rong_test_device` crate from the default host CI gate. ArkJS/OHOS is validated
+The shared tasks exclude `rong_jsvm`, `rong_jsvm_sys`, and the device-only
+`rong_test_device` crate from the default host CI gate. JSVM/OHOS is validated
 through separate Harmony-focused checks instead of the default host matrix. The
 tasks also check `lib/bin/test` targets instead of `--all-targets` to avoid
 example-only regressions from blocking normal work.
@@ -106,7 +106,7 @@ Run them manually:
   Windows when pinned WebKit/JSCOnly artifacts are listed in
   [`javascriptcore/sys/webkit-artifacts.tsv`](javascriptcore/sys/webkit-artifacts.tsv)
   (see [`javascriptcore/sys/README.md`](javascriptcore/sys/README.md))
-- `arkjs`: verified separately through Harmony/OHOS checks; not part of the default host verification gate
+- `jsvm`: verified separately through Harmony/OHOS checks; not part of the default host verification gate
 
 For ad hoc engine tests, the lower-level runner remains available:
 

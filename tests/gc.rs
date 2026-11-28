@@ -2,7 +2,7 @@
 //! own idle work.
 //!
 //! JavaScriptCore collects and sweeps from timers on the thread's run loop,
-//! which the workers service only on Apple's system framework. ArkJS has not
+//! which the workers service only on Apple's system framework. JSVM has not
 //! been verified on a device yet, and source/JSCOnly builds keep collecting
 //! only under allocation, so neither runs these tests.
 //!
@@ -10,7 +10,7 @@
 #![cfg(any(
     // Primary is QuickJS.
     feature = "primary-quickjs",
-    all(feature = "quickjs", not(feature = "jscore"), not(feature = "arkjs")),
+    all(feature = "quickjs", not(feature = "jscore"), not(feature = "jsvm")),
     // Primary is Apple's system JavaScriptCore.
     all(
         any(
@@ -18,7 +18,7 @@
             all(
                 feature = "jscore",
                 not(feature = "primary-quickjs"),
-                not(feature = "primary-arkjs")
+                not(feature = "primary-jsvm")
             )
         ),
         target_vendor = "apple",
@@ -51,7 +51,7 @@ const COLLECT_EXPLICITLY: bool = cfg!(any(
     all(
         feature = "quickjs",
         not(feature = "jscore"),
-        not(feature = "arkjs")
+        not(feature = "jsvm")
     )
 ));
 

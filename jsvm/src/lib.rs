@@ -1,4 +1,5 @@
-//! The ArkJS (JSVM-API) backend for rong.
+//! The JSVM backend for rong: HarmonyOS's JSVM-API (`libjsvm`, a V8), not
+//! ArkTS's own runtime.
 //!
 //! # Handle scopes
 //!
@@ -26,17 +27,17 @@ mod scope;
 mod value;
 
 #[cfg(target_env = "ohos")]
-mod arkjs {
+mod jsvm {
     // Native low-level bindings for Harmony Ark JS
-    pub use rong_arkjs_sys::*;
+    pub use rong_jsvm_sys::*;
 }
 
 #[cfg(target_env = "ohos")]
-pub use context::ArkJSContext;
+pub use context::JSVMContext;
 #[cfg(target_env = "ohos")]
-pub use runtime::{ArkJSRuntime, HarmonyArkJS};
+pub use runtime::{JSVM, JSVMRuntime};
 #[cfg(target_env = "ohos")]
-pub use value::ArkJSValue;
+pub use value::JSVMValue;
 
 /// Writes one warning through the backend's HiLog reporter, so a device test
 /// can confirm the fatal, out-of-memory and refused-reference reports reach it.
@@ -47,10 +48,10 @@ pub fn hilog_probe(message: &str) {
 }
 
 #[cfg(not(target_env = "ohos"))]
-pub struct HarmonyArkJS;
+pub struct JSVM;
 #[cfg(not(target_env = "ohos"))]
-pub struct ArkJSRuntime;
+pub struct JSVMRuntime;
 #[cfg(not(target_env = "ohos"))]
-pub struct ArkJSContext;
+pub struct JSVMContext;
 #[cfg(not(target_env = "ohos"))]
-pub struct ArkJSValue;
+pub struct JSVMValue;

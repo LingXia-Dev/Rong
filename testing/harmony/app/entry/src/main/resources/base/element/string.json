@@ -10,7 +10,7 @@
     },
     {
       "name": "module_desc",
-      "value": "Minimal shell app for ArkJS smoke tests"
+      "value": "Minimal shell app for JSVM smoke tests"
     }
   ]
 }

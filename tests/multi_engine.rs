@@ -39,7 +39,7 @@ fn both_engines_evaluate_in_one_process() {
     assert_eq!(array.len().unwrap(), 2);
 }
 
-#[cfg(not(any(feature = "primary-quickjs", feature = "primary-arkjs")))]
+#[cfg(not(any(feature = "primary-quickjs", feature = "primary-jsvm")))]
 #[test]
 fn the_platform_engine_stays_primary() {
     assert_eq!(TypeId::of::<rong::RongJS>(), TypeId::of::<jscore::RongJS>());

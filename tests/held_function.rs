@@ -300,7 +300,7 @@ fn classes_registered_in_callbacks_stay_distinct() -> Result<(), String> {
             .map(|(n, _)| *n)
             .collect();
         if !failed.is_empty() {
-            // ArkJS keeps each class's id on its constructor; other engines
+            // JSVM keeps each class's id on its constructor; other engines
             // report null. Type tags are not readable from JS.
             let ids: String = ctx.eval(Source::from_bytes(
                 "JSON.stringify([FirstHeld, SecondHeld].map((c) => {

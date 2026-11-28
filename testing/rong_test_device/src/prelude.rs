@@ -1,8 +1,8 @@
-//! Drop-in replacement for `use rong_test::*` that binds to the ArkJS engine.
+//! Drop-in replacement for `use rong_test::*` that binds to the JSVM engine.
 //!
 //! Generated test modules have their `use rong_test::*` rewritten to
 //! `use crate::prelude::*` by build.rs. Since `rong` is a real dependency
-//! (with `arkjs` feature), most types come directly from `rong::*`.
+//! (with `jsvm` feature), most types come directly from `rong::*`.
 
 pub use rong::function::{Constructor, Optional, Rest, This, ThisMut};
 pub use rong::*;

@@ -27,7 +27,7 @@ serde_json = "1.0"
 default = []
 quickjs = ["rong/quickjs", "rong_abort/quickjs", "rong_exception/quickjs"]
 jscore = ["rong/jscore", "rong_abort/jscore", "rong_exception/jscore"]
-arkjs = ["rong/arkjs", "rong_abort/arkjs", "rong_exception/arkjs"]
+jsvm = ["rong/jsvm", "rong_abort/jsvm", "rong_exception/jsvm"]
 tls-aws-lc = ["rong/tls-aws-lc"]
 tls-ring = ["rong/tls-ring"]
 

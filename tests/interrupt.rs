@@ -84,7 +84,7 @@ fn engine_is_preemptive() -> bool {
 #[cfg(any(
     // Primary is QuickJS.
     feature = "primary-quickjs",
-    all(feature = "quickjs", not(feature = "jscore"), not(feature = "arkjs")),
+    all(feature = "quickjs", not(feature = "jscore"), not(feature = "jsvm")),
     // Primary is JavaScriptCore with native preemption.
     all(
         any(
@@ -92,7 +92,7 @@ fn engine_is_preemptive() -> bool {
             all(
                 feature = "jscore",
                 not(feature = "primary-quickjs"),
-                not(feature = "primary-arkjs")
+                not(feature = "primary-jsvm")
             )
         ),
         any(
@@ -503,7 +503,7 @@ fn pinned_timeout_is_typed_and_recoverable() {
 // Primary is QuickJS.
 #[cfg(any(
     feature = "primary-quickjs",
-    all(feature = "quickjs", not(feature = "jscore"), not(feature = "arkjs"))
+    all(feature = "quickjs", not(feature = "jscore"), not(feature = "jsvm"))
 ))]
 #[test]
 fn interrupted_runtime_drop_preempts_pending_jobs() {

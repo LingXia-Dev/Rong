@@ -1,6 +1,6 @@
 #![allow(clippy::missing_const_for_thread_local)]
 
-use crate::{ArkJSContext, ArkJSValue, arkjs};
+use crate::{JSVMContext, JSVMValue, jsvm};
 use rong_core::rejection::{self, RejectionHook};
 use rong_core::{JSEngine, JSRuntimeImpl, JSValueImpl};
 use std::cell::RefCell;
@@ -10,14 +10,14 @@ use std::rc::Rc;
 use std::sync::Once;
 
 /// Stored info about an unhandled promise rejection.
-/// When `Promise.reject(v)` is created without a handler, ArkJS fires the
+/// When `Promise.reject(v)` is created without a handler, JSVM fires the
 /// reject handler with the promise and its rejection value.  We capture these
 /// so `register_promise_handlers` can deliver them directly (bypassing the
 /// broken microtask system for already-settled promises).
 struct UnhandledRejection {
-    env: arkjs::JSVM_Env,
-    promise_ref: arkjs::JSVM_Ref,
-    value_ref: arkjs::JSVM_Ref,
+    env: jsvm::JSVM_Env,
+    promise_ref: jsvm::JSVM_Ref,
+    value_ref: jsvm::JSVM_Ref,
 }
 
 thread_local! {
@@ -26,17 +26,17 @@ thread_local! {
 
 /// Store a rejection.  Called from the promise_reject_handler.
 fn store_unhandled_rejection(
-    env: arkjs::JSVM_Env,
-    promise: arkjs::JSVM_Value,
-    value: arkjs::JSVM_Value,
+    env: jsvm::JSVM_Env,
+    promise: jsvm::JSVM_Value,
+    value: jsvm::JSVM_Value,
 ) {
     unsafe {
-        let mut promise_ref: arkjs::JSVM_Ref = ptr::null_mut();
-        let mut value_ref: arkjs::JSVM_Ref = ptr::null_mut();
+        let mut promise_ref: jsvm::JSVM_Ref = ptr::null_mut();
+        let mut value_ref: jsvm::JSVM_Ref = ptr::null_mut();
         // Create strong references so the values survive beyond the callback
-        let s1 = arkjs::OH_JSVM_CreateReference(env, promise, 1, &mut promise_ref);
-        let s2 = arkjs::OH_JSVM_CreateReference(env, value, 1, &mut value_ref);
-        if s1 == arkjs::JSVM_Status_JSVM_OK && s2 == arkjs::JSVM_Status_JSVM_OK {
+        let s1 = jsvm::OH_JSVM_CreateReference(env, promise, 1, &mut promise_ref);
+        let s2 = jsvm::OH_JSVM_CreateReference(env, value, 1, &mut value_ref);
+        if s1 == jsvm::JSVM_Status_JSVM_OK && s2 == jsvm::JSVM_Status_JSVM_OK {
             UNHANDLED_REJECTIONS.with(|v| {
                 v.borrow_mut().push(UnhandledRejection {
                     env,
@@ -46,18 +46,18 @@ fn store_unhandled_rejection(
             });
         } else {
             if !promise_ref.is_null() {
-                arkjs::OH_JSVM_DeleteReference(env, promise_ref);
+                jsvm::OH_JSVM_DeleteReference(env, promise_ref);
             }
             if !value_ref.is_null() {
-                arkjs::OH_JSVM_DeleteReference(env, value_ref);
+                jsvm::OH_JSVM_DeleteReference(env, value_ref);
             }
         }
     }
 }
 
 fn remove_unhandled_rejection_entry(
-    env: arkjs::JSVM_Env,
-    promise: arkjs::JSVM_Value,
+    env: jsvm::JSVM_Env,
+    promise: jsvm::JSVM_Value,
 ) -> Option<UnhandledRejection> {
     UNHANDLED_REJECTIONS.with(|v| {
         let mut rejections = v.borrow_mut();
@@ -67,14 +67,14 @@ fn remove_unhandled_rejection_entry(
                 continue;
             }
             unsafe {
-                let mut stored_promise: arkjs::JSVM_Value = ptr::null_mut();
+                let mut stored_promise: jsvm::JSVM_Value = ptr::null_mut();
                 let status =
-                    arkjs::OH_JSVM_GetReferenceValue(env, entry.promise_ref, &mut stored_promise);
-                if status == arkjs::JSVM_Status_JSVM_OK && !stored_promise.is_null() {
+                    jsvm::OH_JSVM_GetReferenceValue(env, entry.promise_ref, &mut stored_promise);
+                if status == jsvm::JSVM_Status_JSVM_OK && !stored_promise.is_null() {
                     let mut is_equal = false;
                     let status =
-                        arkjs::OH_JSVM_StrictEquals(env, promise, stored_promise, &mut is_equal);
-                    if status == arkjs::JSVM_Status_JSVM_OK && is_equal {
+                        jsvm::OH_JSVM_StrictEquals(env, promise, stored_promise, &mut is_equal);
+                    if status == jsvm::JSVM_Status_JSVM_OK && is_equal {
                         found_idx = Some(i);
                         break;
                     }
@@ -87,15 +87,15 @@ fn remove_unhandled_rejection_entry(
 }
 
 fn delete_unhandled_rejection_entry(
-    env: arkjs::JSVM_Env,
+    env: jsvm::JSVM_Env,
     entry: UnhandledRejection,
-) -> Option<arkjs::JSVM_Value> {
+) -> Option<jsvm::JSVM_Value> {
     unsafe {
-        let mut value: arkjs::JSVM_Value = ptr::null_mut();
-        let status = arkjs::OH_JSVM_GetReferenceValue(env, entry.value_ref, &mut value);
-        arkjs::OH_JSVM_DeleteReference(env, entry.promise_ref);
-        arkjs::OH_JSVM_DeleteReference(env, entry.value_ref);
-        if status == arkjs::JSVM_Status_JSVM_OK && !value.is_null() {
+        let mut value: jsvm::JSVM_Value = ptr::null_mut();
+        let status = jsvm::OH_JSVM_GetReferenceValue(env, entry.value_ref, &mut value);
+        jsvm::OH_JSVM_DeleteReference(env, entry.promise_ref);
+        jsvm::OH_JSVM_DeleteReference(env, entry.value_ref);
+        if status == jsvm::JSVM_Status_JSVM_OK && !value.is_null() {
             Some(value)
         } else {
             None
@@ -106,40 +106,40 @@ fn delete_unhandled_rejection_entry(
 /// Try to find and remove a stored rejection for the given promise.
 /// Returns the rejection value if found.
 pub(crate) fn take_unhandled_rejection(
-    env: arkjs::JSVM_Env,
-    promise: arkjs::JSVM_Value,
-) -> Option<arkjs::JSVM_Value> {
+    env: jsvm::JSVM_Env,
+    promise: jsvm::JSVM_Value,
+) -> Option<jsvm::JSVM_Value> {
     remove_unhandled_rejection_entry(env, promise)
         .and_then(|entry| delete_unhandled_rejection_entry(env, entry))
 }
 
 /// Passes what the reject handler saw to the embedder's rejection tracker.
 pub(crate) fn report_rejection(
-    env: arkjs::JSVM_Env,
+    env: jsvm::JSVM_Env,
     hook: RejectionHook,
-    promise: arkjs::JSVM_Value,
-    reason: arkjs::JSVM_Value,
+    promise: jsvm::JSVM_Value,
+    reason: jsvm::JSVM_Value,
 ) {
     if !rejection::tracking_on_this_thread() || promise.is_null() {
         return;
     }
-    let Some(ctx) = rong_core::JSContext::<ArkJSContext>::try_from_borrowed_raw_ptr(&env) else {
+    let Some(ctx) = rong_core::JSContext::<JSVMContext>::try_from_borrowed_raw_ptr(&env) else {
         return;
     };
     let reason = if reason.is_null() {
-        ArkJSValue::create_undefined(ctx.as_ref())
+        JSVMValue::create_undefined(ctx.as_ref())
     } else {
-        ArkJSValue::from_borrowed_raw(env, reason)
+        JSVMValue::from_borrowed_raw(env, reason)
     };
     rejection::record(
         &ctx,
         hook,
-        ArkJSValue::from_borrowed_raw(env, promise),
+        JSVMValue::from_borrowed_raw(env, promise),
         reason,
     );
 }
 
-pub(crate) fn clear_unhandled_rejections(env: arkjs::JSVM_Env) {
+pub(crate) fn clear_unhandled_rejections(env: jsvm::JSVM_Env) {
     UNHANDLED_REJECTIONS.with(|v| {
         let mut rejections = v.borrow_mut();
         let mut idx = 0;
@@ -151,8 +151,8 @@ pub(crate) fn clear_unhandled_rejections(env: arkjs::JSVM_Env) {
 
             let entry = rejections.remove(idx);
             unsafe {
-                arkjs::OH_JSVM_DeleteReference(env, entry.promise_ref);
-                arkjs::OH_JSVM_DeleteReference(env, entry.value_ref);
+                jsvm::OH_JSVM_DeleteReference(env, entry.promise_ref);
+                jsvm::OH_JSVM_DeleteReference(env, entry.value_ref);
             }
         }
     });
@@ -176,7 +176,7 @@ unsafe extern "C" fn fatal_error_handler(
         } else {
             CStr::from_ptr(message).to_str().unwrap_or("<invalid utf8>")
         };
-        crate::hilog::fatal(&format!("[ArkJS FATAL] {loc}: {msg}"));
+        crate::hilog::fatal(&format!("[JSVM FATAL] {loc}: {msg}"));
     }
 }
 
@@ -199,43 +199,41 @@ unsafe extern "C" fn oom_error_handler(
         } else {
             CStr::from_ptr(detail).to_str().unwrap_or("<invalid utf8>")
         };
-        crate::hilog::error(&format!(
-            "[ArkJS OOM] {loc}: {det} (heap_oom={is_heap_oom})"
-        ));
+        crate::hilog::error(&format!("[JSVM OOM] {loc}: {det} (heap_oom={is_heap_oom})"));
     }
 }
 
 /// Handler invoked when promise rejection bookkeeping changes.
 ///
 /// We capture `REJECT_WITH_NO_HANDLER` values so `register_promise_handlers`
-/// can deliver them directly, and we drop the cached entry when ArkJS later
+/// can deliver them directly, and we drop the cached entry when JSVM later
 /// reports `ADD_HANDLER_AFTER_REJECTED`.
 unsafe extern "C" fn promise_reject_handler(
-    env: arkjs::JSVM_Env,
-    reject_event: arkjs::JSVM_PromiseRejectEvent,
-    reject_info: arkjs::JSVM_Value,
+    env: jsvm::JSVM_Env,
+    reject_event: jsvm::JSVM_PromiseRejectEvent,
+    reject_info: jsvm::JSVM_Value,
 ) {
     if reject_info.is_null() {
         return;
     }
 
     unsafe {
-        let mut promise: arkjs::JSVM_Value = ptr::null_mut();
-        let mut value: arkjs::JSVM_Value = ptr::null_mut();
-        arkjs::OH_JSVM_GetNamedProperty(env, reject_info, c"promise".as_ptr() as _, &mut promise);
-        arkjs::OH_JSVM_GetNamedProperty(env, reject_info, c"value".as_ptr() as _, &mut value);
+        let mut promise: jsvm::JSVM_Value = ptr::null_mut();
+        let mut value: jsvm::JSVM_Value = ptr::null_mut();
+        jsvm::OH_JSVM_GetNamedProperty(env, reject_info, c"promise".as_ptr() as _, &mut promise);
+        jsvm::OH_JSVM_GetNamedProperty(env, reject_info, c"value".as_ptr() as _, &mut value);
         if promise.is_null() {
             return;
         }
 
         match reject_event {
-            arkjs::JSVM_PromiseRejectEvent_JSVM_PROMISE_REJECT_WITH_NO_HANDLER => {
+            jsvm::JSVM_PromiseRejectEvent_JSVM_PROMISE_REJECT_WITH_NO_HANDLER => {
                 if !value.is_null() {
                     store_unhandled_rejection(env, promise, value);
                 }
                 report_rejection(env, RejectionHook::Rejected, promise, value);
             }
-            arkjs::JSVM_PromiseRejectEvent_JSVM_PROMISE_ADD_HANDLER_AFTER_REJECTED => {
+            jsvm::JSVM_PromiseRejectEvent_JSVM_PROMISE_ADD_HANDLER_AFTER_REJECTED => {
                 // This event carries no value (GetNamedProperty yields undefined, a
                 // non-null handle); prefer the reason kept when the promise rejected.
                 let kept = take_unhandled_rejection(env, promise);
@@ -251,7 +249,7 @@ static JSVM_INIT: Once = Once::new();
 
 fn ensure_jsvm_initialized() {
     JSVM_INIT.call_once(|| {
-        let init_options = arkjs::JSVM_InitOptions {
+        let init_options = jsvm::JSVM_InitOptions {
             externalReferences: ptr::null(),
             argc: ptr::null_mut(),
             argv: ptr::null_mut(),
@@ -259,49 +257,49 @@ fn ensure_jsvm_initialized() {
         };
 
         unsafe {
-            let status = arkjs::OH_JSVM_Init(&init_options);
-            if status != arkjs::JSVM_Status_JSVM_OK {
+            let status = jsvm::OH_JSVM_Init(&init_options);
+            if status != jsvm::JSVM_Status_JSVM_OK {
                 panic!("Failed to initialize Ark JS VM: {:?}", status);
             }
         }
     });
 }
 
-pub(crate) struct ArkJSRuntimeInner {
-    pub(crate) raw: arkjs::JSVM_VM,
-    vm_scope: arkjs::JSVM_VMScope,
+pub(crate) struct JSVMRuntimeInner {
+    pub(crate) raw: jsvm::JSVM_VM,
+    vm_scope: jsvm::JSVM_VMScope,
 }
 
-impl Drop for ArkJSRuntimeInner {
+impl Drop for JSVMRuntimeInner {
     fn drop(&mut self) {
         if !self.raw.is_null() {
             unsafe {
                 if !self.vm_scope.is_null() {
-                    arkjs::OH_JSVM_CloseVMScope(self.raw, self.vm_scope);
+                    jsvm::OH_JSVM_CloseVMScope(self.raw, self.vm_scope);
                 }
-                arkjs::OH_JSVM_DestroyVM(self.raw);
+                jsvm::OH_JSVM_DestroyVM(self.raw);
             }
         }
     }
 }
 
 #[derive(Clone)]
-pub struct ArkJSRuntime {
-    pub(crate) inner: Rc<ArkJSRuntimeInner>,
+pub struct JSVMRuntime {
+    pub(crate) inner: Rc<JSVMRuntimeInner>,
 }
 
-impl JSRuntimeImpl for ArkJSRuntime {
-    type RawRuntime = arkjs::JSVM_VM;
-    type Context = ArkJSContext;
+impl JSRuntimeImpl for JSVMRuntime {
+    type RawRuntime = jsvm::JSVM_VM;
+    type Context = JSVMContext;
 
     fn new() -> Self {
         ensure_jsvm_initialized();
 
-        let mut vm: arkjs::JSVM_VM = ptr::null_mut();
-        let mut vm_scope: arkjs::JSVM_VMScope = ptr::null_mut();
+        let mut vm: jsvm::JSVM_VM = ptr::null_mut();
+        let mut vm_scope: jsvm::JSVM_VMScope = ptr::null_mut();
 
         unsafe {
-            let create_options = arkjs::JSVM_CreateVMOptions {
+            let create_options = jsvm::JSVM_CreateVMOptions {
                 maxOldGenerationSize: 0,
                 maxYoungGenerationSize: 0,
                 initialOldGenerationSize: 0,
@@ -311,25 +309,25 @@ impl JSRuntimeImpl for ArkJSRuntime {
                 isForSnapshotting: false,
             };
 
-            let status = arkjs::OH_JSVM_CreateVM(&create_options, &mut vm);
-            if status != arkjs::JSVM_Status_JSVM_OK {
+            let status = jsvm::OH_JSVM_CreateVM(&create_options, &mut vm);
+            if status != jsvm::JSVM_Status_JSVM_OK {
                 panic!("Failed to create Ark JS VM: {:?}", status);
             }
 
-            let status = arkjs::OH_JSVM_OpenVMScope(vm, &mut vm_scope);
-            if status != arkjs::JSVM_Status_JSVM_OK {
-                arkjs::OH_JSVM_DestroyVM(vm);
+            let status = jsvm::OH_JSVM_OpenVMScope(vm, &mut vm_scope);
+            if status != jsvm::JSVM_Status_JSVM_OK {
+                jsvm::OH_JSVM_DestroyVM(vm);
                 panic!("Failed to open VM scope: {:?}", status);
             }
 
             // Register error handlers for diagnostics
-            arkjs::OH_JSVM_SetHandlerForFatalError(vm, Some(fatal_error_handler));
-            arkjs::OH_JSVM_SetHandlerForOOMError(vm, Some(oom_error_handler));
-            arkjs::OH_JSVM_SetHandlerForPromiseReject(vm, Some(promise_reject_handler));
+            jsvm::OH_JSVM_SetHandlerForFatalError(vm, Some(fatal_error_handler));
+            jsvm::OH_JSVM_SetHandlerForOOMError(vm, Some(oom_error_handler));
+            jsvm::OH_JSVM_SetHandlerForPromiseReject(vm, Some(promise_reject_handler));
         }
 
         Self {
-            inner: Rc::new(ArkJSRuntimeInner { raw: vm, vm_scope }),
+            inner: Rc::new(JSVMRuntimeInner { raw: vm, vm_scope }),
         }
     }
 
@@ -339,7 +337,7 @@ impl JSRuntimeImpl for ArkJSRuntime {
 
     fn run_pending_jobs(&self) -> i32 {
         unsafe {
-            let _ = arkjs::OH_JSVM_PerformMicrotaskCheckpoint(self.inner.raw);
+            let _ = jsvm::OH_JSVM_PerformMicrotaskCheckpoint(self.inner.raw);
         }
         0
     }
@@ -348,9 +346,9 @@ impl JSRuntimeImpl for ArkJSRuntime {
         // JSVM has no collect call; critical memory pressure runs a full GC.
         if let Some(env) = crate::context::any_env_of_vm(self.inner.raw) {
             unsafe {
-                let _ = arkjs::OH_JSVM_MemoryPressureNotification(
+                let _ = jsvm::OH_JSVM_MemoryPressureNotification(
                     env,
-                    arkjs::JSVM_MemoryPressureLevel_JSVM_MEMORY_PRESSURE_LEVEL_CRITICAL,
+                    jsvm::JSVM_MemoryPressureLevel_JSVM_MEMORY_PRESSURE_LEVEL_CRITICAL,
                 );
             }
         }
@@ -360,10 +358,9 @@ impl JSRuntimeImpl for ArkJSRuntime {
         if self.inner.raw.is_null() {
             return None;
         }
-        let mut stats = std::mem::MaybeUninit::<arkjs::JSVM_HeapStatistics>::zeroed();
-        let status =
-            unsafe { arkjs::OH_JSVM_GetHeapStatistics(self.inner.raw, stats.as_mut_ptr()) };
-        if status != arkjs::JSVM_Status_JSVM_OK {
+        let mut stats = std::mem::MaybeUninit::<jsvm::JSVM_HeapStatistics>::zeroed();
+        let status = unsafe { jsvm::OH_JSVM_GetHeapStatistics(self.inner.raw, stats.as_mut_ptr()) };
+        if status != jsvm::JSVM_Status_JSVM_OK {
             return None;
         }
         let stats = unsafe { stats.assume_init() };
@@ -387,18 +384,18 @@ impl JSRuntimeImpl for ArkJSRuntime {
     // terminate API.
 }
 
-pub struct HarmonyArkJS;
+pub struct JSVM;
 
-impl JSEngine for HarmonyArkJS {
-    type Value = ArkJSValue;
-    type Context = ArkJSContext;
-    type Runtime = ArkJSRuntime;
+impl JSEngine for JSVM {
+    type Value = JSVMValue;
+    type Context = JSVMContext;
+    type Runtime = JSVMRuntime;
 
     fn name() -> &'static str {
-        "HarmonyArkJS"
+        "JSVM"
     }
 
     fn version() -> String {
-        String::from("ArkJS 1.0.0")
+        String::from("JSVM 1.0.0")
     }
 }

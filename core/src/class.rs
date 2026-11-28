@@ -61,7 +61,7 @@ pub trait JSClassExt<V: JSValueImpl>: JSClass<V> {
     ///
     /// Engines with different native constructor ABIs can reuse this and keep
     /// their post-construction wiring local. For example, QuickJS/JSC call
-    /// `constructor()`, while ArkJS calls `construct_value()` directly and
+    /// `constructor()`, while JSVM calls `construct_value()` directly and
     /// finishes prototype synchronization in its own callback.
     fn construct_value(ctx: &V::Context, this: V, args: Vec<V>) -> Result<V, V>
     where

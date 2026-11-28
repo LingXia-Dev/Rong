@@ -39,7 +39,7 @@ rong = { workspace = true }
 default = []
 quickjs    = ["rong/quickjs"]
 jscore     = ["rong/jscore"]
-arkjs      = ["rong/arkjs"]
+jsvm      = ["rong/jsvm"]
 tls-aws-lc = ["rong/tls-aws-lc"]
 tls-ring   = ["rong/tls-ring"]
 
@@ -80,7 +80,7 @@ pub fn init(ctx: &JSContext) -> JSResult<()> {
    - per-module feature: `<name> = ["rong_<name>", "<runtime-dependency>", ...]`;
      include every Rong module whose JS API/classes your module needs at runtime
    - add `"<name>"` to the `all = [ ... ]` feature list
-   - add engine passthrough to each engine feature: `"rong_<name>?/quickjs"`, `"rong_<name>?/jscore"`, `"rong_<name>?/arkjs"`
+   - add engine passthrough to each engine feature: `"rong_<name>?/quickjs"`, `"rong_<name>?/jscore"`, `"rong_<name>?/jsvm"`
 
 3. **`rong_modules/src/lib.rs`** - add one dependency-first entry to
    `define_modules!`:
@@ -141,7 +141,7 @@ cargo test -p rong_<name> --no-default-features --features quickjs
 cargo test -p rong_<name> --no-default-features --features jscore
 ```
 
-The engines (`quickjs`, `jscore`, `arkjs`) are mutually exclusive - always pass
+The engines (`quickjs`, `jscore`, `jsvm`) are mutually exclusive - always pass
 exactly one with `--no-default-features`.
 
 ## Conventions

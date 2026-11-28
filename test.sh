@@ -30,7 +30,7 @@ log_warning() {
 }
 
 HOST_TLS_BACKEND="${HOST_TLS_BACKEND:-tls-aws-lc}"
-SUPPORTED_ENGINES=("quickjs" "jscore" "arkjs")
+SUPPORTED_ENGINES=("quickjs" "jscore" "jsvm")
 
 # Apple's system-framework feature set omits private SPI by default, so that
 # production shape remains covered. Source/JSCOnly builds force preemption via
@@ -192,7 +192,7 @@ print_usage() {
     echo "Usage: $0 [OPTIONS]"
     echo ""
     echo "Options:"
-    echo "  -e, --engine ENGINE           Run tests for specific engine (quickjs, jscore, arkjs, all)"
+    echo "  -e, --engine ENGINE           Run tests for specific engine (quickjs, jscore, jsvm, all)"
     echo "  -t, --test TEST               Run specific test (core test name or module name)"
     echo "  -c, --core                    Run only core tests"
     echo "  -m, --modules                 Run only module tests"
@@ -204,17 +204,17 @@ print_usage() {
     echo "  $0 -k                         # Run all tests, continue on failures"
     echo "  $0 -e quickjs                 # Run all tests on QuickJS"
     echo "  $0 -e jscore -c               # Run core tests on JavaScriptCore"
-    echo "  $0 -e arkjs                   # Show how to run ArkJS device-side tests"
+    echo "  $0 -e jsvm                   # Show how to run JSVM device-side tests"
     echo "  $0 -t iterator                # Run iterator tests on all engines"
     echo "  $0 -t rong_http               # Run rong_http module tests on all engines"
     echo "  $0 -k -m                      # Run all module tests, continue on error"
 }
 
-print_arkjs_instructions() {
+print_jsvm_instructions() {
     echo -e "${BLUE}================================${NC}"
-    echo -e "${BLUE}  ArkJS Test Flow${NC}"
+    echo -e "${BLUE}  JSVM Test Flow${NC}"
     echo -e "${BLUE}================================${NC}"
-    echo "ArkJS tests run on a HarmonyOS device via the smoke app."
+    echo "JSVM tests run on a HarmonyOS device via the smoke app."
     echo ""
     echo "Run:"
     echo "  ./testing/harmony/dev.sh test"
@@ -540,8 +540,8 @@ if [[ -n "$ENGINE_FILTER" && "$ENGINE_FILTER" != "all" ]]; then
         echo "Available engines: ${SUPPORTED_ENGINES[*]}"
         exit 1
     fi
-    if [[ "$ENGINE_FILTER" == "arkjs" ]]; then
-        print_arkjs_instructions
+    if [[ "$ENGINE_FILTER" == "jsvm" ]]; then
+        print_jsvm_instructions
         exit 0
     fi
     ENGINES=("$ENGINE_FILTER")

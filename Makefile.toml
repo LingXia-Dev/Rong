@@ -4,7 +4,7 @@ skip_crate_env_info = true
 [env]
 ENGINE = { value = "quickjs", condition = { env_not_set = ["ENGINE"] } }
 OHOS_TARGET = { value = "aarch64-unknown-linux-ohos", condition = { env_not_set = ["OHOS_TARGET"] } }
-WORKSPACE_ARGS = { value = "--workspace --exclude rong_arkjs --exclude rong_arkjs_sys --exclude rong_test_device", condition = { env_not_set = ["WORKSPACE_ARGS"] } }
+WORKSPACE_ARGS = { value = "--workspace --exclude rong_jsvm --exclude rong_jsvm_sys --exclude rong_test_device", condition = { env_not_set = ["WORKSPACE_ARGS"] } }
 HOST_TLS_BACKEND = { value = "tls-aws-lc", condition = { env_not_set = ["HOST_TLS_BACKEND"] } }
 OHOS_TLS_BACKEND = { value = "tls-ring", condition = { env_not_set = ["OHOS_TLS_BACKEND"] } }
 
@@ -53,8 +53,8 @@ elif [ "${ENGINE}" = "jscore" ]; then
       workspace_args="${workspace_args} --exclude rong_quickjs --exclude rong_quickjs_sys --exclude rong_quickjs_jit"
       ;;
   esac
-elif [ "${ENGINE}" = "arkjs" ]; then
-  echo "Use 'cargo make check-arkjs-ohos' for ArkJS." >&2
+elif [ "${ENGINE}" = "jsvm" ]; then
+  echo "Use 'cargo make check-jsvm-ohos' for JSVM." >&2
   exit 1
 fi
 
@@ -75,9 +75,9 @@ if ($workspaceArgs.Count -eq 0) {
     $workspaceArgs = @(
         "--workspace"
         "--exclude"
-        "rong_arkjs"
+        "rong_jsvm"
         "--exclude"
-        "rong_arkjs_sys"
+        "rong_jsvm_sys"
         "--exclude"
         "rong_test_device"
     )
@@ -94,8 +94,8 @@ if ($env:ENGINE -eq "quickjs") {
 } elseif ($env:ENGINE -eq "jscore") {
     $workspaceArgs += @("--exclude", "rong_quickjs", "--exclude", "rong_quickjs_sys", "--exclude", "rong_quickjs_jit")
     & cargo check @workspaceArgs --lib --bins --tests "--no-default-features" "--features=$engineFeatures"
-} elseif ($env:ENGINE -eq "arkjs") {
-    throw "Use 'cargo make check-arkjs-ohos' for ArkJS"
+} elseif ($env:ENGINE -eq "jsvm") {
+    throw "Use 'cargo make check-jsvm-ohos' for JSVM"
 } else {
     throw "Unsupported ENGINE '$($env:ENGINE)'"
 }
@@ -142,8 +142,8 @@ elif [ "${ENGINE}" = "jscore" ]; then
       workspace_args="${workspace_args} --exclude rong_quickjs --exclude rong_quickjs_sys --exclude rong_quickjs_jit"
       ;;
   esac
-elif [ "${ENGINE}" = "arkjs" ]; then
-  echo "Use 'cargo make clippy-arkjs-ohos' for ArkJS." >&2
+elif [ "${ENGINE}" = "jsvm" ]; then
+  echo "Use 'cargo make clippy-jsvm-ohos' for JSVM." >&2
   exit 1
 fi
 
@@ -172,9 +172,9 @@ if ($workspaceArgs.Count -eq 0) {
     $workspaceArgs = @(
         "--workspace"
         "--exclude"
-        "rong_arkjs"
+        "rong_jsvm"
         "--exclude"
-        "rong_arkjs_sys"
+        "rong_jsvm_sys"
         "--exclude"
         "rong_test_device"
     )
@@ -197,8 +197,8 @@ if ($env:ENGINE -eq "quickjs") {
 } elseif ($env:ENGINE -eq "jscore") {
     $workspaceArgs += @("--exclude", "rong_quickjs", "--exclude", "rong_quickjs_sys", "--exclude", "rong_quickjs_jit")
     & cargo clippy @workspaceArgs --lib --bins --tests "--no-default-features" "--features=$engineFeatures" -- -D warnings
-} elseif ($env:ENGINE -eq "arkjs") {
-    throw "Use 'cargo make clippy-arkjs-ohos' for ArkJS"
+} elseif ($env:ENGINE -eq "jsvm") {
+    throw "Use 'cargo make clippy-jsvm-ohos' for JSVM"
 } else {
     throw "Unsupported ENGINE '$($env:ENGINE)'"
 }
@@ -209,13 +209,13 @@ exit $LASTEXITCODE
 ''',
 ]
 
-[tasks.check-arkjs-ohos]
-description = "Run cargo check for ArkJS across the OHOS workspace plus the Harmony smoke app (requires OHOS_NDK_HOME)"
-linux_alias = "check-arkjs-ohos-unix"
-mac_alias = "check-arkjs-ohos-unix"
-windows_alias = "check-arkjs-ohos-windows"
+[tasks.check-jsvm-ohos]
+description = "Run cargo check for JSVM across the OHOS workspace plus the Harmony smoke app (requires OHOS_NDK_HOME)"
+linux_alias = "check-jsvm-ohos-unix"
+mac_alias = "check-jsvm-ohos-unix"
+windows_alias = "check-jsvm-ohos-windows"
 
-[tasks.check-arkjs-ohos-unix]
+[tasks.check-jsvm-ohos-unix]
 script_runner = "@shell"
 script = '''
 set -eu
@@ -242,7 +242,7 @@ cargo check \
   --exclude rong_jscore \
   --exclude rong_jscore_sys \
   --no-default-features \
-  --features "arkjs,intl,${OHOS_TLS_BACKEND}" \
+  --features "jsvm,intl,${OHOS_TLS_BACKEND}" \
   --lib \
   --bins \
   --tests
@@ -250,20 +250,20 @@ cargo check \
 cargo check --target "${OHOS_TARGET}" --manifest-path "testing/harmony/rong_harmony_smoke/Cargo.toml" --features "${OHOS_TLS_BACKEND}" --all-targets
 '''
 
-[tasks.check-arkjs-ohos-windows]
+[tasks.check-jsvm-ohos-windows]
 script_runner = "@shell"
 script = '''
-echo "ArkJS OHOS checks are only supported on Unix hosts" >&2
+echo "JSVM OHOS checks are only supported on Unix hosts" >&2
 exit 1
 '''
 
-[tasks.clippy-arkjs-ohos]
-description = "Run cargo clippy for ArkJS across the OHOS workspace plus the Harmony smoke app (requires OHOS_NDK_HOME)"
-linux_alias = "clippy-arkjs-ohos-unix"
-mac_alias = "clippy-arkjs-ohos-unix"
-windows_alias = "clippy-arkjs-ohos-windows"
+[tasks.clippy-jsvm-ohos]
+description = "Run cargo clippy for JSVM across the OHOS workspace plus the Harmony smoke app (requires OHOS_NDK_HOME)"
+linux_alias = "clippy-jsvm-ohos-unix"
+mac_alias = "clippy-jsvm-ohos-unix"
+windows_alias = "clippy-jsvm-ohos-windows"
 
-[tasks.clippy-arkjs-ohos-unix]
+[tasks.clippy-jsvm-ohos-unix]
 script_runner = "@shell"
 script = '''
 set -eu
@@ -290,7 +290,7 @@ cargo clippy \
   --exclude rong_jscore \
   --exclude rong_jscore_sys \
   --no-default-features \
-  --features "arkjs,intl,${OHOS_TLS_BACKEND}" \
+  --features "jsvm,intl,${OHOS_TLS_BACKEND}" \
   --lib \
   --bins \
   --tests \
@@ -299,10 +299,10 @@ cargo clippy \
 cargo clippy --target "${OHOS_TARGET}" --manifest-path "testing/harmony/rong_harmony_smoke/Cargo.toml" --features "${OHOS_TLS_BACKEND}" --all-targets -- -D warnings
 '''
 
-[tasks.clippy-arkjs-ohos-windows]
+[tasks.clippy-jsvm-ohos-windows]
 script_runner = "@shell"
 script = '''
-echo "ArkJS OHOS clippy is only supported on Unix hosts" >&2
+echo "JSVM OHOS clippy is only supported on Unix hosts" >&2
 exit 1
 '''
 
@@ -437,9 +437,9 @@ case "${host_target}" in
     ;;
 esac
 echo ""
-echo "ArkJS tasks:"
-echo "  cargo make check-arkjs-ohos"
-echo "  cargo make clippy-arkjs-ohos"
+echo "JSVM tasks:"
+echo "  cargo make check-jsvm-ohos"
+echo "  cargo make clippy-jsvm-ohos"
 echo "Requires: OHOS_NDK_HOME and the Harmony OHOS toolchain."
 echo "Coverage: OHOS-target workspace check/clippy plus testing/harmony/rong_harmony_smoke."
 echo ""
@@ -447,7 +447,7 @@ echo "Examples:"
 echo "  cargo make check-engine"
 echo "  ENGINE=jscore cargo make clippy-engine"
 echo "  cargo make ci-verify-all"
-echo "  cargo make check-arkjs-ohos"
+echo "  cargo make check-jsvm-ohos"
 '''
 
 [tasks.help-windows]
@@ -468,9 +468,9 @@ Write-Host "  cargo make ci-verify"
 Write-Host ""
 Write-Host "Current host: Windows -> quickjs by default; jscore requires a source artifact."
 Write-Host ""
-Write-Host "ArkJS tasks:"
-Write-Host "  cargo make check-arkjs-ohos"
-Write-Host "  cargo make clippy-arkjs-ohos"
+Write-Host "JSVM tasks:"
+Write-Host "  cargo make check-jsvm-ohos"
+Write-Host "  cargo make clippy-jsvm-ohos"
 Write-Host "These tasks are only supported on Unix hosts with OHOS_NDK_HOME configured."
 Write-Host ""
 Write-Host "Examples:"

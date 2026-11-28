@@ -23,7 +23,7 @@ In Chinese culture, "融" represents natural harmony and coexistence - perfectly
 ### Multi-Engine Support
 - **QuickJS** - Lightweight and fast
 - **JavaScriptCore** - two builds: the system `JavaScriptCore.framework` on macOS/iOS, and a source-built JSCOnly artifact on every other target
-- **ArkJS** - HarmonyOS JavaScript engine
+- **JSVM** - HarmonyOS's JSVM-API (`libjsvm`, a V8)
 
 ### Developer Experience
 - **Type-safe bindings** - Rust's type system helps keep host bindings safe
@@ -43,7 +43,7 @@ In Chinese culture, "融" represents natural harmony and coexistence - perfectly
 ├─────────────────────────────────────────────────────────────┤
 │ Unified API │ Type System │ Memory Management │ Async/Await │
 ├─────────────────────────────────────────────────────────────┤
-│    QuickJS   │      JavaScriptCore     │      ArkJS         │
+│    QuickJS   │      JavaScriptCore     │        JSVM        │
 ├─────────────────────────────────────────────────────────────┤
 │              Built-in Modules & Extensions                  │
 │   Timer │ HTTP │ FS │ Console │ S3 │ SQLite │ Redis │ ...   │
@@ -189,19 +189,19 @@ for source-backend setup and bytecode support. Source/JSCOnly builds always
 enable hard interruption; system-framework builds can opt in with
 `jscore-interrupt`.
 
-Build for ArkJS explicitly on HarmonyOS/OpenHarmony targets:
+Build for JSVM explicitly on HarmonyOS/OpenHarmony targets:
 
 ```bash
-cargo build --no-default-features --features arkjs,tls-ring --target aarch64-unknown-linux-ohos
+cargo build --no-default-features --features jsvm,tls-ring --target aarch64-unknown-linux-ohos
 ```
 
 Engine features are additive. Each enabled engine has its own typed API,
-`rong::quickjs`, `rong::jscore` and `rong::arkjs` (`rong::quickjs::RongJS::runtime()`,
+`rong::quickjs`, `rong::jscore` and `rong::jsvm` (`rong::quickjs::RongJS::runtime()`,
 `rong::quickjs::JSContext`, ...), so one binary can run several engines side by side.
 The root aliases (`rong::RongJS`, `rong::JSContext`, ...), `#[js_class]` and the module
-crates bind one primary engine: `jscore` if enabled, else `arkjs`, else `quickjs`, so
+crates bind one primary engine: `jscore` if enabled, else `jsvm`, else `quickjs`, so
 adding QuickJS for secondary isolates never moves an app's primary engine. Pin it with
-at most one of `primary-quickjs`, `primary-jscore` or `primary-arkjs`; the build fails if
+at most one of `primary-quickjs`, `primary-jscore` or `primary-jsvm`; the build fails if
 two are set or the named engine feature is off.
 `rong` the library has no default engine or TLS backend; downstream crates should choose them explicitly.
 For TLS backend selection, use `tls-aws-lc` on desktop hosts and `tls-ring` on HarmonyOS/OpenHarmony targets.
@@ -249,7 +249,7 @@ See [LICENSE-MIT](LICENSE-MIT) and [LICENSE-APACHE](LICENSE-APACHE) for details.
 
 - QuickJS team for the lightweight JavaScript engine
 - WebKit team for JavaScriptCore
-- HarmonyOS team for ArkJS
+- HarmonyOS team for JSVM
 - Rust community for excellent async ecosystem
 
 ---

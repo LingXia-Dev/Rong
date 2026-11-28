@@ -16,7 +16,7 @@ Engine features:
 - `quickjs`: bundled QuickJS engine with native hard interruption.
 - `intl`: opt-in ECMA-402 `Intl` for engines without one, QuickJS and
   HarmonyOS's JSVM (data and settings via `rong::intl`, installed with
-  `rong::quickjs::intl::init` or `rong::arkjs::intl::init`).
+  `rong::quickjs::intl::init` or `rong::jsvm::intl::init`).
   `intl-bundled-tzdb` adds a tz database copy on Android and HarmonyOS.
 - `quickjs-jit`: opt-in Cranelift baseline JIT for QuickJS (`rong::quickjs::jit`,
   supported on `x86_64` and `aarch64` excluding iOS; activate per runtime via
@@ -27,7 +27,7 @@ Engine features:
   interruption support.
 - `jscore-interrupt`: opt into the private execution-time-limit SPI when using
   Apple's system framework.
-- `arkjs`: HarmonyOS/OpenHarmony ArkJS; interruption is cooperative-only.
+- `jsvm`: HarmonyOS/OpenHarmony JSVM; interruption is cooperative-only.
 
 Select `tls-aws-lc` for the usual desktop host or `tls-ring` for HarmonyOS when
 network-capable Rong services are compiled. Do not enable multiple engine or TLS
@@ -53,7 +53,7 @@ Sample heap and allocator metrics with `runtime.memory_usage()` (or
 worker); handle `None` on backends without a public heap-statistics API (such
 as Apple's system `JavaScriptCore.framework`). Sampling walks the heap, so do it
 periodically, never per call. `external_bytes` is inside `used_bytes` on JSC but
-outside it on ArkJS.
+outside it on JSVM.
 
 ## Install an explicit module surface
 

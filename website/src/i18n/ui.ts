@@ -34,7 +34,7 @@ export const LAYOUT = {
     skipToContent: "Skip to content",
     title: "Rong (融) — JavaScript Runtime for Rust",
     description:
-      "Rong is a JavaScript runtime for Rust with a unified API over multiple engines — QuickJS, JavaScriptCore, and ArkJS. Built for embedding, Rust-driven JS APIs, and long-lived worker runtimes.",
+      "Rong is a JavaScript runtime for Rust with a unified API over multiple engines — QuickJS, JavaScriptCore, and JSVM. Built for embedding, Rust-driven JS APIs, and long-lived worker runtimes.",
     nav: {
       features: "Features",
       engines: "Engines",
@@ -66,7 +66,7 @@ export const LAYOUT = {
     skipToContent: "跳到主要内容",
     title: "Rong（融）— Rust 的 JavaScript 运行时",
     description:
-      "Rong 是一个面向 Rust 的 JavaScript 运行时，以统一的 API 覆盖多种引擎 —— QuickJS、JavaScriptCore 和 ArkJS。专为嵌入式场景、Rust 驱动的 JS API 以及长生命周期的 worker 运行时而设计。",
+      "Rong 是一个面向 Rust 的 JavaScript 运行时，以统一的 API 覆盖多种引擎 —— QuickJS、JavaScriptCore 和 JSVM。专为嵌入式场景、Rust 驱动的 JS API 以及长生命周期的 worker 运行时而设计。",
     nav: {
       features: "特性",
       engines: "引擎",
