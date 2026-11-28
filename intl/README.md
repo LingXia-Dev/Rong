@@ -1,8 +1,10 @@
-# rong_quickjs_intl
+# rong_intl
 
-ECMA-402 `Intl` for QuickJS, which has none. Internal to `rong_quickjs`: turn
-it on with `rong`'s `quickjs-intl` feature and use `rong::quickjs::intl`, not
-this crate. JavaScriptCore and ArkJS have their own `Intl` and never link it.
+ECMA-402 `Intl` for the engines that have none, on rong's engine-generic API.
+Turn it on with `rong`'s `intl` feature: `rong::intl` gives a context its data
+and settings, and each engine's thin `init` installs it (QuickJS:
+`rong::quickjs::intl::init`). JavaScriptCore and ArkJS have their own `Intl`
+and never link it.
 
 Locale data comes from an ICU4X data blob that the embedder loads per app
 (`IntlData::try_from_blob`), so an app carries only the locales it ships.
@@ -10,21 +12,21 @@ The default locale, time zone and hour cycle come from `IntlSettings`.
 
 ## Features and what they add
 
-Everything is off by default; a build without `quickjs-intl` has no `Intl` on
+Everything is off by default; a build without `intl` has no `Intl` on
 QuickJS and none of this code or data.
 
 | `rong` feature | Adds | Linux | macOS / iOS | Android | HarmonyOS | Windows |
 |---|---|---|---|---|---|---|
-| `quickjs-intl` | `Intl` on QuickJS; the rows below are what each part adds | | | | | |
+| `intl` | `Intl` on QuickJS; the rows below are what each part adds | | | | | |
 | (base) | locale services: canonicalization, fallback, `getCanonicalLocales`, the data blob reader | 116 KB (54 KB gzip) | 97 / 80 KB (48 / 47 KB gzip) | 106 KB (52 KB gzip) | not measured | 104 KB (52 KB gzip) |
 | (`PluralRules`) | plural rules and ranges, ECMA-402 rounding on exact decimals, compact exponents | 124 KB (66 KB gzip) | 97 / 112 KB (62 / 61 KB gzip) | 114 KB (65 KB gzip) | not measured | 117 KB (63 KB gzip) |
 | (`NumberFormat`, decimal and percent) | the formatting layer, `icu_experimental` percent data, the CLDR number table (about 21 KB of this, from its layout: 389 entries, 68 value rows) | 120 KB (42 KB gzip) | 81 / 96 KB (36 / 35 KB gzip) | 112 KB (38 KB gzip) | not measured | 97 KB (39 KB gzip) |
-| (part of `quickjs-intl`, from `DateTimeFormat` on) | time zone code; bundled zone data only where the platform may lack a system database (`quickjs-intl-system-tzdb` leaves it out on Android and HarmonyOS, which then rely on the system's) | 256 KB | 484 / 480 KB | 511 KB, incl. 207 KB data | not measured; about Android | 581 KB, incl. 207 KB data |
+| (part of `intl`, from `DateTimeFormat` on) | time zone code (`rong_tz`); bundled zone data only with `intl-bundled-tzdb`, on Android and HarmonyOS, and always on Windows | 256 KB | 484 / 480 KB | 511 KB, incl. 207 KB data | not measured; about Android | 581 KB, incl. 207 KB data |
 | (`DateTimeFormat`) | `DateTimeFormat` (`format`, `formatToParts`, `formatRange`, `formatRangeToParts`), CLDR `timeData` hour cycles and flexible day periods (`src/cldr_dates.rs`) | to be measured | | | | |
 | (`toLocale*`) | `toLocale{String,DateString,TimeString}` on `Number`, `BigInt`, `Date`, `Array`, `%TypedArray%`; `String.prototype.toLocale{Upper,Lower}Case` (`CaseMapper`) | to be measured | | | | |
 | (`NumberFormat`, currency, unit, notation & range) | `style: "currency"` and `"unit"`, `scientific`/`engineering`/`compact` notation, `formatRange`/`formatRangeToParts`, CLDR unit table (`src/cldr_units.rs`) | to be measured | | | | |
 | (`RelativeTimeFormat`, `ListFormat`) | `Intl.RelativeTimeFormat` and `Intl.ListFormat` (`format`, `formatToParts`, `resolvedOptions`, `supportedLocalesOf`) | to be measured | | | | |
-| `quickjs-intl-collator` (planned, with `Collator`) | `Collator` code; its data is a separate optional blob (about 585 KB at root) | to be measured | | | | |
+| `intl-collator` (planned, with `Collator`) | `Collator` code; its data is a separate optional blob (about 585 KB at root) | to be measured | | | | |
 
 Sizes are added to a stripped release `cdylib` (`opt-level = "s"`, LTO, one
 codegen unit) that runs one QuickJS script; KB is 1,024 bytes. Linux is
@@ -35,7 +37,7 @@ is not compiled in: the app's blob holds it (about 160 KB, 48 KB gzipped, for
 
 ## Making an app's data blob
 
-Build the blob with `icu4x-datagen` (the version in `rong::quickjs::intl::ICU4X_VERSION`),
+Build the blob with `icu4x-datagen` (the version in `rong::intl::ICU4X_VERSION`),
 naming exactly the locales the app ships:
 
     icu4x-datagen --markers-for-bin <app binary> --format blob \

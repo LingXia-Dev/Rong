@@ -90,8 +90,8 @@ macro_rules! engine_api {
 pub mod quickjs {
     engine_api!(rong_quickjs::QuickJS);
 
-    /// ECMA-402 `Intl` for QuickJS (the `quickjs-intl` feature).
-    #[cfg(feature = "quickjs-intl")]
+    /// Installs `Intl` on a QuickJS context (the `intl` feature).
+    #[cfg(feature = "intl")]
     pub use rong_quickjs::intl;
 
     /// Cranelift baseline JIT for QuickJS (the `quickjs-jit` feature).
@@ -99,9 +99,20 @@ pub mod quickjs {
     pub use rong_quickjs::jit;
 }
 
-#[cfg(all(feature = "quickjs-intl", not(feature = "quickjs")))]
+/// ECMA-402 `Intl` for the engines that have none (the `intl` feature): its
+/// locale data and settings. Each engine's `intl::init` installs it, such as
+/// [`quickjs::intl::init`].
+#[cfg(feature = "intl")]
+pub mod intl {
+    pub use rong_intl::{
+        HourCycle, ICU4X_VERSION, IntlData, IntlSettings, configure, set_reporter, set_settings,
+        settings,
+    };
+}
+
+#[cfg(all(feature = "intl", not(feature = "quickjs")))]
 compile_error!(
-    "the `rong` feature `quickjs-intl` gives QuickJS an `Intl`; enable `quickjs` too. JavaScriptCore and ArkJS have their own."
+    "the `rong` feature `intl` gives QuickJS an `Intl`; enable `quickjs` too. JavaScriptCore has its own."
 );
 
 #[cfg(all(feature = "quickjs-jit", not(feature = "quickjs")))]

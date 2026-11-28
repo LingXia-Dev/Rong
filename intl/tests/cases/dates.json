@@ -36,7 +36,7 @@
   ["new Intl.DateTimeFormat('en', {dateStyle: 'short', timeZone: 'UTC'}).resolvedOptions().year === undefined", "true"],
   ["new Intl.DateTimeFormat('en', {timeZone: 'Asia/Calcutta'}).resolvedOptions().timeZone", "\"Asia/Calcutta\"", "spec: ECMA-402 stores the primary identifier (Asia/Kolkata); JavaScriptCore follows Temporal's canonical-tz, which keeps the name given"],
   ["new Intl.DateTimeFormat('en', {timeZone: 'etc/utc'}).resolvedOptions().timeZone", "\"UTC\"", "spec: ECMA-402 stores the primary identifier (UTC); JavaScriptCore follows Temporal's canonical-tz, which keeps the name given"],
-  ["new Intl.DateTimeFormat('en', {timeZone: 'america/new_york'}).resolvedOptions().timeZone", "\"America/New_York\""],
+  ["new Intl.DateTimeFormat('en', {timeZone: 'asia/shanghai'}).resolvedOptions().timeZone", "\"Asia/Shanghai\""],
   ["new Intl.DateTimeFormat('en', {timeZone: '+0530'}).resolvedOptions().timeZone", "\"+05:30\""],
   ["new Intl.DateTimeFormat('th', {timeZone: 'UTC'}).resolvedOptions().calendar", "\"buddhist\""],
   ["new Intl.DateTimeFormat('ar-EG', {timeZone: 'UTC'}).resolvedOptions().numberingSystem", "\"arab\""],

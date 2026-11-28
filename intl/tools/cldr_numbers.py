@@ -10,8 +10,8 @@ Only entries that change a lookup are kept: a locale whose values differ
 from the root, or equal the root while an ancestor differs (so the lookup's
 fallback walk stops there).
 
-    python3 quickjs/intl/tools/cldr_numbers.py          # rewrite the table
-    python3 quickjs/intl/tools/cldr_numbers.py --check  # fail if it is stale
+    python3 intl/tools/cldr_numbers.py          # rewrite the table
+    python3 intl/tools/cldr_numbers.py --check  # fail if it is stale
 """
 
 import io

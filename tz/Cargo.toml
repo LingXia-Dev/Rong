@@ -1,9 +1,9 @@
 [package]
-name = "rong_quickjs_tz"
+name = "rong_tz"
 version = "0.8.0"
 edition.workspace = true
 
-description = "Time zones for the Intl that RongJS provides on QuickJS; internal, use rong::quickjs::intl"
+description = "Time zones for rong_intl; internal, use the standard Intl through rong's intl feature"
 license.workspace = true
 repository.workspace = true
 homepage.workspace = true

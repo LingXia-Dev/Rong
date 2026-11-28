@@ -248,17 +248,17 @@ function Run-AllCoreTests([string]$EngineName, [string[]]$CoreTests) {
     # Engine-generic crate: name the engine and TLS backend through `rong`.
     $intlFeatures = ($featureSet -split ',' | ForEach-Object { if ($_ -match '/') { $_ } else { "rong/$_" } }) -join ','
     Log-Info "Running Intl tests ($EngineName)"
-    $intlArgs = @("-p", "rong_quickjs_intl", "--features=$intlFeatures", "--quiet")
+    $intlArgs = @("-p", "rong_intl", "--features=$intlFeatures", "--quiet")
     if (-not $script:FailFast) {
         $intlArgs += "--no-fail-fast"
     }
     & cargo test @intlArgs -- --nocapture
     Record-SuiteResult -Name "Intl tests on $EngineName" -ExitCode $LASTEXITCODE
     if ($EngineName -eq "quickjs") {
-        Log-Info "Running the quickjs-intl feature test"
-        $featArgs = @("-p", "rong", "--no-default-features", "--features=$featureSet,quickjs-intl", "--test", "quickjs_intl", "--quiet")
+        Log-Info "Running the intl feature test"
+        $featArgs = @("-p", "rong", "--no-default-features", "--features=$featureSet,intl", "--test", "quickjs_intl", "--quiet")
         & cargo test @featArgs
-        Record-SuiteResult -Name "quickjs-intl feature" -ExitCode $LASTEXITCODE
+        Record-SuiteResult -Name "intl feature" -ExitCode $LASTEXITCODE
 
         Log-Info "Running JIT tests (quickjs)"
         $jitArgs = @("-p", "rong_quickjs_jit", "--quiet")
@@ -293,16 +293,16 @@ function Run-AllCoreTests([string]$EngineName, [string[]]$CoreTests) {
 
     # Engine-independent; it backs the Intl that rong provides on QuickJS.
     if ($EngineName -eq "quickjs") {
-        Log-Info "Running rong_quickjs_tz shared zone table"
-        $tzArgs = @("-p", "rong_quickjs_tz", "--quiet")
+        Log-Info "Running rong_tz shared zone table"
+        $tzArgs = @("-p", "rong_tz", "--quiet")
         if (-not $script:FailFast) {
             $tzArgs += "--no-fail-fast"
         }
         & cargo test @tzArgs -- --nocapture
-        Record-SuiteResult -Name "rong_quickjs_tz zone table" -ExitCode $LASTEXITCODE
+        Record-SuiteResult -Name "rong_tz zone table" -ExitCode $LASTEXITCODE
         # Release too: integer overflow wraps there instead of panicking.
         & cargo test @tzArgs --release
-        Record-SuiteResult -Name "rong_quickjs_tz zone table (release)" -ExitCode $LASTEXITCODE
+        Record-SuiteResult -Name "rong_tz zone table (release)" -ExitCode $LASTEXITCODE
     }
 }
 

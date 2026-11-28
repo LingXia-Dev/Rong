@@ -1,7 +1,8 @@
-//! ECMA-402 `Intl` for QuickJS, which has none.
+//! ECMA-402 `Intl` for the engines that have none.
 //!
-//! Internal to `rong_quickjs`: embedders turn it on with `rong`'s
-//! `quickjs-intl` feature and use `rong::quickjs::intl`, not this crate.
+//! Embedders turn it on with `rong`'s `intl` feature: `rong::intl` gives a
+//! context its data and settings, and each engine's thin `init` (such as
+//! `rong::quickjs::intl::init`) calls [`init`] for that engine.
 //! JavaScriptCore and ArkJS have their own `Intl` and never link this one.
 //! The bar is ECMA-402 itself, with JavaScriptCore and ArkJS as references.
 //!
@@ -9,8 +10,8 @@
 //! an app carries only the locales it ships. The default locale, time zone and
 //! hour cycle come from the embedder's [`IntlSettings`].
 //!
-//! The code is written against rong's engine-generic API and instantiated for
-//! QuickJS by `rong_quickjs`, so this crate does not depend on the engine.
+//! The code is written against rong's engine-generic API and instantiated by
+//! each engine crate that lacks an `Intl`, so this crate depends on none.
 
 mod cldr_dates;
 mod cldr_numbers;
@@ -107,7 +108,7 @@ impl IntlState {
             .insert(service.to_string())
         {
             report(&format!(
-                "rong_quickjs_intl: the data blob has no {service} data for the host locale \
+                "rong_intl: the data blob has no {service} data for the host locale \
                  {host}; {service} defaults to {chosen}"
             ));
         }
@@ -152,7 +153,7 @@ pub fn settings<C: JSContextImpl>(ctx: &JSContext<C>) -> Option<IntlSettings> {
 }
 
 /// Installs `Intl` on `ctx` once [`configure`] gave it data; without data it
-/// does nothing. QuickJS only: `rong_quickjs` instantiates it for QuickJS.
+/// does nothing. Engine crates without an `Intl` call it for their engine.
 pub fn init<E: JSEngine>(ctx: &JSContext<E::Context>) -> JSResult<()>
 where
     E::Context: 'static,
@@ -388,7 +389,7 @@ where
                     },
                 )
                 .map_err(|e| {
-                    report(&format!("rong_quickjs_intl: {e}"));
+                    report(&format!("rong_intl: {e}"));
                     bad(&e)
                 })?;
                 Ok(parts
@@ -423,7 +424,7 @@ where
                     &list,
                 )
                 .map_err(|e| {
-                    report(&format!("rong_quickjs_intl: {e}"));
+                    report(&format!("rong_intl: {e}"));
                     bad(&e)
                 })?;
                 Ok(parts
@@ -550,15 +551,11 @@ where
         "systemTimeZone",
         JSFunc::<E::Value>::new(ctx, move |own: JSContext<E::Context>| -> JSResult<String> {
             let state = state(&own)?;
-            let name = state
-                .settings
-                .get()
-                .time_zone
-                .or_else(rong_quickjs_tz::system_zone);
+            let name = state.settings.get().time_zone.or_else(rong_tz::system_zone);
             // UTC stands in for a host zone that cannot be read, never for
             // one that cannot be answered: that would give wrong offsets.
             let Some(name) = name else {
-                if !rong_quickjs_tz::has_database() {
+                if !rong_tz::has_database() {
                     return Err(no_database_error("the host's time zone"));
                 }
                 return Ok(String::from("UTC"));
@@ -578,7 +575,7 @@ where
                 let state = state(&own)?;
                 let request = date_time_request::<E>(&slots)?;
                 let format = state.date_times.get(&state.data, &request).map_err(|e| {
-                    report(&format!("rong_quickjs_intl: {e}"));
+                    report(&format!("rong_intl: {e}"));
                     bad(&e)
                 })?;
                 Ok(format
@@ -601,7 +598,7 @@ where
                 let request = date_time_request::<E>(&slots)?;
                 let zone: String = slots.get("timeZone")?;
                 let format = state.date_times.get(&state.data, &request).map_err(|e| {
-                    report(&format!("rong_quickjs_intl: {e}"));
+                    report(&format!("rong_intl: {e}"));
                     bad(&e)
                 })?;
                 let parts = date_time_format::format_to_parts(&state.data, &format, &zone, x)
@@ -626,13 +623,13 @@ where
                 let request = date_time_request::<E>(&slots)?;
                 let zone: String = slots.get("timeZone")?;
                 let format = state.date_times.get(&state.data, &request).map_err(|e| {
-                    report(&format!("rong_quickjs_intl: {e}"));
+                    report(&format!("rong_intl: {e}"));
                     bad(&e)
                 })?;
                 let parts =
                     date_time_format::format_range_to_parts(&state.data, &format, &zone, x, y)
                         .map_err(|e| {
-                            report(&format!("rong_quickjs_intl: {e}"));
+                            report(&format!("rong_intl: {e}"));
                             bad(&e)
                         })?;
                 Ok(parts
@@ -672,14 +669,14 @@ fn state<C: JSContextImpl>(ctx: &JSContext<C>) -> JSResult<&IntlState> {
 /// A named zone with no tz database to answer it: an error naming the
 /// cause, not `Invalid time zone`.
 fn no_database(name: &str) -> JSResult<()> {
-    match rong_quickjs_tz::canonical_zone(name) {
-        Err(rong_quickjs_tz::TzError::NoDatabase(_)) => Err(no_database_error(name)),
+    match rong_tz::canonical_zone(name) {
+        Err(rong_tz::TzError::NoDatabase(_)) => Err(no_database_error(name)),
         _ => Ok(()),
     }
 }
 
 fn no_database_error(what: &str) -> rong_core::RongJSError {
-    bad(&rong_quickjs_tz::TzError::NoDatabase(what.to_string()).to_string())
+    bad(&rong_tz::TzError::NoDatabase(what.to_string()).to_string())
 }
 
 fn bad(message: &str) -> rong_core::RongJSError {
@@ -724,7 +721,7 @@ fn transform_case(state: &IntlState, text: &str, tag: &str, upper: bool) -> Opti
         icu::casemap::CaseMapper::try_new_unstable(&state.data.provider())
             .inspect_err(|e| {
                 report(&format!(
-                    "rong_quickjs_intl: the data blob has no case mapping data \
+                    "rong_intl: the data blob has no case mapping data \
                      (CaseMapV1); {tag} cases as und: {e}"
                 ))
             })
@@ -866,9 +863,7 @@ fn currency_digits(data: &IntlData, code: &str) -> u8 {
     let Ok(response) = response else {
         static REPORTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
         if !REPORTED.swap(true, std::sync::atomic::Ordering::Relaxed) {
-            report(
-                "rong_quickjs_intl: the data blob has no currency fractions; currencies use 2 digits",
-            );
+            report("rong_intl: the data blob has no currency fractions; currencies use 2 digits");
         }
         return 2;
     };
@@ -920,7 +915,7 @@ fn number_format_data(
     options: &number_format::Options,
 ) -> JSResult<NumberFormatData> {
     let failed = |e: String| {
-        report(&format!("rong_quickjs_intl: {e}"));
+        report(&format!("rong_intl: {e}"));
         bad(&e)
     };
     let format = state

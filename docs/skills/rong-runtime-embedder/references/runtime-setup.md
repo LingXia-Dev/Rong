@@ -14,7 +14,9 @@ rong = { version = "0.6", default-features = false, features = ["quickjs"] }
 Engine features:
 
 - `quickjs`: bundled QuickJS engine with native hard interruption.
-- `quickjs-intl`: opt-in ECMA-402 `Intl` for QuickJS (`rong::quickjs::intl`).
+- `intl`: opt-in ECMA-402 `Intl` for engines without one, QuickJS today (data
+  and settings via `rong::intl`, installed with `rong::quickjs::intl::init`).
+  `intl-bundled-tzdb` adds a tz database copy on Android and HarmonyOS.
 - `quickjs-jit`: opt-in Cranelift baseline JIT for QuickJS (`rong::quickjs::jit`,
   supported on `x86_64` and `aarch64` excluding iOS; activate per runtime via
   `rong::quickjs::jit::init(&ctx, Default::default())?`).

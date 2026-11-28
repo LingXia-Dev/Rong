@@ -200,8 +200,7 @@ fn install_intl(ctx: &JSContext) -> Result<(), String> {
     if native {
         return Ok(());
     }
-    let data =
-        rong_quickjs_intl::IntlData::try_from_static_blob(BLOB).map_err(|e| e.to_string())?;
-    rong_quickjs_intl::configure(ctx, data, rong_quickjs_intl::IntlSettings::default());
-    rong_quickjs_intl::init::<RongJS>(ctx).map_err(|e| e.to_string())
+    let data = rong_intl::IntlData::try_from_static_blob(BLOB).map_err(|e| e.to_string())?;
+    rong_intl::configure(ctx, data, rong_intl::IntlSettings::default());
+    rong_intl::init::<RongJS>(ctx).map_err(|e| e.to_string())
 }

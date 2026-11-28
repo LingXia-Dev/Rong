@@ -12,6 +12,7 @@ engine-agnostic runtime traits and value model.
 
 ## Optional features
 
-- `intl` (`rong`'s `quickjs-intl`): ECMA-402 `Intl` via `rong_quickjs::intl`.
+- `intl` (`rong`'s `intl`): `rong_quickjs::intl::init` installs rong's
+  ECMA-402 `Intl` (`rong_intl`) on a QuickJS context.
 - `jit` (`rong`'s `quickjs-jit`): Cranelift baseline JIT compiler via
   `rong_quickjs::jit` on `x86_64` and `aarch64` (no-op on iOS and other targets).

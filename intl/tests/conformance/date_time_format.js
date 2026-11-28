@@ -181,7 +181,7 @@ test('sec-formatdatetimepattern', 'h24 and h11 at midnight', () => {
 
 const ZONE_IDS = [
   ['UTC', 'UTC'], ['utc', 'UTC'],
-  ['etc/gmt+5', 'Etc/GMT+5'], ['america/new_york', 'America/New_York'],
+  ['etc/gmt+5', 'Etc/GMT+5'], ['asia/shanghai', 'Asia/Shanghai'],
   ['+05:30', '+05:30'], ['+0530', '+05:30'], ['-00:00', '+00:00'], ['+05', '+05:00'], ['-0330', '-03:30'],
 ];
 for (const [input, want] of ZONE_IDS) {
@@ -198,7 +198,7 @@ test('sec-createdatetimeformat', 'invalid time zones', () => {
 
 only('rong', 'JavaScriptCore keeps the identifier given; CreateDateTimeFormat sets timeZone to the record\'s [[PrimaryIdentifier]]', 'sec-createdatetimeformat',
   'timeZone: a link resolves to its primary identifier', () => {
-    for (const [given, primary] of [['Etc/UTC', 'UTC'], ['GMT', 'UTC'], ['Etc/GMT', 'UTC'], ['US/Eastern', 'America/New_York']]) {
+    for (const [given, primary] of [['Etc/UTC', 'UTC'], ['GMT', 'UTC'], ['Etc/GMT', 'UTC'], ['PRC', 'Asia/Shanghai']]) {
       assert.sameValue(new DTF('en', { timeZone: given }).resolvedOptions().timeZone, primary, given);
     }
     assert.sameValue(new DTF('en', { timeZone: 'Asia/Calcutta' }).resolvedOptions().timeZone, 'Asia/Kolkata');
@@ -213,6 +213,7 @@ test('sec-createdatetimeformat', 'the default time zone is a valid one', () => {
 // Instants either side of transitions, odd offsets, past and future rules:
 // the wall time and the offset the zone data gives.
 const ZONES = [
+  // New York for its DST transitions (Shanghai has none).
   ['America/New_York', 1772953199000, '03/08/2026, 01:59:59 GMT-05:00'],
   ['America/New_York', 1772953200000, '03/08/2026, 03:00:00 GMT-04:00'],
   ['America/New_York', 1793512799000, '11/01/2026, 01:59:59 GMT-04:00'],
@@ -226,7 +227,7 @@ const ZONES = [
   ['Pacific/Chatham', 1782864000000, '07/01/2026, 12:45:00 GMT+12:45'],
   ['Asia/Kolkata', 1767225600000, '01/01/2026, 05:30:00 GMT+05:30'],
   ['America/St_Johns', 1767225600000, '12/31/2025, 20:30:00 GMT-03:30'],
-  ['America/New_York', 4118083200000, '06/30/2100, 20:00:00 GMT-04:00'],
+  ['America/New_York', 4118083200000, '06/30/2100, 20:00:00 GMT-04:00'], // a future DST rule
   ['Australia/Sydney', 1767225600000, '01/01/2026, 11:00:00 GMT+11:00'],
   ['Australia/Sydney', 1782864000000, '07/01/2026, 10:00:00 GMT+10:00'],
   ['Pacific/Kiritimati', 1767225600000, '01/01/2026, 14:00:00 GMT+14:00'],
@@ -253,7 +254,7 @@ test('sec-formatdatetimepattern', 'shortOffset names', () => {
   const name = (zone, ms) => new DTF('en', { timeZone: zone, timeZoneName: 'shortOffset' }).formatToParts(ms)
     .find((p) => p.type === 'timeZoneName').value;
   assert.sameValue(name('Asia/Kathmandu', D), 'GMT+5:45');
-  assert.sameValue(name('America/New_York', D), 'GMT-5');
+  assert.sameValue(name('Asia/Shanghai', D), 'GMT+8');
   assert.sameValue(name('+05:30', D), 'GMT+5:30');
 });
 
@@ -644,10 +645,11 @@ test('regression', 'the extreme time values format, with the zone rule of their 
   const at = (zone, x) => new DTF('en', { timeZone: zone, year: 'numeric', month: 'numeric', day: 'numeric',
     hour: 'numeric', minute: '2-digit' }).format(x).replace(/\u202f/g, ' ');
   assert.sameValue(at('UTC', 8.64e15), '9/13/275760, 12:00 AM');
+  // New York for its season's DST rule (Shanghai has none).
   assert.sameValue(at('America/New_York', 8.64e15), '9/12/275760, 8:00 PM', 'daylight time in September');
   assert.sameValue(at('Australia/Sydney', 8.64e15), '9/13/275760, 10:00 AM', 'standard time in September');
   const offset = (x) => new DTF('en', { timeZone: 'America/New_York', timeZoneName: 'shortOffset' }).formatToParts(x)
     .find((p) => p.type === 'timeZoneName').value;
   assert.sameValue(offset(8.64e15), 'GMT-4');
-  new DTF('en', { timeZone: 'America/New_York' }).format(-8.64e15);
+  new DTF('en', { timeZone: 'Asia/Shanghai' }).format(-8.64e15);
 });

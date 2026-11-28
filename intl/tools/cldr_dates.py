@@ -7,8 +7,8 @@ afternoon"), their rules per language and their names per locale.
 The CLDR release is cldr_numbers.py's, which checks it against ICU4X's.
 Only entries that change a lookup are kept, as there.
 
-    python3 quickjs/intl/tools/cldr_dates.py          # rewrite the table
-    python3 quickjs/intl/tools/cldr_dates.py --check  # fail if it is stale
+    python3 intl/tools/cldr_dates.py          # rewrite the table
+    python3 intl/tools/cldr_dates.py --check  # fail if it is stale
 """
 
 import io
