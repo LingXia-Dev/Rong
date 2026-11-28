@@ -23,6 +23,7 @@ pub(crate) fn check() -> Result<usize, String> {
         }
     };
 
+    // New York for its DST gap and overlap (Shanghai has none).
     // A gap: 02:30 does not exist on 2024-03-10 in New York; compatible moves
     // it forward to 03:30 EDT, 07:30Z.
     expect(
@@ -73,8 +74,8 @@ pub(crate) fn check() -> Result<usize, String> {
     )?;
     // Names: case-insensitive match, canonical spelling.
     expect(
-        "america/new_york -> America/New_York",
-        canonical_zone("america/new_york").as_deref() == Ok("America/New_York"),
+        "asia/shanghai -> Asia/Shanghai",
+        canonical_zone("asia/shanghai").as_deref() == Ok("Asia/Shanghai"),
     )?;
     // A source that exists but holds no zones is not a source.
     expect(
@@ -243,11 +244,11 @@ mod tests {
     fn no_database_is_an_error_not_an_offset() {
         let none = crate::none_database();
         assert!(!crate::answers(&none.zones));
-        let err = none.zones.get("America/New_York").unwrap_err();
-        assert_eq!(err, TzError::NoDatabase("America/New_York".into()));
+        let err = none.zones.jiff("Asia/Shanghai").unwrap_err();
+        assert_eq!(err, TzError::NoDatabase("Asia/Shanghai".into()));
         assert!(err.to_string().contains("no time zone database"), "{err}");
         assert!(matches!(
-            none.zones.get("Etc/UTC"),
+            none.zones.jiff("Etc/UTC"),
             Err(TzError::NoDatabase(_))
         ));
     }
@@ -262,11 +263,12 @@ mod tests {
         assert!(crate::answers(&zones));
         let at = |name: &str, ms: i64| {
             zones
-                .get(name)
+                .jiff(name)
                 .unwrap()
                 .to_offset(Timestamp::from_millisecond(ms).unwrap())
                 .seconds()
         };
+        // New York for its DST (Shanghai has none).
         assert_eq!(at("America/New_York", 1_705_276_800_000), -18_000);
         assert_eq!(at("America/New_York", 1_721_001_600_000), -14_400);
         assert_eq!(at("Australia/Sydney", 1_705_276_800_000), 39_600);
@@ -274,11 +276,14 @@ mod tests {
         assert_eq!(at("Asia/Kolkata", 1_717_243_200_000), 19_800);
         assert_eq!(at("Asia/Kathmandu", 1_717_243_200_000), 20_700);
         assert_eq!(at("Pacific/Chatham", 1_721_001_600_000), 45_900);
-        // Before standard time, New York kept local mean time, -4:56:02.
-        assert_eq!(at("America/New_York", -3_000_000_000_000), -17_762);
+        // Before standard time, Shanghai kept local mean time, +8:05:43.
+        assert_eq!(at("Asia/Shanghai", -3_000_000_000_000), 29_143);
+        assert_eq!(
+            zones.jiff("asia/shanghai").unwrap().iana_name(),
+            Some("Asia/Shanghai")
+        );
         // The gap and the overlap of 2024 in New York, as compatible resolves them.
-        let ny = zones.get("america/new_york").unwrap();
-        assert_eq!(ny.iana_name(), Some("America/New_York"));
+        let ny = zones.jiff("America/New_York").unwrap();
         let wall = |h: i8, d: i8, m: i8| jiff::civil::date(2024, m, d).at(h, 30, 0, 0);
         let gap = ny
             .to_ambiguous_timestamp(wall(2, 10, 3))
@@ -292,28 +297,23 @@ mod tests {
         assert_eq!(overlap.as_millisecond(), 1_730_611_800_000);
         // Links keep their own name; unknown names are unknown.
         assert_eq!(
-            zones.get("Asia/Calcutta").unwrap().iana_name(),
+            zones.jiff("Asia/Calcutta").unwrap().iana_name(),
             Some("Asia/Calcutta")
         );
         assert!(matches!(
-            zones.get("Mars/Olympus_Mons"),
+            zones.jiff("Mars/Olympus_Mons"),
             Err(TzError::UnknownZone(_))
         ));
         // Where this host has its own database, both give the same offsets.
         let system = TimeZoneDatabase::from_env();
-        for name in [
-            "America/New_York",
-            "Europe/London",
-            "Asia/Shanghai",
-            "Australia/Lord_Howe",
-        ] {
+        for name in ["Europe/London", "Asia/Shanghai", "Australia/Lord_Howe"] {
             let Ok(theirs) = system.get(name) else {
                 continue;
             };
             for ms in [0, 1_000_000_000_000, 1_705_276_800_000, 1_721_001_600_000] {
                 let t = Timestamp::from_millisecond(ms).unwrap();
                 assert_eq!(
-                    zones.get(name).unwrap().to_offset(t),
+                    zones.jiff(name).unwrap().to_offset(t),
                     theirs.to_offset(t),
                     "{name} at {ms}"
                 );

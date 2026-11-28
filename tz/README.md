@@ -13,8 +13,9 @@ and HarmonyOS with the `bundled` feature).
 
 Android 10+ ships its database in the `com.android.tzdata` APEX and
 HarmonyOS in `/system/etc/zoneinfo`; the copy covers older or stripped
-systems. A database counts only if it resolves `Etc/UTC` and
-`America/New_York`, so a present but empty one falls through the same way.
+systems. The HarmonyOS app sandbox cannot read those files, so there zones
+come from the system ICU (`libicu.so`), which reads them for the app. A database counts only if it resolves `Etc/UTC` and
+`Asia/Shanghai`, so a present but empty one falls through the same way.
 
 Internal to rong's `Intl` (`rong_intl`, behind `rong`'s `intl` feature);
 not for direct use. JavaScriptCore and ArkJS have

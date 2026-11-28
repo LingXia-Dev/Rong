@@ -19,10 +19,10 @@
 //! | macOS, iOS, Linux | `/usr/share/zoneinfo` (TZif files) |
 //! | Android 10+ | `/apex/com.android.tzdata/etc/tz/tzdata` (packed) |
 //! | Android 9 and older | `/system/usr/share/zoneinfo/tzdata` (packed; its rules may be stale) |
-//! | HarmonyOS | `/system/etc/zoneinfo/tzdata` (packed), then `/system/etc/zoneinfo` (TZif), then the general search |
+//! | HarmonyOS | `/system/etc/zoneinfo/tzdata` (packed), then `/system/etc/zoneinfo` (TZif), then the general search, then the system ICU (`libicu.so`), which reads the zones the app sandbox cannot |
 //! | Windows | bundled (Windows has no IANA rules) |
 //!
-//! A source counts only if it resolves `Etc/UTC` and `America/New_York`.
+//! A source counts only if it resolves `Etc/UTC` and `Asia/Shanghai`.
 //! When no system database answers, the bundled copy is used: Windows always
 //! carries one; Android and HarmonyOS carry one with the `bundled` feature
 //! (207 KB; rong's `intl-bundled-tzdb` enables it, `intl` alone does not);
@@ -108,25 +108,52 @@ enum Zones {
         all(feature = "bundled", any(target_os = "android", target_env = "ohos"))
     ))]
     Embedded(embedded::Embedded),
+    /// The system ICU on HarmonyOS.
+    #[cfg(any(target_env = "ohos", all(test, target_os = "macos")))]
+    Icu(&'static icu::Icu),
     /// No usable database.
     None,
 }
 
+/// One zone, from whichever database answered.
+enum Zone {
+    Jiff(TimeZone),
+    /// ICU's own spelling of the name.
+    #[cfg(any(target_env = "ohos", all(test, target_os = "macos")))]
+    Icu(&'static str),
+}
+
 impl Zones {
-    fn get(&self, name: &str) -> Result<TimeZone, TzError> {
+    fn get(&self, name: &str) -> Result<Zone, TzError> {
+        let unknown = || TzError::UnknownZone(name.into());
         match self {
-            Self::Jiff(db) => db.get(name).map_err(|_| TzError::UnknownZone(name.into())),
+            Self::Jiff(db) => db.get(name).map(Zone::Jiff).map_err(|_| unknown()),
             #[cfg(any(
                 test,
                 all(feature = "bundled", any(target_os = "android", target_env = "ohos"))
             ))]
-            Self::Embedded(db) => db
-                .get(name)
-                .ok_or_else(|| TzError::UnknownZone(name.into())),
+            Self::Embedded(db) => db.get(name).map(Zone::Jiff).ok_or_else(unknown),
+            #[cfg(any(target_env = "ohos", all(test, target_os = "macos")))]
+            Self::Icu(icu) => icu.name(name).map(Zone::Icu).ok_or_else(unknown),
             Self::None => Err(TzError::NoDatabase(name.into())),
         }
     }
 }
+
+#[cfg(test)]
+impl Zones {
+    /// A TZif-backed zone as jiff's own type, for tests of those readers.
+    fn jiff(&self, name: &str) -> Result<TimeZone, TzError> {
+        match self.get(name)? {
+            Zone::Jiff(tz) => Ok(tz),
+            #[cfg(any(target_env = "ohos", target_os = "macos"))]
+            Zone::Icu(_) => panic!("{name} is an ICU zone"),
+        }
+    }
+}
+
+#[cfg(any(target_env = "ohos", all(test, target_os = "macos")))]
+mod icu;
 
 #[cfg(any(
     test,
@@ -304,6 +331,7 @@ fn database() -> &'static Database {
 fn open_source(source: Source, skipped: &mut Vec<String>) -> Result<Database, ConfigureError> {
     match source {
         Source::System => Ok(system_database(SYSTEM_FIRST, skipped)
+            .or_else(|| icu_database(skipped))
             .or_else(bundled)
             .unwrap_or_else(none_database)),
         Source::Path(path) => open_path(&path).ok_or_else(|| {
@@ -327,7 +355,7 @@ fn report_line(database: &Database, skipped: &[String]) -> String {
 /// A database counts only if it answers: an existing but empty directory
 /// opens without error and then fails every lookup.
 fn answers(zones: &Zones) -> bool {
-    zones.get("Etc/UTC").is_ok() && zones.get("America/New_York").is_ok()
+    zones.get("Etc/UTC").is_ok() && zones.get("Asia/Shanghai").is_ok()
 }
 
 /// The copy built into this binary: Windows, and Android and HarmonyOS with
@@ -341,6 +369,23 @@ fn bundled() -> Option<Database> {
         zones,
         source: String::from("bundled"),
     })
+}
+
+/// The system ICU, where the app sandbox hides the zoneinfo files: HarmonyOS.
+fn icu_database(skipped: &mut Vec<String>) -> Option<Database> {
+    #[cfg(target_env = "ohos")]
+    {
+        let database = icu::shared().map(|icu| Database {
+            zones: Zones::Icu(icu),
+            source: String::from("system ICU"),
+        });
+        match database {
+            Some(database) if answers(&database.zones) => return Some(database),
+            _ => skipped.push(String::from("the system ICU (cannot answer)")),
+        }
+    }
+    let _ = skipped;
+    None
 }
 
 fn none_database() -> Database {
@@ -451,17 +496,17 @@ fn is_name_syntax(name: &str) -> bool {
         })
 }
 
-fn zone(name: &str) -> Result<TimeZone, TzError> {
+fn zone(name: &str) -> Result<Zone, TzError> {
     if let Some(seconds) = parse_offset(name) {
         let offset =
             Offset::from_seconds(seconds).map_err(|_| TzError::InvalidName(name.into()))?;
-        return Ok(TimeZone::fixed(offset));
+        return Ok(Zone::Jiff(TimeZone::fixed(offset)));
     }
     if !is_name_syntax(name) {
         return Err(TzError::InvalidName(name.into()));
     }
     if name.eq_ignore_ascii_case("UTC") {
-        return Ok(TimeZone::UTC);
+        return Ok(Zone::Jiff(TimeZone::UTC));
     }
     database().zones.get(name)
 }
@@ -475,8 +520,11 @@ pub fn canonical_zone(name: &str) -> Result<String, TzError> {
         let s = seconds.abs();
         return Ok(format!("{sign}{:02}:{:02}", s / 3600, s % 3600 / 60));
     }
-    let tz = zone(name)?;
-    Ok(tz.iana_name().unwrap_or("UTC").to_string())
+    match zone(name)? {
+        Zone::Jiff(tz) => Ok(tz.iana_name().unwrap_or("UTC").to_string()),
+        #[cfg(any(target_env = "ohos", all(test, target_os = "macos")))]
+        Zone::Icu(name) => Ok(name.to_string()),
+    }
 }
 
 /// The zone's UTC offset in seconds at `epoch_ms` (milliseconds since the
@@ -485,10 +533,14 @@ pub fn canonical_zone(name: &str) -> Result<String, TzError> {
 /// whole 400-year Gregorian cycles, which repeat every date and weekday, so
 /// the zone's last rule (or its first offset) applies as at the real date.
 pub fn offset_seconds(name: &str, epoch_ms: i64) -> Result<i32, TzError> {
-    let tz = zone(name)?;
-    let at =
-        Timestamp::from_millisecond(in_zone_range(epoch_ms)).map_err(|_| TzError::OutOfRange)?;
-    Ok(tz.to_offset(at).seconds())
+    let zone = zone(name)?;
+    let epoch_ms = in_zone_range(epoch_ms);
+    let at = Timestamp::from_millisecond(epoch_ms).map_err(|_| TzError::OutOfRange)?;
+    match zone {
+        Zone::Jiff(tz) => Ok(tz.to_offset(at).seconds()),
+        #[cfg(any(target_env = "ohos", all(test, target_os = "macos")))]
+        Zone::Icu(name) => icu::offset_seconds(name, epoch_ms).ok_or(TzError::OutOfRange),
+    }
 }
 
 /// 400 Gregorian years in milliseconds: 146097 days.
@@ -535,7 +587,7 @@ mod tests {
 /// length; a time repeated by an overlap takes the earlier instant
 /// (Temporal's `compatible`).
 pub fn instant_from_wall_clock(name: &str, fields: WallClock) -> Result<i64, TzError> {
-    let tz = zone(name)?;
+    let zone = zone(name)?;
     // Range-check before narrowing or scaling: 1000..=65535 would overflow
     // the nanosecond product.
     if fields.millisecond > 999 {
@@ -552,18 +604,36 @@ pub fn instant_from_wall_clock(name: &str, fields: WallClock) -> Result<i64, TzE
         i32::from(fields.millisecond) * 1_000_000,
     )
     .map_err(|_| TzError::OutOfRange)?;
-    let at = tz
-        .to_ambiguous_timestamp(dt)
-        .compatible()
-        .map_err(|_| TzError::OutOfRange)?;
-    Ok(at.as_millisecond())
+    match zone {
+        Zone::Jiff(tz) => tz
+            .to_ambiguous_timestamp(dt)
+            .compatible()
+            .map(|at| at.as_millisecond())
+            .map_err(|_| TzError::OutOfRange),
+        #[cfg(any(target_env = "ohos", all(test, target_os = "macos")))]
+        Zone::Icu(name) => icu::instant(name, fields).ok_or(TzError::OutOfRange),
+    }
 }
 
-/// The system's own zone, if it has an IANA name.
+/// The system's own zone, if it has an IANA name. On HarmonyOS the sandbox
+/// hides `/etc/localtime`; the system ICU follows the device setting.
 pub fn system_zone() -> Option<String> {
     TimeZone::try_system()
         .ok()
         .and_then(|tz| tz.iana_name().map(str::to_string))
+        .or_else(icu_system_zone)
+}
+
+fn icu_system_zone() -> Option<String> {
+    #[cfg(target_env = "ohos")]
+    {
+        let zone = icu::default_zone()?;
+        icu::shared()?.name(&zone).map(str::to_string)
+    }
+    #[cfg(not(target_env = "ohos"))]
+    {
+        None
+    }
 }
 
 /// The shared table every host runs: a DST gap and an overlap, a

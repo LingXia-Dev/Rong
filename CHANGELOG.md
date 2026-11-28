@@ -48,6 +48,10 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
     are kept: `rong::quickjs::intl::configure(..)` becomes
     `rong::intl::configure(..)`.
   - `rong_quickjs`'s `intl-bundled-tzdb` is gone; ask `rong` for it.
+- On HarmonyOS, zones come from the system ICU (the NDK's `libicu.so`) when
+  the app sandbox hides `/system/etc/zoneinfo`; before, every named zone,
+  the host's own included, threw `no time zone database` unless the tz copy
+  was bundled. The host's zone follows the device setting through ICU.
 
 ### ArkJS
 
