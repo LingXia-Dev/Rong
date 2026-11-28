@@ -28,7 +28,7 @@ mod value;
 
 #[cfg(target_env = "ohos")]
 mod jsvm {
-    // Native low-level bindings for Harmony Ark JS
+    // Native low-level bindings for HarmonyOS JSVM
     pub use rong_jsvm_sys::*;
 }
 

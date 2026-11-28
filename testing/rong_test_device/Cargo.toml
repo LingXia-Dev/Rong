@@ -8,7 +8,8 @@ publish = false
 description = "On-device test suite generated from tests/*.rs via build.rs source transformation"
 
 [features]
-default = ["intl"]
+default = ["jsvm", "intl"]
+jsvm = []
 intl = ["rong/intl"]
 tls-aws-lc = ["rong/tls-aws-lc"]
 tls-ring = ["rong/tls-ring"]

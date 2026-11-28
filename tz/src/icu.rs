@@ -95,7 +95,10 @@ impl Icu {
             if next.is_null() || failed(status) {
                 break;
             }
-            let bytes = unsafe { std::slice::from_raw_parts(next.cast::<u8>(), len as usize) };
+            let Ok(len) = usize::try_from(len) else {
+                continue;
+            };
+            let bytes = unsafe { std::slice::from_raw_parts(next.cast::<u8>(), len) };
             if let Ok(name) = std::str::from_utf8(bytes) {
                 names.insert(name.to_ascii_lowercase(), name.to_string());
             }
@@ -135,9 +138,10 @@ impl Calendar {
             }
             return None;
         }
+        let cal = Self(cal);
         let mut status = 0;
-        unsafe { ucal_setGregorianChange(cal, MIN_MILLIS, &mut status) };
-        Some(Self(cal))
+        unsafe { ucal_setGregorianChange(cal.0, MIN_MILLIS, &mut status) };
+        (!failed(status)).then_some(cal)
     }
 }
 

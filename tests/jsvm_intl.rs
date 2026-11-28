@@ -1,4 +1,4 @@
-#![cfg(all(target_env = "ohos", feature = "intl"))]
+#![cfg(all(target_env = "ohos", feature = "jsvm", feature = "intl"))]
 //! HarmonyOS's JSVM has no `Intl` of its own; the `intl` feature gives it
 //! rong's, with zones from the system ICU.
 
