@@ -2,7 +2,7 @@
 //!
 //! Internal to rong's `Intl` (`rong_intl`, behind `rong`'s `intl` feature);
 //! not for direct use. An engine with its own `Intl`
-//! (JavaScriptCore, ArkJS) carries none of it, and embedders reach zones
+//! (JavaScriptCore) carries none of it, and embedders reach zones
 //! through the standard `Intl`.
 //!
 //! Three questions, answered from one tz database per process:

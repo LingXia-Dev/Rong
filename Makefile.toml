@@ -242,7 +242,7 @@ cargo check \
   --exclude rong_jscore \
   --exclude rong_jscore_sys \
   --no-default-features \
-  --features "arkjs,${OHOS_TLS_BACKEND}" \
+  --features "arkjs,intl,${OHOS_TLS_BACKEND}" \
   --lib \
   --bins \
   --tests
@@ -290,7 +290,7 @@ cargo clippy \
   --exclude rong_jscore \
   --exclude rong_jscore_sys \
   --no-default-features \
-  --features "arkjs,${OHOS_TLS_BACKEND}" \
+  --features "arkjs,intl,${OHOS_TLS_BACKEND}" \
   --lib \
   --bins \
   --tests \

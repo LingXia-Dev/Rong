@@ -3,8 +3,9 @@
 //! Embedders turn it on with `rong`'s `intl` feature: `rong::intl` gives a
 //! context its data and settings, and each engine's thin `init` (such as
 //! `rong::quickjs::intl::init`) calls [`init`] for that engine.
-//! JavaScriptCore and ArkJS have their own `Intl` and never link this one.
-//! The bar is ECMA-402 itself, with JavaScriptCore and ArkJS as references.
+//! JavaScriptCore has its own `Intl` and never links this one; neither QuickJS
+//! nor HarmonyOS's JSVM (a V8 built without ICU) has one. The bar is ECMA-402
+//! itself, with JavaScriptCore as the reference.
 //!
 //! Locale data comes from an ICU4X data blob loaded per app ([`IntlData`]), so
 //! an app carries only the locales it ships. The default locale, time zone and

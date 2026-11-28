@@ -25,3 +25,10 @@ doctest = false
 [dependencies]
 rong_arkjs_sys = { workspace = true }
 rong_core = { workspace = true }
+rong_intl = { workspace = true, optional = true }
+
+[features]
+default = []
+# Installs rong's ECMA-402 `Intl` (`rong_intl`) with `rong_arkjs::intl::init`:
+# HarmonyOS's JSVM is built without one. Off by default; pulls in ICU4X.
+intl = ["dep:rong_intl"]

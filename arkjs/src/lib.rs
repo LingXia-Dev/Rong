@@ -16,6 +16,8 @@ mod class;
 mod context;
 #[cfg(target_env = "ohos")]
 mod hilog;
+#[cfg(all(target_env = "ohos", feature = "intl"))]
+pub mod intl;
 #[cfg(target_env = "ohos")]
 mod runtime;
 #[cfg(target_env = "ohos")]
