@@ -6,6 +6,7 @@ on:
       - "intl/**"
       - "tz/**"
       - "quickjs/src/intl.rs"
+      - "jsvm/src/intl.rs"
       - ".github/workflows/intl-test262.yml"
   workflow_dispatch:
 

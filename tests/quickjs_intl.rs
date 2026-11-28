@@ -1,4 +1,4 @@
-#![cfg(feature = "intl")]
+#![cfg(all(feature = "quickjs", feature = "intl"))]
 //! The `intl` feature gives a QuickJS context the standard `Intl`: data from
 //! `rong::intl`, installed by `rong::quickjs::intl::init`.
 
