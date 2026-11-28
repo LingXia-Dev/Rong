@@ -332,9 +332,13 @@ fn transform_source(
     (output, test_fns, module_cfgs)
 }
 
+/// Points a fixture path relative to `tests/` at its real place, since the
+/// generated module lives elsewhere.
 fn rewrite_fixture_include(line: &str, tests_dir: &std::path::Path) -> String {
-    let marker = "include_str!(\"";
-    let Some(marker_start) = line.find(marker) else {
+    let Some((marker_start, marker)) = ["include_str!(\"", "include_bytes!(\""]
+        .into_iter()
+        .find_map(|marker| line.find(marker).map(|start| (start, marker)))
+    else {
         return line.to_string();
     };
     let path_start = marker_start + marker.len();
@@ -342,7 +346,7 @@ fn rewrite_fixture_include(line: &str, tests_dir: &std::path::Path) -> String {
         return line.to_string();
     };
     let relative = &line[path_start..path_start + path_end];
-    if !relative.starts_with("unit/") {
+    if !(relative.starts_with("unit/") || relative.starts_with("../")) {
         return line.to_string();
     }
 

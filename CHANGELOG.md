@@ -52,6 +52,10 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
   the app sandbox hides `/system/etc/zoneinfo`; before, every named zone,
   the host's own included, threw `no time zone database` unless the tz copy
   was bundled. The host's zone follows the device setting through ICU.
+- HarmonyOS's JSVM gets the same `Intl` with `rong::arkjs::intl::init` under
+  `intl`. Its V8 is built without ICU: no `Intl`, `toLocaleString` ignores
+  the locale, `localeCompare` compares code units. `init` leaves a JSVM with
+  its own `Intl` alone.
 
 ### ArkJS
 

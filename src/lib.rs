@@ -100,8 +100,8 @@ pub mod quickjs {
 }
 
 /// ECMA-402 `Intl` for the engines that have none (the `intl` feature): its
-/// locale data and settings. Each engine's `intl::init` installs it, such as
-/// [`quickjs::intl::init`].
+/// locale data and settings. Each engine's `intl::init` installs it:
+/// `rong::quickjs::intl::init`, `rong::arkjs::intl::init`.
 #[cfg(feature = "intl")]
 pub mod intl {
     pub use rong_intl::{
@@ -110,9 +110,9 @@ pub mod intl {
     };
 }
 
-#[cfg(all(feature = "intl", not(feature = "quickjs")))]
+#[cfg(all(feature = "intl", not(any(feature = "quickjs", feature = "arkjs"))))]
 compile_error!(
-    "the `rong` feature `intl` gives QuickJS an `Intl`; enable `quickjs` too. JavaScriptCore has its own."
+    "the `rong` feature `intl` gives QuickJS and JSVM an `Intl`; enable `quickjs` or `arkjs` too. JavaScriptCore has its own."
 );
 
 #[cfg(all(feature = "quickjs-jit", not(feature = "quickjs")))]
@@ -130,6 +130,10 @@ pub mod jscore {
 #[cfg(feature = "arkjs")]
 pub mod arkjs {
     engine_api!(rong_arkjs::HarmonyArkJS);
+
+    /// Installs `Intl` on a JSVM context (the `intl` feature).
+    #[cfg(all(feature = "intl", target_env = "ohos"))]
+    pub use rong_arkjs::intl;
 }
 
 // The root aliases, `#[js_class]` and the module crates use one primary engine.

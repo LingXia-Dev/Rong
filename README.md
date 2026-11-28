@@ -166,9 +166,9 @@ Reach for `RongExecutor::builder()` only when you need to:
 cargo run -p rong_cli
 ```
 
-Enable `intl` to add ECMA-402 `Intl` where the engine has none (QuickJS):
-`rong::intl` gives a context its locale data, `rong::quickjs::intl::init`
-installs it. Enable `quickjs-jit` to add the optional Cranelift baseline JIT compiler
+Enable `intl` to add ECMA-402 `Intl` where the engine has none (QuickJS, and
+HarmonyOS's JSVM, a V8 built without ICU): `rong::intl` gives a context its
+locale data, the engine's `intl::init` installs it. Enable `quickjs-jit` to add the optional Cranelift baseline JIT compiler
 (`rong::quickjs::jit`, active on `x86_64` and `aarch64` except iOS). Both are
 off by default so pure-interpreter builds carry zero extra code or hook overhead.
 

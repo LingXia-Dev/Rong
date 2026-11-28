@@ -163,12 +163,13 @@ futures = { workspace = true }
 # The CLI/examples keep desktop-friendly defaults for out-of-the-box runs.
 default = []
 quickjs = ["dep:rong_quickjs"]
-# ECMA-402 `Intl` for the engines that have none (QuickJS): `rong::intl`
+# ECMA-402 `Intl` for the engines that have none (QuickJS, and JSVM on
+# HarmonyOS, a V8 built without ICU): `rong::intl`
 # gives a context its data and settings, the engine's `intl::init` installs
 # it. JavaScriptCore has its own and never carries this. Zones come from the
 # system's tz database; without one, named zones throw an error naming the
 # cause.
-intl = ["dep:rong_intl", "rong_quickjs?/intl"]
+intl = ["dep:rong_intl", "rong_quickjs?/intl", "rong_arkjs?/intl"]
 # With `intl`: a tz database copy (207 KB) on Android and HarmonyOS for when
 # the system's cannot answer.
 intl-bundled-tzdb = ["intl", "rong_intl?/bundled-tzdb"]

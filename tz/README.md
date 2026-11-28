@@ -18,7 +18,7 @@ come from the system ICU (`libicu.so`), which reads them for the app. A database
 `Asia/Shanghai`, so a present but empty one falls through the same way.
 
 Internal to rong's `Intl` (`rong_intl`, behind `rong`'s `intl` feature);
-not for direct use. JavaScriptCore and ArkJS have
-zone data in their own `Intl` and never link it, and embedders use the
+not for direct use. JavaScriptCore has zone data in its own `Intl` and never
+links it, and embedders use the
 standard `Intl` rather than calling it. It is its own crate so its tests and
 the device check need neither a JS engine nor ICU4X.
